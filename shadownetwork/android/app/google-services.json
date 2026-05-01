@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "1098182908294",
+    "project_id": "shadownetwork-b2086",
+    "storage_bucket": "shadownetwork-b2086.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1098182908294:android:126f84cb7b3cafc75a3407",
+        "android_client_info": {
+          "package_name": "com.example.shadownetwork"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1098182908294-pkda3v2n8nkmpvpkgqvija0f2hs2len7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.shadownetwork",
+            "certificate_hash": "77cba8e483e5486d9e9ae63e7a82e85169a44125"
+          }
+        },
+        {
+          "client_id": "1098182908294-laeq6ed3gjmffaspp51gac6g0vekck5s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB3_8E9Jzzrn7kKX1JlnYwpA6Wyfj6KVDI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1098182908294-laeq6ed3gjmffaspp51gac6g0vekck5s.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
