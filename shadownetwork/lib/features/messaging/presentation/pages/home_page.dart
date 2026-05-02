@@ -1,23 +1,41 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
+import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../domain/entities/category.dart' as messaging;
+import '../../domain/entities/message_status.dart' as messaging;
+import '../../domain/entities/peer.dart' as messaging;
+import '../../domain/entities/peer_type.dart' as messaging;
+import '../../domain/entities/sos_message.dart' as messaging;
+import '../providers/local_messaging_providers.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   int _selectedTab = 0;
   int _selectedMessageFilter = 0;
+  final Set<messaging.Category> _visibleMapCategories = {
+    ...messaging.Category.values,
+  };
+  bool _showMapPeers = true;
+  bool _showMapLocation = true;
+
+  static const String _mapFilterAllMarkers = 'all-markers';
+  static const String _mapFilterPeers = 'peers';
+  static const String _mapFilterLocation = 'location';
 
   static const LatLng _mapCenter = LatLng(7.3026, 125.6888);
   static const double _minZoom = 4;
@@ -30,97 +48,8 @@ class _HomePageState extends State<HomePage> {
   LatLng? _myPosition;
   bool _isLocating = false;
   bool _isFollowing = false;
+  bool _tileLoadFailed = false;
   StreamSubscription<Position>? _positionSubscription;
-
-  final List<_PeerData> _peers = const [
-    _PeerData(
-      name: 'Peer_01',
-      id: 'ID: 7A:3F:2B:11:9E:A0',
-      signal: SignalStrength.strong,
-      connected: true,
-    ),
-    _PeerData(
-      name: 'Peer_02',
-      id: 'ID: 07:3C:2B:11:9E:A0',
-      signal: SignalStrength.weak,
-      connected: false,
-    ),
-    _PeerData(
-      name: 'Peer_03',
-      id: 'ID: 07:3C:2B:11:9E:A0',
-      signal: SignalStrength.weak,
-      connected: false,
-    ),
-  ];
-
-  final List<_MessageFeedItem> _messages = const [
-    _MessageFeedItem(
-      title: 'SOS from Rescuer_01',
-      description: 'We need immediate medical assistance.',
-      distance: '2.4 km away',
-      time: '10:32 AM',
-      badge: 'SOS',
-      type: 'SOS',
-      icon: Icons.warning,
-      iconColor: Color(0xFFE83C3D),
-      badgeColor: Color(0xFFE83C3D),
-    ),
-    _MessageFeedItem(
-      title: 'Food Request',
-      description: 'Need food and water for 5 people.',
-      distance: '1.8 km away',
-      time: '09:15 AM',
-      badge: 'REQUEST',
-      type: 'REQUEST',
-      icon: Icons.restaurant,
-      iconColor: Color(0xFFF39C12),
-      badgeColor: Color(0xFFF39C12),
-    ),
-    _MessageFeedItem(
-      title: 'Water Available',
-      description: 'We have clean drinking water available.',
-      distance: '3.1 km away',
-      time: '08:47 AM',
-      badge: 'UPDATE',
-      type: 'UPDATE',
-      icon: Icons.opacity,
-      iconColor: Color(0xFF3F66C4),
-      badgeColor: Color(0xFF3F66C4),
-    ),
-    _MessageFeedItem(
-      title: 'Shelter Available',
-      description: 'Safe shelter open for anyone in need.',
-      distance: '4.2 km away',
-      time: 'Yesterday',
-      badge: 'UPDATE',
-      type: 'UPDATE',
-      icon: Icons.home,
-      iconColor: Color(0xFF24A646),
-      badgeColor: Color(0xFF24A646),
-    ),
-    _MessageFeedItem(
-      title: 'Transport Help Needed',
-      description: 'Need transport for injured person.',
-      distance: '5.6 km away',
-      time: 'Yesterday',
-      badge: 'REQUEST',
-      type: 'REQUEST',
-      icon: Icons.directions_bus,
-      iconColor: Color(0xFF7E3EB8),
-      badgeColor: Color(0xFFF39C12),
-    ),
-    _MessageFeedItem(
-      title: 'General Update',
-      description: 'Bridge ahead is damaged. Avoid the route.',
-      distance: '6.3 km away',
-      time: '2 days ago',
-      badge: 'UPDATE',
-      type: 'UPDATE',
-      icon: Icons.more_horiz,
-      iconColor: Color(0xFF777777),
-      badgeColor: Color(0xFF3F66C4),
-    ),
-  ];
 
   @override
   void initState() {
@@ -294,13 +223,43 @@ class _HomePageState extends State<HomePage> {
         return _SosComposerSheet(
           locationText: _formatLocationText(),
           onUpdateLocation: _locateMe,
+          onSend: _saveSosMessage,
         );
       },
     );
   }
 
+  Future<void> _saveSosMessage(String body, messaging.Category category) async {
+    final now = DateTime.now();
+    final position = _myPosition;
+    final message = messaging.SosMessage(
+      id: 'sos-${now.microsecondsSinceEpoch}',
+      sender: messaging.Peer(
+        id: 'local-device',
+        name: 'This Device',
+        type: messaging.PeerType.civilian,
+        isConnected: true,
+        lastSeenAt: now,
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      ),
+      body: body.trim(),
+      category: category,
+      status: messaging.MessageStatus.queued,
+      createdAt: now,
+      latitude: position?.latitude,
+      longitude: position?.longitude,
+    );
+
+    await ref.read(saveSosMessageProvider)(message);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final peers = ref.watch(nearbyPeersProvider);
+    final messages = ref.watch(sosMessagesProvider);
+    final tileCacheStore = ref.watch(mapTileCacheStoreProvider);
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: AuthBackground(
@@ -310,22 +269,28 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 children: [
                   Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildLogo(),
-                          Transform.translate(
-                            offset: const Offset(0, -25),
-                            child: _selectedTab == 1
-                                ? _buildMessagesTabContent()
-                                : _buildHomeTabContent(),
+                    child: _selectedTab == 2
+                        ? _buildMapTabContent(peers, messages, tileCacheStore)
+                        : SingleChildScrollView(
+                            physics: const BouncingScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildLogo(),
+                                Transform.translate(
+                                  offset: const Offset(0, -25),
+                                  child: _selectedTab == 1
+                                      ? _buildMessagesTabContent(messages)
+                                      : _buildHomeTabContent(
+                                          peers,
+                                          messages,
+                                          tileCacheStore,
+                                        ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ],
-                      ),
-                    ),
                   ),
                   _buildBottomBar(),
                 ],
@@ -337,24 +302,95 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildHomeTabContent() {
+  Widget _buildHomeTabContent(
+    AsyncValue<List<messaging.Peer>> peers,
+    AsyncValue<List<messaging.SosMessage>> messages,
+    AsyncValue<CacheStore> tileCacheStore,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 12),
         _buildSosButton(),
         const SizedBox(height: 14),
-        _buildMapCard(),
+        _buildMapCard(peers, messages, tileCacheStore),
         const SizedBox(height: 14),
         _buildActionButtons(),
         const SizedBox(height: 20),
-        _buildPeersSection(),
+        _buildPeersSection(peers),
         const SizedBox(height: 16),
       ],
     );
   }
 
-  Widget _buildMessagesTabContent() {
+  Widget _buildMapTabContent(
+    AsyncValue<List<messaging.Peer>> peers,
+    AsyncValue<List<messaging.SosMessage>> messages,
+    AsyncValue<CacheStore> tileCacheStore,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildLogo(),
+          Expanded(
+            child: Transform.translate(
+              offset: const Offset(0, -25),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  const Text(
+                    'MAP',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F1F1F),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  const Text(
+                    'View SOS alerts and peers',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF717173),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: _buildMapStack(
+                        peers: peers,
+                        messages: messages,
+                        tileCacheStore: tileCacheStore,
+                        showLegend: true,
+                        showStatusBadge: false,
+                        markerSize: 58,
+                        locationMarkerSize: 42,
+                        visibleCategories: _visibleMapCategories,
+                        showPeers: _showMapPeers,
+                        showMyLocation: _showMapLocation,
+                        bottomOverlay: _buildMapTabActionButtons(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessagesTabContent(
+    AsyncValue<List<messaging.SosMessage>> messages,
+  ) {
     final List<(String, IconData, String)> filters = [
       ('All Messages', Icons.chat_bubble_outline_rounded, 'ALL'),
       ('SOS Alerts', Icons.sos_rounded, 'SOS'),
@@ -363,9 +399,6 @@ class _HomePageState extends State<HomePage> {
     ];
 
     final String activeType = filters[_selectedMessageFilter].$3;
-    final List<_MessageFeedItem> filteredMessages = activeType == 'ALL'
-        ? _messages
-        : _messages.where((item) => item.type == activeType).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -510,7 +543,37 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
-        ...filteredMessages.map((message) => _buildMessageFeedCard(message)),
+        messages.when(
+          data: (items) {
+            final feedItems = items
+                .map(_messageFeedItemFromSosMessage)
+                .toList();
+            final filteredMessages = activeType == 'ALL'
+                ? feedItems
+                : feedItems.where((item) => item.type == activeType).toList();
+
+            if (filteredMessages.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.chat_bubble_outline_rounded,
+                message: 'No local messages yet.',
+              );
+            }
+
+            return Column(
+              children: filteredMessages
+                  .map(_buildMessageFeedCard)
+                  .toList(growable: false),
+            );
+          },
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, _) => _buildEmptyState(
+            icon: Icons.error_outline_rounded,
+            message: 'Unable to load local messages.',
+          ),
+        ),
         Container(
           width: double.infinity,
           margin: const EdgeInsets.only(top: 8),
@@ -653,6 +716,168 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  _MessageFeedItem _messageFeedItemFromSosMessage(
+    messaging.SosMessage message,
+  ) {
+    final type = _messageTypeForCategory(message.category);
+    final accentColor = _colorForCategory(message.category);
+
+    return _MessageFeedItem(
+      title:
+          '${_labelForCategory(message.category)} from ${message.sender.name}',
+      description: message.body,
+      distance: _distanceTextForMessage(message),
+      time: _relativeTime(message.createdAt),
+      badge: type,
+      type: type,
+      icon: _iconForCategory(message.category),
+      iconColor: accentColor,
+      badgeColor: accentColor,
+    );
+  }
+
+  String _messageTypeForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue || messaging.Category.medical => 'SOS',
+      messaging.Category.food ||
+      messaging.Category.water ||
+      messaging.Category.shelter ||
+      messaging.Category.transport => 'REQUEST',
+      messaging.Category.information || messaging.Category.other => 'UPDATE',
+    };
+  }
+
+  String _labelForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue => 'Rescue Request',
+      messaging.Category.food => 'Food Request',
+      messaging.Category.water => 'Water Request',
+      messaging.Category.medical => 'Medical SOS',
+      messaging.Category.shelter => 'Shelter Request',
+      messaging.Category.transport => 'Transport Request',
+      messaging.Category.information => 'Information Update',
+      messaging.Category.other => 'General Update',
+    };
+  }
+
+  String _shortLabelForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue => 'Rescue',
+      messaging.Category.food => 'Food',
+      messaging.Category.water => 'Water',
+      messaging.Category.medical => 'Medical',
+      messaging.Category.shelter => 'Shelter',
+      messaging.Category.transport => 'Transport',
+      messaging.Category.information => 'Information',
+      messaging.Category.other => 'Other',
+    };
+  }
+
+  String _markerLabelForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue => 'RESCUE',
+      messaging.Category.food => 'FOOD',
+      messaging.Category.water => 'WATER',
+      messaging.Category.medical => 'MED',
+      messaging.Category.shelter => 'SHELTER',
+      messaging.Category.transport => 'RIDE',
+      messaging.Category.information => 'INFO',
+      messaging.Category.other => 'OTHER',
+    };
+  }
+
+  IconData _iconForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue => Icons.accessibility_new,
+      messaging.Category.food => Icons.restaurant,
+      messaging.Category.water => Icons.opacity,
+      messaging.Category.medical => Icons.local_hospital,
+      messaging.Category.shelter => Icons.home,
+      messaging.Category.transport => Icons.directions_bus,
+      messaging.Category.information => Icons.info,
+      messaging.Category.other => Icons.more_horiz,
+    };
+  }
+
+  Color _colorForCategory(messaging.Category category) {
+    return switch (category) {
+      messaging.Category.rescue ||
+      messaging.Category.medical => const Color(0xFFE83C3D),
+      messaging.Category.food ||
+      messaging.Category.shelter ||
+      messaging.Category.transport => const Color(0xFFF39C12),
+      messaging.Category.water ||
+      messaging.Category.information => const Color(0xFF3F66C4),
+      messaging.Category.other => const Color(0xFF777777),
+    };
+  }
+
+  String _distanceTextForMessage(messaging.SosMessage message) {
+    final myPosition = _myPosition;
+    final latitude = message.latitude;
+    final longitude = message.longitude;
+    if (myPosition == null || latitude == null || longitude == null) {
+      return 'Stored locally';
+    }
+
+    final distanceMeters = const Distance().as(
+      LengthUnit.Meter,
+      myPosition,
+      LatLng(latitude, longitude),
+    );
+
+    if (distanceMeters < 1000) {
+      return '${distanceMeters.round()} m away';
+    }
+
+    return '${(distanceMeters / 1000).toStringAsFixed(1)} km away';
+  }
+
+  String _relativeTime(DateTime dateTime) {
+    final elapsed = DateTime.now().difference(dateTime);
+    if (elapsed.inMinutes < 1) {
+      return 'Just now';
+    }
+    if (elapsed.inHours < 1) {
+      return '${elapsed.inMinutes}m ago';
+    }
+    if (elapsed.inDays < 1) {
+      return '${elapsed.inHours}h ago';
+    }
+    if (elapsed.inDays == 1) {
+      return 'Yesterday';
+    }
+
+    return '${elapsed.inDays} days ago';
+  }
+
+  Widget _buildEmptyState({required IconData icon, required String message}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: const Color(0xFFE83C3D)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF666666),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBottomBar() {
     const items = [
       _NavItem(icon: Icons.home_rounded, label: 'Home'),
@@ -714,7 +939,7 @@ class _HomePageState extends State<HomePage> {
   Widget _buildLogo() {
     return Center(
       child: Image.asset(
-        'assets/home/home_map.png',
+        'assets/home/shadownetwork_logo.png',
         width: 170,
         fit: BoxFit.contain,
       ),
@@ -780,68 +1005,499 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildMapCard() {
+  Widget _buildMapCard(
+    AsyncValue<List<messaging.Peer>> peers,
+    AsyncValue<List<messaging.SosMessage>> messages,
+    AsyncValue<CacheStore> tileCacheStore,
+  ) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: SizedBox(
         height: 250,
         width: double.infinity,
-        child: Stack(
+        child: _buildMapStack(
+          peers: peers,
+          messages: messages,
+          tileCacheStore: tileCacheStore,
+          showLegend: false,
+          showStatusBadge: true,
+          markerSize: 56,
+          locationMarkerSize: 40,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapStack({
+    required AsyncValue<List<messaging.Peer>> peers,
+    required AsyncValue<List<messaging.SosMessage>> messages,
+    required AsyncValue<CacheStore> tileCacheStore,
+    required bool showLegend,
+    required bool showStatusBadge,
+    required double markerSize,
+    required double locationMarkerSize,
+    Set<messaging.Category>? visibleCategories,
+    bool showPeers = true,
+    bool showMyLocation = true,
+    Widget? bottomOverlay,
+  }) {
+    final cachedTileProvider = tileCacheStore.valueOrNull == null
+        ? null
+        : CachedTileProvider(
+            store: tileCacheStore.valueOrNull!,
+            cachePolicy: CachePolicy.forceCache,
+            maxStale: const Duration(days: 30),
+            hitCacheOnErrorCodes: const [
+              400,
+              401,
+              403,
+              404,
+              408,
+              429,
+              500,
+              502,
+              503,
+              504,
+            ],
+            hitCacheOnNetworkFailure: true,
+          );
+
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: _currentCenter,
+            initialZoom: _currentZoom,
+            minZoom: _minZoom,
+            maxZoom: _maxZoom,
+            onPositionChanged: (camera, hasGesture) {
+              _currentCenter = camera.center;
+              _currentZoom = camera.zoom;
+            },
+          ),
           children: [
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _currentCenter,
-                initialZoom: _currentZoom,
-                minZoom: _minZoom,
-                maxZoom: _maxZoom,
-                onPositionChanged: (camera, hasGesture) {
-                  _currentCenter = camera.center;
-                  _currentZoom = camera.zoom;
-                },
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.shadownetwork',
-                  maxNativeZoom: 19,
-                  panBuffer: 1,
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.example.shadownetwork',
+              tileProvider: cachedTileProvider,
+              maxNativeZoom: 19,
+              panBuffer: 1,
+              errorTileCallback: (_, _, _) {
+                if (mounted && !_tileLoadFailed) {
+                  setState(() => _tileLoadFailed = true);
+                }
+              },
+            ),
+            MarkerLayer(
+              markers: [
+                ..._triageMarkersFromMessages(
+                  messages,
+                  markerSize: markerSize,
+                  visibleCategories: visibleCategories,
                 ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _myPosition ?? _currentCenter,
-                      width: 40,
-                      height: 40,
-                      child: const Icon(
-                        Icons.location_pin,
-                        size: 40,
-                        color: Color(0xFFE83C3D),
-                      ),
+                if (showPeers)
+                  ..._peerMarkersFromPeers(peers, markerSize: markerSize),
+                if (showMyLocation)
+                  Marker(
+                    point: _myPosition ?? _currentCenter,
+                    width: locationMarkerSize,
+                    height: locationMarkerSize,
+                    child: Icon(
+                      Icons.location_pin,
+                      size: locationMarkerSize,
+                      color: const Color(0xFFE83C3D),
                     ),
-                  ],
-                ),
+                  ),
               ],
             ),
-            Positioned(
-              right: 10,
-              top: 10,
-              child: Column(
-                children: [
-                  _MapControlButton(icon: Icons.add, onTap: _zoomIn),
-                  const SizedBox(height: 8),
-                  _MapControlButton(icon: Icons.remove, onTap: _zoomOut),
-                ],
+          ],
+        ),
+        if (showLegend) Positioned(left: 16, top: 10, child: _buildMapLegend()),
+        if (showStatusBadge)
+          Positioned(
+            left: 10,
+            top: 10,
+            child: _MapStatusBadge(
+              icon: _tileLoadFailed
+                  ? Icons.offline_bolt_outlined
+                  : Icons.layers_outlined,
+              label: _mapTileStatusLabel(tileCacheStore),
+              color: _tileLoadFailed
+                  ? const Color(0xFFF39C12)
+                  : const Color(0xFF3F66C4),
+            ),
+          ),
+        Positioned(
+          right: 10,
+          top: 10,
+          child: Column(
+            children: [
+              _MapControlButton(icon: Icons.add, onTap: _zoomIn),
+              const SizedBox(height: 8),
+              _MapControlButton(icon: Icons.remove, onTap: _zoomOut),
+            ],
+          ),
+        ),
+        Positioned(
+          right: 10,
+          bottom: bottomOverlay == null ? 10 : 92,
+          child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
+        ),
+        if (bottomOverlay != null)
+          Positioned(left: 8, right: 8, bottom: 10, child: bottomOverlay),
+      ],
+    );
+  }
+
+  String _mapTileStatusLabel(AsyncValue<CacheStore> tileCacheStore) {
+    if (_tileLoadFailed) {
+      return 'Offline fallback';
+    }
+
+    return tileCacheStore.when(
+      data: (_) => 'Cached map',
+      loading: () => 'Preparing cache',
+      error: (_, _) => 'Live map',
+    );
+  }
+
+  List<Marker> _triageMarkersFromMessages(
+    AsyncValue<List<messaging.SosMessage>> messages, {
+    required double markerSize,
+    Set<messaging.Category>? visibleCategories,
+  }) {
+    final items = messages.valueOrNull ?? const <messaging.SosMessage>[];
+    final activeCategories =
+        visibleCategories ?? messaging.Category.values.toSet();
+
+    return items
+        .where(
+          (message) =>
+              activeCategories.contains(message.category) &&
+              message.latitude != null &&
+              message.longitude != null,
+        )
+        .map(
+          (message) => Marker(
+            point: LatLng(message.latitude!, message.longitude!),
+            width: markerSize,
+            height: markerSize,
+            child: GestureDetector(
+              onTap: () => _showMessage(
+                '${_labelForCategory(message.category)}: ${message.body}',
+              ),
+              child: _TriageMarker(
+                icon: _iconForCategory(message.category),
+                color: _colorForCategory(message.category),
+                label: _markerLabelForCategory(message.category),
               ),
             ),
-            Positioned(
-              right: 10,
-              bottom: 10,
-              child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  List<Marker> _peerMarkersFromPeers(
+    AsyncValue<List<messaging.Peer>> peers, {
+    required double markerSize,
+  }) {
+    final items = peers.valueOrNull ?? const <messaging.Peer>[];
+
+    return items
+        .where((peer) => peer.latitude != null && peer.longitude != null)
+        .map(
+          (peer) => Marker(
+            point: LatLng(peer.latitude!, peer.longitude!),
+            width: markerSize,
+            height: markerSize,
+            child: GestureDetector(
+              onTap: () => _showMessage('${peer.name} nearby'),
+              child: _PeerMapMarker(isConnected: peer.isConnected),
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Widget _buildMapLegend() {
+    return PopupMenuButton<Object>(
+      tooltip: 'Filter map markers',
+      offset: const Offset(0, 8),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      onSelected: _handleMapLegendSelection,
+      itemBuilder: (context) => [
+        PopupMenuItem<Object>(
+          value: _mapFilterAllMarkers,
+          child: _MapLegendChoice(
+            selected: _allMapMarkersSelected,
+            marker: const SizedBox(
+              width: 34,
+              height: 34,
+              child: Icon(
+                Icons.layers_rounded,
+                color: Color(0xFFE83C3D),
+                size: 24,
+              ),
+            ),
+            label: 'All markers',
+          ),
+        ),
+        const PopupMenuDivider(height: 8),
+        ...messaging.Category.values.map(
+          (category) => PopupMenuItem<Object>(
+            value: category,
+            child: _MapLegendChoice(
+              selected: _visibleMapCategories.contains(category),
+              marker: SizedBox(
+                width: 34,
+                height: 34,
+                child: _TriageMarker(
+                  icon: _iconForCategory(category),
+                  color: _colorForCategory(category),
+                  label: _markerLabelForCategory(category),
+                ),
+              ),
+              label: _shortLabelForCategory(category),
+            ),
+          ),
+        ),
+        const PopupMenuDivider(height: 8),
+        PopupMenuItem<Object>(
+          value: _mapFilterPeers,
+          child: _MapLegendChoice(
+            selected: _showMapPeers,
+            marker: const SizedBox(
+              width: 34,
+              height: 34,
+              child: _PeerMapMarker(isConnected: true),
+            ),
+            label: 'Peers',
+          ),
+        ),
+        PopupMenuItem<Object>(
+          value: _mapFilterLocation,
+          child: _MapLegendChoice(
+            selected: _showMapLocation,
+            marker: const SizedBox(
+              width: 34,
+              height: 34,
+              child: Icon(
+                Icons.location_pin,
+                size: 32,
+                color: Color(0xFFE83C3D),
+              ),
+            ),
+            label: 'My location',
+          ),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _legendPreviewMarker(),
+            const SizedBox(width: 8),
+            Text(
+              _mapLegendSummaryLabel(),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1F1F1F),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 20,
+              color: Color(0xFF555555),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  bool get _allMapMarkersSelected {
+    return _visibleMapCategories.length == messaging.Category.values.length &&
+        _showMapPeers &&
+        _showMapLocation;
+  }
+
+  int get _selectedMapMarkerCount {
+    return _visibleMapCategories.length +
+        (_showMapPeers ? 1 : 0) +
+        (_showMapLocation ? 1 : 0);
+  }
+
+  void _handleMapLegendSelection(Object value) {
+    setState(() {
+      if (value == _mapFilterAllMarkers) {
+        _visibleMapCategories
+          ..clear()
+          ..addAll(messaging.Category.values);
+        _showMapPeers = true;
+        _showMapLocation = true;
+        return;
+      }
+
+      if (value == _mapFilterPeers) {
+        if (_allMapMarkersSelected) {
+          _visibleMapCategories.clear();
+          _showMapPeers = true;
+          _showMapLocation = false;
+        } else {
+          _showMapPeers = !_showMapPeers;
+        }
+        return;
+      }
+
+      if (value == _mapFilterLocation) {
+        if (_allMapMarkersSelected) {
+          _visibleMapCategories.clear();
+          _showMapPeers = false;
+          _showMapLocation = true;
+        } else {
+          _showMapLocation = !_showMapLocation;
+        }
+        return;
+      }
+
+      if (value is messaging.Category) {
+        if (_allMapMarkersSelected) {
+          _visibleMapCategories
+            ..clear()
+            ..add(value);
+          _showMapPeers = false;
+          _showMapLocation = false;
+        } else if (_visibleMapCategories.contains(value)) {
+          _visibleMapCategories.remove(value);
+        } else {
+          _visibleMapCategories.add(value);
+        }
+      }
+    });
+  }
+
+  Widget _legendPreviewMarker() {
+    if (_visibleMapCategories.length == 1 &&
+        !_showMapPeers &&
+        !_showMapLocation) {
+      final category = _visibleMapCategories.first;
+      return SizedBox(
+        width: 34,
+        height: 34,
+        child: _TriageMarker(
+          icon: _iconForCategory(category),
+          color: _colorForCategory(category),
+          label: _markerLabelForCategory(category),
+        ),
+      );
+    }
+
+    if (_visibleMapCategories.isEmpty && _showMapPeers && !_showMapLocation) {
+      return const SizedBox(
+        width: 34,
+        height: 34,
+        child: _PeerMapMarker(isConnected: true),
+      );
+    }
+
+    return const SizedBox(
+      width: 34,
+      height: 34,
+      child: Icon(Icons.layers_rounded, color: Color(0xFFE83C3D), size: 24),
+    );
+  }
+
+  String _mapLegendSummaryLabel() {
+    if (_allMapMarkersSelected) {
+      return 'All markers';
+    }
+
+    if (_visibleMapCategories.length == 1 &&
+        !_showMapPeers &&
+        !_showMapLocation) {
+      return _shortLabelForCategory(_visibleMapCategories.first);
+    }
+
+    if (_selectedMapMarkerCount == 0) {
+      return 'No markers';
+    }
+
+    return '$_selectedMapMarkerCount selected';
+  }
+
+  Widget _buildMapTabActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: _MapActionButton(
+            icon: _isLocating
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.4,
+                      color: Color(0xFFE83C3D),
+                    ),
+                  )
+                : const Icon(
+                    Icons.gps_fixed_rounded,
+                    color: Color(0xFFE83C3D),
+                    size: 34,
+                  ),
+            label: 'LOCATE ME',
+            subtitle: _isLocating
+                ? 'Locating...'
+                : (_isFollowing ? 'Show my location' : 'Find my location'),
+            backgroundColor: Colors.white,
+            foregroundColor: const Color(0xFFE83C3D),
+            subtitleColor: const Color(0xFF7D7D7D),
+            onTap: () => _startFollowing(),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MapActionButton(
+            icon: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 3),
+              ),
+              alignment: Alignment.center,
+              child: const Text(
+                'SOS',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            label: 'SEND SOS',
+            subtitle: 'Alert nearby peers',
+            backgroundColor: const Color(0xFFE83C3D),
+            foregroundColor: Colors.white,
+            subtitleColor: Colors.white,
+            onTap: _openSosComposerModal,
+          ),
+        ),
+      ],
     );
   }
 
@@ -862,7 +1518,11 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   )
-                : const _LocationIcon(),
+                : const Icon(
+                    Icons.gps_fixed_rounded,
+                    color: Color(0xFFE83C3D),
+                    size: 34,
+                  ),
             label: 'LOCATE ME',
             labelColor: const Color(0xFFE83C3D),
             subtitle: _isLocating
@@ -876,7 +1536,7 @@ class _HomePageState extends State<HomePage> {
           child: _ActionCard(
             icon: const _MessageIcon(),
             label: 'MESSAGES',
-            labelColor: const Color(0xFF851C1B),
+            labelColor: const Color(0xFFE83C3D),
             subtitle: 'View all messages',
             onTap: () => setState(() => _selectedTab = 1),
           ),
@@ -885,7 +1545,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildPeersSection() {
+  Widget _buildPeersSection(AsyncValue<List<messaging.Peer>> peers) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -905,31 +1565,38 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         const SizedBox(height: 12),
-        ...List.generate(_peers.length, (i) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _PeerCard(peer: _peers[i]),
-          );
-        }),
+        peers.when(
+          data: (items) {
+            if (items.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.people_outline_rounded,
+                message: 'No nearby peers stored yet.',
+              );
+            }
+
+            return Column(
+              children: items
+                  .map(
+                    (peer) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _PeerCard(peer: peer),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, _) => _buildEmptyState(
+            icon: Icons.error_outline_rounded,
+            message: 'Unable to load local peers.',
+          ),
+        ),
       ],
     );
   }
-}
-
-enum SignalStrength { strong, weak }
-
-class _PeerData {
-  final String name;
-  final String id;
-  final SignalStrength signal;
-  final bool connected;
-
-  const _PeerData({
-    required this.name,
-    required this.id,
-    required this.signal,
-    required this.connected,
-  });
 }
 
 class _MessageFeedItem {
@@ -987,14 +1654,297 @@ class _MapControlButton extends StatelessWidget {
   }
 }
 
+class _MapStatusBadge extends StatelessWidget {
+  const _MapStatusBadge({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapLegendChoice extends StatelessWidget {
+  const _MapLegendChoice({
+    required this.selected,
+    required this.marker,
+    required this.label,
+  });
+
+  final bool selected;
+  final Widget marker;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 210,
+      child: Row(
+        children: [
+          marker,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1F1F1F),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(
+            selected
+                ? Icons.check_box_rounded
+                : Icons.check_box_outline_blank_rounded,
+            size: 20,
+            color: selected ? const Color(0xFFE83C3D) : const Color(0xFF9A9A9A),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MapActionButton extends StatelessWidget {
+  const _MapActionButton({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.subtitleColor,
+    required this.onTap,
+  });
+
+  final Widget icon;
+  final String label;
+  final String subtitle;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final Color subtitleColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(17),
+      elevation: 5,
+      shadowColor: Colors.black.withValues(alpha: 0.22),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(17),
+        child: Container(
+          height: 64,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              icon,
+              const SizedBox(width: 10),
+              Flexible(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: foregroundColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: subtitleColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TriageMarker extends StatelessWidget {
+  const _TriageMarker({
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      alignment: Alignment.topCenter,
+      children: [
+        Container(
+          width: 38,
+          height: 38,
+          margin: const EdgeInsets.only(top: 3),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+        Positioned(
+          bottom: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withValues(alpha: 0.32)),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 8,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PeerMapMarker extends StatelessWidget {
+  const _PeerMapMarker({required this.isConnected});
+
+  final bool isConnected;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isConnected
+        ? const Color(0xFF24A646)
+        : const Color(0xFF969696);
+
+    return Stack(
+      alignment: Alignment.topCenter,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          margin: const EdgeInsets.only(top: 4),
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.16),
+                blurRadius: 9,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Icon(
+            Icons.person_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
+        ),
+        Positioned(
+          bottom: 1,
+          child: Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: isConnected
+                  ? const Color(0xFF06820E)
+                  : const Color(0xFFF0881E),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 1.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _SosComposerSheet extends StatefulWidget {
   const _SosComposerSheet({
     required this.locationText,
     required this.onUpdateLocation,
+    required this.onSend,
   });
 
   final String locationText;
   final Future<void> Function() onUpdateLocation;
+  final Future<void> Function(String body, messaging.Category category) onSend;
 
   @override
   State<_SosComposerSheet> createState() => _SosComposerSheetState();
@@ -1002,19 +1952,40 @@ class _SosComposerSheet extends StatefulWidget {
 
 class _SosComposerSheetState extends State<_SosComposerSheet> {
   static const _categories = [
-    (icon: Icons.accessibility_new, label: 'Rescue'),
-    (icon: Icons.restaurant, label: 'Food'),
-    (icon: Icons.opacity, label: 'Water'),
-    (icon: Icons.local_hospital, label: 'Medical'),
-    (icon: Icons.home, label: 'Shelter'),
-    (icon: Icons.directions_bus, label: 'Transport'),
-    (icon: Icons.info, label: 'Information'),
-    (icon: Icons.more_horiz, label: 'Other'),
+    (
+      icon: Icons.accessibility_new,
+      label: 'Rescue',
+      category: messaging.Category.rescue,
+    ),
+    (icon: Icons.restaurant, label: 'Food', category: messaging.Category.food),
+    (icon: Icons.opacity, label: 'Water', category: messaging.Category.water),
+    (
+      icon: Icons.local_hospital,
+      label: 'Medical',
+      category: messaging.Category.medical,
+    ),
+    (icon: Icons.home, label: 'Shelter', category: messaging.Category.shelter),
+    (
+      icon: Icons.directions_bus,
+      label: 'Transport',
+      category: messaging.Category.transport,
+    ),
+    (
+      icon: Icons.info,
+      label: 'Information',
+      category: messaging.Category.information,
+    ),
+    (
+      icon: Icons.more_horiz,
+      label: 'Other',
+      category: messaging.Category.other,
+    ),
   ];
 
   late final TextEditingController _messageController;
   int _selectedCategory = 0;
   bool _updatingLocation = false;
+  bool _sending = false;
 
   @override
   void initState() {
@@ -1274,7 +2245,9 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _sending
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                       side: const BorderSide(color: Color(0xFFE83C3D)),
@@ -1295,7 +2268,48 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () => Navigator.of(context).pop(),
+                    onPressed: _sending
+                        ? null
+                        : () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            final navigator = Navigator.of(context);
+                            final body = _messageController.text.trim();
+                            if (body.isEmpty) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text('Message cannot be empty.'),
+                                ),
+                              );
+                              return;
+                            }
+
+                            setState(() => _sending = true);
+                            try {
+                              await widget.onSend(
+                                body,
+                                _categories[_selectedCategory].category,
+                              );
+                              if (mounted) {
+                                navigator.pop();
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'SOS queued for local delivery.',
+                                    ),
+                                  ),
+                                );
+                              }
+                            } catch (_) {
+                              if (mounted) {
+                                setState(() => _sending = false);
+                                messenger.showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Unable to queue SOS.'),
+                                  ),
+                                );
+                              }
+                            }
+                          },
                     icon: const Icon(Icons.near_me, color: Colors.white),
                     label: const Text(
                       'SEND SOS',
@@ -1389,12 +2403,13 @@ class _ActionCard extends StatelessWidget {
 class _PeerCard extends StatelessWidget {
   const _PeerCard({required this.peer});
 
-  final _PeerData peer;
+  final messaging.Peer peer;
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = peer.connected;
-    final isStrong = peer.signal == SignalStrength.strong;
+    final isConnected = peer.isConnected;
+    final signalStrength = peer.signalStrength;
+    final isStrong = signalStrength == null || signalStrength >= 60;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1441,7 +2456,7 @@ class _PeerCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  peer.id,
+                  'ID: ${peer.id}',
                   style: const TextStyle(fontSize: 9, color: Color(0x80000000)),
                 ),
                 const SizedBox(height: 3),
@@ -1578,19 +2593,6 @@ class _ScanningBadgeState extends State<_ScanningBadge>
   }
 }
 
-class _LocationIcon extends StatelessWidget {
-  const _LocationIcon();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 32,
-      height: 32,
-      child: CustomPaint(painter: _LocationIconPainter()),
-    );
-  }
-}
-
 class _MessageIcon extends StatelessWidget {
   const _MessageIcon();
 
@@ -1639,7 +2641,7 @@ class _MessageIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFF851C1B)
+      ..color = const Color(0xFFE83C3D)
       ..style = PaintingStyle.fill;
 
     final w = size.width;
