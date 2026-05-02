@@ -557,16 +557,16 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 78,
-            height: 78,
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
               color: item.iconColor,
               shape: BoxShape.circle,
             ),
-            child: Icon(item.icon, color: Colors.white, size: 38),
+            child: Icon(item.icon, color: Colors.white, size: 28),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -591,7 +591,7 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       item.time,
                       style: const TextStyle(
-                        fontSize: 12,
+                        fontSize: 10,
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF888888),
                       ),
@@ -602,7 +602,7 @@ class _HomePageState extends State<HomePage> {
                 Text(
                   item.description,
                   style: const TextStyle(
-                    fontSize: 14,
+                    fontSize: 12,
                     color: Color(0xFF666666),
                     fontWeight: FontWeight.w500,
                   ),
@@ -619,7 +619,7 @@ class _HomePageState extends State<HomePage> {
                     Text(
                       item.distance,
                       style: const TextStyle(
-                        fontSize: 14,
+                        fontSize: 12,
                         fontWeight: FontWeight.w600,
                         color: Color(0xFF585858),
                       ),
@@ -784,7 +784,7 @@ class _HomePageState extends State<HomePage> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: SizedBox(
-        height: 180,
+        height: 250,
         width: double.infinity,
         child: Stack(
           children: [
