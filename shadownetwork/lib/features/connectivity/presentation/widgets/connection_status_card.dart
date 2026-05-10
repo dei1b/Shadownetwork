@@ -12,6 +12,8 @@ class ConnectionStatusCard extends StatelessWidget {
 
   (String label, Color color) _statusPresentation() {
     switch (status.connectionState) {
+      case PeerConnectionState.permissionsRequired:
+        return ('Permissions Required', AppColors.warning);
       case PeerConnectionState.connected:
         return ('Connected', AppColors.success);
       case PeerConnectionState.discovering:
@@ -33,6 +35,13 @@ class ConnectionStatusCard extends StatelessWidget {
           children: [
             Text('Mesh Status', style: AppTypography.titleMedium),
             const SizedBox(height: AppSpacing.md),
+            if (status.localPeerName != null) ...[
+              Text(
+                'Node: ${status.localPeerName}',
+                style: AppTypography.caption,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             Row(
               children: [
                 Icon(Icons.circle, size: AppSpacing.md, color: presentation.$2),
@@ -45,6 +54,11 @@ class ConnectionStatusCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             Text(
               'Peers: ${status.connectedPeers}',
+              style: AppTypography.bodyMedium,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Discovered: ${status.discoveredPeers}',
               style: AppTypography.bodyMedium,
             ),
             const SizedBox(height: AppSpacing.sm),

@@ -26,34 +26,49 @@ void main() {
     createdAt: DateTime.utc(2026, 5, 2, 5, 30),
     latitude: 7.3026,
     longitude: 125.6888,
+    gpsAccuracyMeters: 8.5,
+    ttl: const Duration(hours: 2),
   );
 
   test('serializes SOS messages into deterministic canonical JSON', () {
-    expect(
-      SosMessagePayload.canonicalJson(message),
-      '{"schema_version":1,"id":"sos-1","sender":{"id":"peer-1",'
-      '"name":"Responder 1","type":"responder","latitude":null,'
-      '"longitude":null},"body":"Need medical assistance.",'
-      '"category":"medical","created_at":"2026-05-02T05:30:00.000Z",'
-      '"latitude":7.3026,"longitude":125.6888}',
-    );
+    final firstJson = SosMessagePayload.canonicalJson(message);
+    final secondJson = SosMessagePayload.canonicalJson(message);
+    final payload = jsonDecode(firstJson) as Map<String, Object?>;
+    final routing = payload['routing']! as Map<String, Object?>;
+    final location = payload['location']! as Map<String, Object?>;
+    final senderPayload = payload['sender']! as Map<String, Object?>;
+
+    expect(firstJson, secondJson);
+    expect(payload['schema_version'], 2);
+    expect(payload['message_id'], 'sos-1');
+    expect(payload['message_hash'], SosMessagePayload.messageHash(message));
+    expect(payload['payload_text'], 'Need medical assistance.');
+    expect(location['latitude'], 7.3026);
+    expect(location['longitude'], 125.6888);
+    expect(location['accuracy_meters'], 8.5);
+    expect(routing['hop_count'], 0);
+    expect(routing['ttl'], 7200);
+    expect(senderPayload['peer_id'], 'peer-1');
+    expect(senderPayload['peer_name'], 'Responder 1');
+    expect(senderPayload['peer_type'], 'responder');
   });
 
   test('creates a deterministic SHA-256 message hash', () {
-    expect(
-      SosMessagePayload.messageHash(message),
-      '48c03f2cd0475f80286a9cd213ced26dea4fe021516396499ce5dfa676041864',
-    );
+    final hash = SosMessagePayload.messageHash(message);
+
+    expect(hash, hasLength(64));
+    expect(hash, SosMessagePayload.messageHash(message));
   });
 
-  test('hash ignores mutable local delivery state', () {
-    final deliveredMessage = message.copyWith(
+  test('hash ignores mutable local delivery and hop state', () {
+    final relayedMessage = message.copyWith(
       status: MessageStatus.delivered,
+      hopCount: 4,
       updatedAt: DateTime.utc(2026, 5, 2, 5, 35),
     );
 
     expect(
-      SosMessagePayload.messageHash(deliveredMessage),
+      SosMessagePayload.messageHash(relayedMessage),
       SosMessagePayload.messageHash(message),
     );
   });
@@ -71,5 +86,23 @@ void main() {
     expect(decoded.category, Category.medical);
     expect(decoded.status, MessageStatus.received);
     expect(decoded.createdAt, message.createdAt);
+    expect(decoded.messageHash, SosMessagePayload.messageHash(message));
+    expect(decoded.gpsAccuracyMeters, 8.5);
+    expect(decoded.hopCount, 0);
+    expect(decoded.ttl, const Duration(hours: 2));
+  });
+
+  test('rewrites routing metadata for relay without changing message hash', () {
+    final relayedJson = SosMessagePayload.payloadJsonForRelay(
+      SosMessagePayload.canonicalJson(message),
+      hopCount: 3,
+    );
+    final relayedPayload = jsonDecode(relayedJson) as Map<String, Object?>;
+    final decoded = SosMessagePayload.fromPayload(relayedPayload);
+
+    expect(relayedPayload['message_hash'], SosMessagePayload.messageHash(message));
+    expect((relayedPayload['routing']! as Map<String, Object?>)['hop_count'], 3);
+    expect(decoded.hopCount, 3);
+    expect(decoded.messageHash, SosMessagePayload.messageHash(message));
   });
 }

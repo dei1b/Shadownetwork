@@ -15,13 +15,12 @@ dependencies:
   firebase_core: ^3.15.2
   firebase_auth: ^5.6.3
   google_sign_in: ^6.3.0
-  flutter_map: ^8.3.0
+  maplibre_gl: ^0.26.0
   latlong2: ^0.9.1
   geolocator: ^14.0.2
   sqflite: ^2.4.2+1
   path: ^1.9.1
   crypto: ^3.0.7
-  flutter_map_cache: 2.1.0
   dio_cache_interceptor: 4.0.6
   path_provider: ^2.1.5
   http_cache_file_store: ^2.0.1
@@ -37,3 +36,23 @@ flutter:
   assets:
     - assets/auth/
     - assets/home/
+    - assets/map_fonts/Noto Sans Bold/
+    - assets/map_fonts/Noto Sans Italic/
+    - assets/map_fonts/Noto Sans Regular/
+    - assets/map_sprites/
+    - assets/map_styles/
+    - assets/map_tiles/panabo_vector/10/869/
+    - assets/map_tiles/panabo_vector/11/1738/
+    - assets/map_tiles/panabo_vector/11/1739/
+    - assets/map_tiles/panabo_vector/12/3477/
+    - assets/map_tiles/panabo_vector/12/3478/
+    - assets/map_tiles/panabo_vector/13/6954/
+    - assets/map_tiles/panabo_vector/13/6955/
+    - assets/map_tiles/panabo_vector/13/6956/
+    - assets/map_tiles/panabo_vector/13/6957/
+    - assets/map_tiles/panabo_vector/14/13909/
+    - assets/map_tiles/panabo_vector/14/13910/
+    - assets/map_tiles/panabo_vector/14/13911/
+    - assets/map_tiles/panabo_vector/14/13912/
+    - assets/map_tiles/panabo_vector/14/13913/
+    - assets/map_tiles/panabo_vector/14/13914/

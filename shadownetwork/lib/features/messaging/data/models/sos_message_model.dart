@@ -3,6 +3,7 @@ import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/sos_message.dart';
+import 'sos_message_payload.dart';
 
 class SosMessageModel {
   const SosMessageModel._();
@@ -25,8 +26,12 @@ class SosMessageModel {
       status: MessageStatus.values.byName(map['status']! as String),
       createdAt: DateTime.parse(map['created_at']! as String),
       updatedAt: _dateTimeFromMap(map['updated_at']),
+      messageHash: map['message_hash'] as String?,
       latitude: map['latitude'] as double?,
       longitude: map['longitude'] as double?,
+      gpsAccuracyMeters: map['gps_accuracy_meters'] as double?,
+      hopCount: (map['hop_count'] as num?)?.toInt() ?? 0,
+      ttl: Duration(seconds: (map['ttl_seconds'] as num?)?.toInt() ?? 86400),
     );
   }
 
@@ -37,8 +42,12 @@ class SosMessageModel {
       'body': message.body,
       'category_code': message.category.name,
       'status': message.status.name,
+      'message_hash': message.messageHash ?? SosMessagePayload.messageHash(message),
       'latitude': message.latitude,
       'longitude': message.longitude,
+      'gps_accuracy_meters': message.gpsAccuracyMeters,
+      'hop_count': message.hopCount,
+      'ttl_seconds': message.ttl.inSeconds,
       'created_at': message.createdAt.toIso8601String(),
       'updated_at': message.updatedAt?.toIso8601String(),
     };

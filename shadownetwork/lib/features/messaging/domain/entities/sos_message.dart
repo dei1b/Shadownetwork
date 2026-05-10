@@ -11,8 +11,12 @@ class SosMessage {
     required this.status,
     required this.createdAt,
     this.updatedAt,
+    this.messageHash,
     this.latitude,
     this.longitude,
+    this.gpsAccuracyMeters,
+    this.hopCount = 0,
+    this.ttl = const Duration(hours: 24),
   });
 
   final String id;
@@ -22,8 +26,12 @@ class SosMessage {
   final MessageStatus status;
   final DateTime createdAt;
   final DateTime? updatedAt;
+  final String? messageHash;
   final double? latitude;
   final double? longitude;
+  final double? gpsAccuracyMeters;
+  final int hopCount;
+  final Duration ttl;
 
   SosMessage copyWith({
     String? id,
@@ -33,8 +41,12 @@ class SosMessage {
     MessageStatus? status,
     DateTime? createdAt,
     DateTime? updatedAt,
+    String? messageHash,
     double? latitude,
     double? longitude,
+    double? gpsAccuracyMeters,
+    int? hopCount,
+    Duration? ttl,
   }) {
     return SosMessage(
       id: id ?? this.id,
@@ -44,8 +56,12 @@ class SosMessage {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      messageHash: messageHash ?? this.messageHash,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      gpsAccuracyMeters: gpsAccuracyMeters ?? this.gpsAccuracyMeters,
+      hopCount: hopCount ?? this.hopCount,
+      ttl: ttl ?? this.ttl,
     );
   }
 }

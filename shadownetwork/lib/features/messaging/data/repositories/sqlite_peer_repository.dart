@@ -22,6 +22,15 @@ class SqlitePeerRepository implements PeerRepository {
   }
 
   @override
+  Future<void> markAllDisconnected({DateTime? timestamp}) async {
+    final now = (timestamp ?? DateTime.now()).toIso8601String();
+    await _database.update(LocalMessagingDatabase.peersTable, {
+      'is_connected': 0,
+      'updated_at': now,
+    });
+  }
+
+  @override
   Future<void> upsertPeer(Peer peer) async {
     await _database.insert(
       LocalMessagingDatabase.peersTable,

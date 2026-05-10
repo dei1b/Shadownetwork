@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
@@ -15,6 +17,44 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   setUpAll(sqfliteFfiInit);
+
+  test('reports live mock transport status from registered peers', () async {
+    const nodeA = Peer(
+      id: 'node-a',
+      name: 'Node A',
+      type: PeerType.civilian,
+      isConnected: true,
+    );
+    const nodeB = Peer(
+      id: 'node-b',
+      name: 'Node B',
+      type: PeerType.relay,
+      isConnected: false,
+    );
+    const nodeC = Peer(
+      id: 'node-c',
+      name: 'Node C',
+      type: PeerType.responder,
+      isConnected: true,
+    );
+
+    final network = MockScfTransportNetwork();
+    final transportA = network.registerPeer(nodeA);
+    network.registerPeer(nodeB);
+    network.registerPeer(nodeC);
+
+    final localPeer = await transportA.getLocalPeer();
+    final status = await transportA.getStatus();
+    final discoveredPeers = await transportA.discoverPeers();
+
+    expect(localPeer.id, nodeA.id);
+    expect(localPeer.name, nodeA.name);
+    expect(status.localPeer.id, nodeA.id);
+    expect(status.permissionsGranted, isTrue);
+    expect(status.isRunning, isTrue);
+    expect(status.discoveredPeerCount, discoveredPeers.length);
+    expect(status.connectedPeerCount, 1);
+  });
 
   test('relays SCF envelopes between mock peers', () async {
     final nodeADatabase = await _openTestDatabase('mock-relay-a.db');
@@ -70,6 +110,12 @@ void main() {
     expect(storedAtB, hasLength(1));
     expect(storedAtB.single.messageHash, hash);
     expect(storedAtB.single.hopCount, 1);
+    expect(
+      SosMessagePayload.fromPayload(
+        jsonDecode(storedAtB.single.payloadJson) as Map<String, Object?>,
+      ).hopCount,
+      1,
+    );
     expect(statusAtA?.status, ScfPeerStatus.sent);
   });
 
@@ -141,5 +187,6 @@ SosMessage _message({required Peer sender}) {
     createdAt: DateTime.utc(2026, 5, 2, 5, 30),
     latitude: 7.3026,
     longitude: 125.6888,
+    ttl: const Duration(hours: 6),
   );
 }

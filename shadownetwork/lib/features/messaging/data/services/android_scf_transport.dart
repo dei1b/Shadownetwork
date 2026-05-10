@@ -3,12 +3,13 @@ import 'package:flutter/services.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
+import '../../domain/entities/transport_status.dart';
 import '../../domain/services/scf_transport.dart';
 
 class AndroidScfTransport implements ScfTransport {
   AndroidScfTransport({
-    required this.localPeerId,
-    required this.localPeerName,
+    this.localPeerId = 'local-device',
+    this.localPeerName = 'This Device',
     MethodChannel? channel,
   }) : _channel =
            channel ?? const MethodChannel('shadownetwork/android_transport');
@@ -18,6 +19,28 @@ class AndroidScfTransport implements ScfTransport {
 
   @override
   final String localPeerId;
+
+  @override
+  Future<Peer> getLocalPeer() async {
+    final map = await _channel.invokeMethod<Map<Object?, Object?>>('getLocalPeer');
+    return _peerFromPlatformMap(map);
+  }
+
+  @override
+  Future<TransportStatus> getStatus() async {
+    final map = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'getTransportStatus',
+    );
+    final localPeerMap = map?['localPeer'] as Map<Object?, Object?>?;
+
+    return TransportStatus(
+      localPeer: _peerFromPlatformMap(localPeerMap),
+      permissionsGranted: map?['permissionsGranted'] as bool? ?? false,
+      isRunning: map?['isRunning'] as bool? ?? false,
+      discoveredPeerCount: map?['discoveredPeerCount'] as int? ?? 0,
+      connectedPeerCount: map?['connectedPeerCount'] as int? ?? 0,
+    );
+  }
 
   Future<bool> ensurePermissions() async {
     return await _channel.invokeMethod<bool>('ensurePermissions') ?? false;
@@ -75,7 +98,16 @@ class AndroidScfTransport implements ScfTransport {
         .toList(growable: false);
   }
 
-  Peer _peerFromPlatformMap(Map<Object?, Object?> map) {
+  Peer _peerFromPlatformMap(Map<Object?, Object?>? map) {
+    if (map == null) {
+      return Peer(
+        id: localPeerId,
+        name: localPeerName,
+        type: PeerType.civilian,
+        isConnected: false,
+      );
+    }
+
     return Peer(
       id: map['id']! as String,
       name: (map['name'] as String?)?.trim().isNotEmpty == true

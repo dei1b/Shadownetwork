@@ -55,5 +55,17 @@ void main() {
       LocalMessagingDatabase.scfMessagesTable,
       LocalMessagingDatabase.scfPeerStatusesTable,
     ]);
+
+    final sosColumns = await database.rawQuery(
+      'PRAGMA table_info(${LocalMessagingDatabase.sosMessagesTable})',
+    );
+    final columnNames = sosColumns
+        .map((row) => row['name'])
+        .toSet();
+
+    expect(columnNames, contains('message_hash'));
+    expect(columnNames, contains('gps_accuracy_meters'));
+    expect(columnNames, contains('hop_count'));
+    expect(columnNames, contains('ttl_seconds'));
   });
 }

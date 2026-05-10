@@ -1,20 +1,22 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_cache/flutter_map_cache.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 
 import '../../domain/entities/category.dart' as messaging;
 import '../../domain/entities/message_status.dart' as messaging;
 import '../../domain/entities/peer.dart' as messaging;
 import '../../domain/entities/peer_type.dart' as messaging;
 import '../../domain/entities/sos_message.dart' as messaging;
+import '../../data/services/offline_panabo_tile_server.dart';
 import '../providers/local_messaging_providers.dart';
+import '../providers/relay_runtime_provider.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -27,6 +29,7 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   int _selectedTab = 0;
   int _selectedMessageFilter = 0;
+  int _selectedPeerFilter = 0;
   final Set<messaging.Category> _visibleMapCategories = {
     ...messaging.Category.values,
   };
@@ -38,30 +41,50 @@ class _HomePageState extends ConsumerState<HomePage> {
   static const String _mapFilterLocation = 'location';
 
   static const LatLng _mapCenter = LatLng(7.3026, 125.6888);
-  static const double _minZoom = 4;
+  static const double _minZoom = 10;
   static const double _maxZoom = 19;
   static const double _defaultZoom = 16.1;
+  static const double _panaboNorth = 7.345;
+  static const double _panaboSouth = 7.235;
+  static const double _panaboEast = 125.73;
+  static const double _panaboWest = 125.62;
 
-  final MapController _mapController = MapController();
+  final OfflinePanaboTileServer _offlineTileServer = OfflinePanaboTileServer();
+  ml.MapLibreMapController? _mapController;
+  String? _offlineMapStyle;
   LatLng _currentCenter = _mapCenter;
   double _currentZoom = _defaultZoom;
+  double _currentBearing = 0;
   LatLng? _myPosition;
   bool _isLocating = false;
   bool _isFollowing = false;
-  bool _tileLoadFailed = false;
+  final bool _tileLoadFailed = false;
   StreamSubscription<Position>? _positionSubscription;
 
   @override
   void initState() {
     super.initState();
+    ml.MapLibreMap.useHybridComposition = true;
+    unawaited(_startOfflineMapStyle());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _startFollowing(showError: false);
     });
   }
 
+  Future<void> _startOfflineMapStyle() async {
+    try {
+      final styleUri = await _offlineTileServer.start();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _offlineMapStyle = styleUri.toString());
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _positionSubscription?.cancel();
+    unawaited(_offlineTileServer.dispose());
     super.dispose();
   }
 
@@ -122,7 +145,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           });
 
           if (_isFollowing) {
-            _mapController.move(myPoint, _currentZoom);
+            _moveMap(myPoint, _currentZoom);
           }
         });
   }
@@ -160,7 +183,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         _currentZoom = targetZoom;
       });
 
-      _mapController.move(myPoint, targetZoom);
+      _moveMap(myPoint, targetZoom);
     } catch (_) {
       if (showError) {
         _showMessage('Unable to get current location right now.');
@@ -174,18 +197,25 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _zoomIn() {
     final targetZoom = (_currentZoom + 1).clamp(_minZoom, _maxZoom).toDouble();
-    _mapController.move(_currentCenter, targetZoom);
+    _moveMap(_currentCenter, targetZoom);
     setState(() => _currentZoom = targetZoom);
   }
 
   void _zoomOut() {
     final targetZoom = (_currentZoom - 1).clamp(_minZoom, _maxZoom).toDouble();
-    _mapController.move(_currentCenter, targetZoom);
+    _moveMap(_currentCenter, targetZoom);
     setState(() => _currentZoom = targetZoom);
   }
 
   void _resetNorth() {
-    _mapController.rotate(0);
+    _mapController?.animateCamera(ml.CameraUpdate.bearingTo(0));
+    setState(() => _currentBearing = 0);
+  }
+
+  void _moveMap(LatLng center, double zoom) {
+    _mapController?.moveCamera(
+      ml.CameraUpdate.newLatLngZoom(_toMapLibreLatLng(center), zoom),
+    );
   }
 
   void _showMessage(String message) {
@@ -196,6 +226,22 @@ class _HomePageState extends ConsumerState<HomePage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _syncRelayNow() async {
+    try {
+      await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
+      if (!mounted) {
+        return;
+      }
+      final status = ref.read(relayRuntimeProvider);
+      _showMessage(
+        'Relay sync complete. ${status.connectedPeers} peer(s), '
+        '${status.lastReceivedCount} received, ${status.lastRelayedCount} relayed.',
+      );
+    } catch (_) {
+      _showMessage('Relay sync failed.');
+    }
   }
 
   String _formatLocationText() {
@@ -212,7 +258,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _openSosComposerModal() async {
-    await showModalBottomSheet<void>(
+    final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
@@ -227,18 +273,39 @@ class _HomePageState extends ConsumerState<HomePage> {
         );
       },
     );
+
+    if (created == true && mounted) {
+      await _showTaskCompletionPopup(
+        title: 'SOS Created',
+        message: 'Saved locally and queued for relay.',
+        icon: Icons.check_rounded,
+      );
+    }
+  }
+
+  Future<void> _showTaskCompletionPopup({
+    required String title,
+    required String message,
+    required IconData icon,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return _TaskCompletionPopup(title: title, message: message, icon: icon);
+      },
+    );
   }
 
   Future<void> _saveSosMessage(String body, messaging.Category category) async {
     final now = DateTime.now();
     final position = _myPosition;
+    final localPeer = await ref.read(localPeerProvider.future);
+    final runtime = ref.read(relayRuntimeProvider);
     final message = messaging.SosMessage(
       id: 'sos-${now.microsecondsSinceEpoch}',
-      sender: messaging.Peer(
-        id: 'local-device',
-        name: 'This Device',
-        type: messaging.PeerType.civilian,
-        isConnected: true,
+      sender: localPeer.copyWith(
+        isConnected: runtime.isRunning || runtime.connectedPeers > 0,
         lastSeenAt: now,
         latitude: position?.latitude,
         longitude: position?.longitude,
@@ -252,6 +319,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
 
     await ref.read(saveSosMessageProvider)(message);
+    await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
   }
 
   @override
@@ -282,6 +350,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                                   offset: const Offset(0, -25),
                                   child: _selectedTab == 1
                                       ? _buildMessagesTabContent(messages)
+                                      : _selectedTab == 3
+                                      ? _buildPeersTabContent(peers)
                                       : _buildHomeTabContent(
                                           peers,
                                           messages,
@@ -414,19 +484,19 @@ class _HomePageState extends ConsumerState<HomePage> {
                   Text(
                     'MESSAGES',
                     style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                      color: Color(0xFF181818),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F1F1F),
+                      letterSpacing: 0.2,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  SizedBox(height: 3),
                   Text(
                     'All messages from your peers',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Color(0xFF696969),
                       fontWeight: FontWeight.w500,
+                      color: Color(0xFF717173),
                     ),
                   ),
                 ],
@@ -600,6 +670,128 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
+      ],
+    );
+  }
+
+  Widget _buildPeersTabContent(AsyncValue<List<messaging.Peer>> peers) {
+    final items = peers.valueOrNull ?? const <messaging.Peer>[];
+    final filters = const [
+      (label: 'All Peers', icon: Icons.groups_rounded),
+      (label: 'Connected', icon: Icons.link_rounded),
+      (label: 'Rescuers', icon: Icons.health_and_safety_outlined),
+      (label: 'Nearby', icon: Icons.location_on_outlined),
+    ];
+
+    final connectedCount = items.where((peer) => peer.isConnected).length;
+    final rescuerCount = items.where(_isResponderPeer).length;
+    final filteredPeers = items.where(_peerMatchesSelectedFilter).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'PEERS',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF1F1F1F),
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  SizedBox(height: 3),
+                  Text(
+                    'Nearby devices available for message relay',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF717173),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: _PeerSearchButton(
+                onTap: () => _showMessage('Peer search is not active yet.'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        _PeerStatsPanel(
+          connectedCount: connectedCount,
+          nearbyCount: items.length,
+          rescuerCount: rescuerCount,
+        ),
+        const SizedBox(height: 18),
+        _PeerFilterBar(
+          filters: filters,
+          selectedIndex: _selectedPeerFilter,
+          onSelected: (index) => setState(() => _selectedPeerFilter = index),
+        ),
+        const SizedBox(height: 12),
+        const _PeerScanningRow(),
+        const SizedBox(height: 12),
+        peers.when(
+          data: (_) {
+            if (filteredPeers.isEmpty) {
+              return _buildEmptyState(
+                icon: Icons.people_outline_rounded,
+                message: 'No peers match this filter yet.',
+              );
+            }
+
+            return Column(
+              children: filteredPeers
+                  .map(
+                    (peer) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: _PeerDirectoryCard(
+                        peer: peer,
+                        distanceText: _distanceTextForPeer(peer),
+                        signalLabel: _signalLabelForPeer(peer),
+                        signalColor: _signalColorForPeer(peer),
+                        avatarColor: _avatarColorForPeer(peer),
+                        typeLabel: _peerTypeLabel(peer),
+                        actionLabel: _peerActionLabel(peer),
+                        actionStyle: _peerActionStyle(peer),
+                        onActionTap: () => _showMessage(
+                          peer.isConnected
+                              ? '${peer.name} is already connected.'
+                              : 'Connection request queued for ${peer.name}.',
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            );
+          },
+          loading: () => const Padding(
+            padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+          error: (_, _) => _buildEmptyState(
+            icon: Icons.error_outline_rounded,
+            message: 'Unable to load local peers.',
+          ),
+        ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerRight,
+          child: _PeerScanButton(onTap: _syncRelayNow),
+        ),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -833,6 +1025,109 @@ class _HomePageState extends ConsumerState<HomePage> {
     return '${(distanceMeters / 1000).toStringAsFixed(1)} km away';
   }
 
+  bool _peerMatchesSelectedFilter(messaging.Peer peer) {
+    return switch (_selectedPeerFilter) {
+      1 => peer.isConnected,
+      2 => _isResponderPeer(peer),
+      3 => peer.latitude != null && peer.longitude != null,
+      _ => true,
+    };
+  }
+
+  bool _isResponderPeer(messaging.Peer peer) {
+    return peer.type == messaging.PeerType.responder ||
+        peer.type == messaging.PeerType.authority;
+  }
+
+  String _distanceTextForPeer(messaging.Peer peer) {
+    final myPosition = _myPosition;
+    final latitude = peer.latitude;
+    final longitude = peer.longitude;
+    if (myPosition == null || latitude == null || longitude == null) {
+      return 'In range';
+    }
+
+    final distanceMeters = const Distance().as(
+      LengthUnit.Meter,
+      myPosition,
+      LatLng(latitude, longitude),
+    );
+
+    if (distanceMeters < 1000) {
+      return '${distanceMeters.round()} m';
+    }
+
+    return '${(distanceMeters / 1000).toStringAsFixed(1)} km';
+  }
+
+  String _signalLabelForPeer(messaging.Peer peer) {
+    final signalStrength = peer.signalStrength;
+    if (signalStrength == null || signalStrength >= 65) {
+      return 'Strong Signal';
+    }
+    if (signalStrength >= 35) {
+      return 'Medium Signal';
+    }
+    return 'Weak Signal';
+  }
+
+  Color _signalColorForPeer(messaging.Peer peer) {
+    final signalStrength = peer.signalStrength;
+    if (signalStrength == null || signalStrength >= 65) {
+      return const Color(0xFF15A832);
+    }
+    if (signalStrength >= 35) {
+      return const Color(0xFFF28B16);
+    }
+    return const Color(0xFF7D7D7D);
+  }
+
+  Color _avatarColorForPeer(messaging.Peer peer) {
+    if (_isResponderPeer(peer)) {
+      return peer.isConnected
+          ? const Color(0xFFE83C3D)
+          : const Color(0xFFFFC15A);
+    }
+    if (peer.type == messaging.PeerType.relay) {
+      return const Color(0xFF5B8DEF);
+    }
+    if (peer.type == messaging.PeerType.unknown) {
+      return const Color(0xFFD8D8D8);
+    }
+    return const Color(0xFF68D179);
+  }
+
+  String _peerTypeLabel(messaging.Peer peer) {
+    return switch (peer.type) {
+      messaging.PeerType.responder || messaging.PeerType.authority => 'Rescuer',
+      messaging.PeerType.relay => 'Relay',
+      messaging.PeerType.civilian => 'User',
+      messaging.PeerType.unknown => 'User',
+    };
+  }
+
+  String _peerActionLabel(messaging.Peer peer) {
+    if (peer.isConnected) {
+      return 'CONNECTED';
+    }
+    final signalStrength = peer.signalStrength ?? 0;
+    if (signalStrength >= 45 && !_isResponderPeer(peer)) {
+      return 'RELAY READY';
+    }
+    return 'CONNECT';
+  }
+
+  _PeerActionStyle _peerActionStyle(messaging.Peer peer) {
+    if (peer.isConnected) {
+      return _PeerActionStyle.filledRed;
+    }
+    final signalStrength = peer.signalStrength ?? 0;
+    if (signalStrength >= 45 && !_isResponderPeer(peer)) {
+      return _PeerActionStyle.outlineOrange;
+    }
+    return _PeerActionStyle.outlineRed;
+  }
+
   String _relativeTime(DateTime dateTime) {
     final elapsed = DateTime.now().difference(dateTime);
     if (elapsed.inMinutes < 1) {
@@ -1041,116 +1336,153 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool showMyLocation = true,
     Widget? bottomOverlay,
   }) {
-    final cachedTileProvider = tileCacheStore.valueOrNull == null
-        ? null
-        : CachedTileProvider(
-            store: tileCacheStore.valueOrNull!,
-            cachePolicy: CachePolicy.forceCache,
-            maxStale: const Duration(days: 30),
-            hitCacheOnErrorCodes: const [
-              400,
-              401,
-              403,
-              404,
-              408,
-              429,
-              500,
-              502,
-              503,
-              504,
-            ],
-            hitCacheOnNetworkFailure: true,
-          );
+    final isViewingPanaboArea = _isInsidePanabo(_currentCenter);
 
-    return Stack(
-      children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _currentCenter,
-            initialZoom: _currentZoom,
-            minZoom: _minZoom,
-            maxZoom: _maxZoom,
-            onPositionChanged: (camera, hasGesture) {
-              _currentCenter = camera.center;
-              _currentZoom = camera.zoom;
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.example.shadownetwork',
-              tileProvider: cachedTileProvider,
-              maxNativeZoom: 19,
-              panBuffer: 1,
-              errorTileCallback: (_, _, _) {
-                if (mounted && !_tileLoadFailed) {
-                  setState(() => _tileLoadFailed = true);
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth <= 0 || constraints.maxHeight <= 0) {
+                  return const SizedBox.shrink();
                 }
+
+                final mapSize = Size(
+                  constraints.maxWidth,
+                  constraints.maxHeight,
+                );
+                final mapStyle = _offlineMapStyle;
+                final markers = [
+                  ..._triageMarkersFromMessages(
+                    messages,
+                    markerSize: markerSize,
+                    visibleCategories: visibleCategories,
+                  ),
+                  if (showPeers)
+                    ..._peerMarkersFromPeers(peers, markerSize: markerSize),
+                  if (showMyLocation)
+                    _MapOverlayMarker(
+                      id: 'my-location',
+                      point: _myPosition ?? _currentCenter,
+                      width: locationMarkerSize,
+                      height: locationMarkerSize,
+                      child: Icon(
+                        Icons.location_pin,
+                        size: locationMarkerSize,
+                        color: const Color(0xFFE83C3D),
+                      ),
+                    ),
+                ];
+                return Stack(
+                  children: [
+                    if (mapStyle == null)
+                      const Positioned.fill(child: _OfflineMapPreparingView())
+                    else
+                      Positioned.fill(
+                        child: ml.MapLibreMap(
+                          key: ValueKey<String>(
+                            '${showLegend ? 'maplibre-full' : 'maplibre-card'}:$mapStyle',
+                          ),
+                          initialCameraPosition: ml.CameraPosition(
+                            target: _toMapLibreLatLng(_currentCenter),
+                            zoom: _currentZoom,
+                            bearing: _currentBearing,
+                          ),
+                          styleString: mapStyle,
+                          minMaxZoomPreference: const ml.MinMaxZoomPreference(
+                            _minZoom,
+                            _maxZoom,
+                          ),
+                          logoEnabled: false,
+                          compassEnabled: false,
+                          foregroundLoadColor: const Color(0xFFEFF2F0),
+                          rotateGesturesEnabled: false,
+                          tiltGesturesEnabled: false,
+                          myLocationEnabled: false,
+                          trackCameraPosition: true,
+                          attributionButtonPosition:
+                              ml.AttributionButtonPosition.bottomLeft,
+                          onMapCreated: (controller) {
+                            _mapController = controller;
+                            if (mounted) {
+                              setState(() {});
+                            }
+                          },
+                          onCameraMove: (cameraPosition) {
+                            if (!mounted) {
+                              return;
+                            }
+                            setState(() {
+                              _currentCenter = LatLng(
+                                cameraPosition.target.latitude,
+                                cameraPosition.target.longitude,
+                              );
+                              _currentZoom = cameraPosition.zoom;
+                              _currentBearing = cameraPosition.bearing;
+                            });
+                          },
+                        ),
+                      ),
+                    if (mapStyle != null)
+                      ...markers.map(
+                        (marker) => _buildProjectedMarker(marker, mapSize),
+                      ),
+                  ],
+                );
               },
             ),
-            MarkerLayer(
-              markers: [
-                ..._triageMarkersFromMessages(
-                  messages,
-                  markerSize: markerSize,
-                  visibleCategories: visibleCategories,
-                ),
-                if (showPeers)
-                  ..._peerMarkersFromPeers(peers, markerSize: markerSize),
-                if (showMyLocation)
-                  Marker(
-                    point: _myPosition ?? _currentCenter,
-                    width: locationMarkerSize,
-                    height: locationMarkerSize,
-                    child: Icon(
-                      Icons.location_pin,
-                      size: locationMarkerSize,
-                      color: const Color(0xFFE83C3D),
-                    ),
-                  ),
+          ),
+          if (showLegend)
+            Positioned(left: 16, top: 10, child: _buildMapLegend()),
+          if (showStatusBadge)
+            Positioned(
+              left: 10,
+              top: 10,
+              child: _MapStatusBadge(
+                icon: isViewingPanaboArea
+                    ? Icons.map_outlined
+                    : _tileLoadFailed
+                    ? Icons.offline_bolt_outlined
+                    : Icons.layers_outlined,
+                label: _mapTileStatusLabel(tileCacheStore),
+                color: isViewingPanaboArea
+                    ? const Color(0xFF2E8B57)
+                    : _tileLoadFailed
+                    ? const Color(0xFFF39C12)
+                    : const Color(0xFF3F66C4),
+              ),
+            ),
+          Positioned(
+            right: 10,
+            top: 10,
+            child: Column(
+              children: [
+                _MapControlButton(icon: Icons.add, onTap: _zoomIn),
+                const SizedBox(height: 8),
+                _MapControlButton(icon: Icons.remove, onTap: _zoomOut),
               ],
             ),
-          ],
-        ),
-        if (showLegend) Positioned(left: 16, top: 10, child: _buildMapLegend()),
-        if (showStatusBadge)
+          ),
           Positioned(
-            left: 10,
-            top: 10,
-            child: _MapStatusBadge(
-              icon: _tileLoadFailed
-                  ? Icons.offline_bolt_outlined
-                  : Icons.layers_outlined,
-              label: _mapTileStatusLabel(tileCacheStore),
-              color: _tileLoadFailed
-                  ? const Color(0xFFF39C12)
-                  : const Color(0xFF3F66C4),
-            ),
+            right: 10,
+            bottom: bottomOverlay == null ? 10 : 92,
+            child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
           ),
-        Positioned(
-          right: 10,
-          top: 10,
-          child: Column(
-            children: [
-              _MapControlButton(icon: Icons.add, onTap: _zoomIn),
-              const SizedBox(height: 8),
-              _MapControlButton(icon: Icons.remove, onTap: _zoomOut),
-            ],
-          ),
-        ),
-        Positioned(
-          right: 10,
-          bottom: bottomOverlay == null ? 10 : 92,
-          child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
-        ),
-        if (bottomOverlay != null)
-          Positioned(left: 8, right: 8, bottom: 10, child: bottomOverlay),
-      ],
+          if (bottomOverlay != null)
+            Positioned(left: 8, right: 8, bottom: 10, child: bottomOverlay),
+        ],
+      ),
     );
   }
 
   String _mapTileStatusLabel(AsyncValue<CacheStore> tileCacheStore) {
+    if (_isInsidePanabo(_currentCenter)) {
+      return _offlineMapStyle == null
+          ? 'Preparing offline map'
+          : 'Panabo offline';
+    }
+
     if (_tileLoadFailed) {
       return 'Offline fallback';
     }
@@ -1162,7 +1494,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  List<Marker> _triageMarkersFromMessages(
+  List<_MapOverlayMarker> _triageMarkersFromMessages(
     AsyncValue<List<messaging.SosMessage>> messages, {
     required double markerSize,
     Set<messaging.Category>? visibleCategories,
@@ -1179,7 +1511,8 @@ class _HomePageState extends ConsumerState<HomePage> {
               message.longitude != null,
         )
         .map(
-          (message) => Marker(
+          (message) => _MapOverlayMarker(
+            id: 'sos-${message.id}',
             point: LatLng(message.latitude!, message.longitude!),
             width: markerSize,
             height: markerSize,
@@ -1198,7 +1531,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         .toList(growable: false);
   }
 
-  List<Marker> _peerMarkersFromPeers(
+  List<_MapOverlayMarker> _peerMarkersFromPeers(
     AsyncValue<List<messaging.Peer>> peers, {
     required double markerSize,
   }) {
@@ -1207,7 +1540,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     return items
         .where((peer) => peer.latitude != null && peer.longitude != null)
         .map(
-          (peer) => Marker(
+          (peer) => _MapOverlayMarker(
+            id: 'peer-${peer.id}',
             point: LatLng(peer.latitude!, peer.longitude!),
             width: markerSize,
             height: markerSize,
@@ -1218,6 +1552,67 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         )
         .toList(growable: false);
+  }
+
+  bool _isInsidePanabo(LatLng point) {
+    return point.latitude >= _panaboSouth &&
+        point.latitude <= _panaboNorth &&
+        point.longitude >= _panaboWest &&
+        point.longitude <= _panaboEast;
+  }
+
+  ml.LatLng _toMapLibreLatLng(LatLng point) {
+    return ml.LatLng(point.latitude, point.longitude);
+  }
+
+  Widget _buildProjectedMarker(_MapOverlayMarker marker, Size mapSize) {
+    final screenPoint = _projectToScreen(marker.point, mapSize);
+    if (screenPoint == null) {
+      return const SizedBox.shrink();
+    }
+
+    const margin = 96.0;
+    if (screenPoint.dx < -margin ||
+        screenPoint.dy < -margin ||
+        screenPoint.dx > mapSize.width + margin ||
+        screenPoint.dy > mapSize.height + margin) {
+      return const SizedBox.shrink();
+    }
+
+    return Positioned(
+      left: screenPoint.dx - marker.width / 2,
+      top: screenPoint.dy - marker.height / 2,
+      width: marker.width,
+      height: marker.height,
+      child: marker.child,
+    );
+  }
+
+  Offset? _projectToScreen(LatLng point, Size mapSize) {
+    if (!_isFiniteLatLng(point) || !_isFiniteLatLng(_currentCenter)) {
+      return null;
+    }
+
+    final markerWorld = _worldPixel(point, _currentZoom);
+    final centerWorld = _worldPixel(_currentCenter, _currentZoom);
+    final delta = markerWorld - centerWorld;
+    return Offset(mapSize.width / 2 + delta.dx, mapSize.height / 2 + delta.dy);
+  }
+
+  Offset _worldPixel(LatLng point, double zoom) {
+    final scale = 512.0 * math.pow(2.0, zoom);
+    final latitude = point.latitude.clamp(-85.05112878, 85.05112878);
+    final sinLatitude = math.sin(latitude * math.pi / 180.0);
+    final x = (point.longitude + 180.0) / 360.0 * scale;
+    final y =
+        (0.5 -
+            math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * math.pi)) *
+        scale;
+    return Offset(x, y);
+  }
+
+  bool _isFiniteLatLng(LatLng point) {
+    return point.latitude.isFinite && point.longitude.isFinite;
   }
 
   Widget _buildMapLegend() {
@@ -1599,6 +1994,71 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
+class _MapOverlayMarker {
+  const _MapOverlayMarker({
+    required this.id,
+    required this.point,
+    required this.width,
+    required this.height,
+    required this.child,
+  });
+
+  final String id;
+  final LatLng point;
+  final double width;
+  final double height;
+  final Widget child;
+}
+
+class _OfflineMapPreparingView extends StatelessWidget {
+  const _OfflineMapPreparingView();
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(color: Color(0xFFEFF2F0)),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: Color(0xFF2E8B57),
+                ),
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Preparing offline map',
+                style: TextStyle(
+                  color: Color(0xFF2E8B57),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageFeedItem {
   final String title;
   final String description;
@@ -1628,6 +2088,289 @@ class _NavItem {
   final String label;
 
   const _NavItem({required this.icon, required this.label});
+}
+
+enum _PeerActionStyle { filledRed, outlineRed, outlineOrange }
+
+class _PeerSearchButton extends StatelessWidget {
+  const _PeerSearchButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      elevation: 4,
+      shadowColor: Colors.black.withValues(alpha: 0.12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: const SizedBox(
+          width: 46,
+          height: 46,
+          child: Icon(Icons.search_rounded, size: 28, color: Colors.black),
+        ),
+      ),
+    );
+  }
+}
+
+class _PeerStatsPanel extends StatelessWidget {
+  const _PeerStatsPanel({
+    required this.connectedCount,
+    required this.nearbyCount,
+    required this.rescuerCount,
+  });
+
+  final int connectedCount;
+  final int nearbyCount;
+  final int rescuerCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _PeerMetric(
+              icon: Icons.groups_rounded,
+              count: connectedCount,
+              label: 'Connected',
+              subtitle: 'Active peers',
+              color: const Color(0xFFE83C3D),
+            ),
+          ),
+          const _VerticalDividerLine(),
+          Expanded(
+            child: _PeerMetric(
+              icon: Icons.wifi_rounded,
+              count: nearbyCount,
+              label: 'Nearby',
+              subtitle: 'In range',
+              color: Color(0xFF3478F6),
+            ),
+          ),
+          const _VerticalDividerLine(),
+          Expanded(
+            child: _PeerMetric(
+              icon: Icons.health_and_safety_rounded,
+              count: rescuerCount,
+              label: 'Rescuers',
+              subtitle: 'Available',
+              color: Color(0xFF15A832),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PeerMetric extends StatelessWidget {
+  const _PeerMetric({
+    required this.icon,
+    required this.count,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+  });
+
+  final IconData icon;
+  final int count;
+  final String label;
+  final String subtitle;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          child: Icon(icon, color: Colors.white, size: 28),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '$count',
+          style: TextStyle(
+            fontSize: 25,
+            fontWeight: FontWeight.w900,
+            color: color,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+            color: Colors.black,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF696969),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _VerticalDividerLine extends StatelessWidget {
+  const _VerticalDividerLine();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(width: 1, height: 88, color: const Color(0xFFE4E4E4));
+  }
+}
+
+class _PeerFilterBar extends StatelessWidget {
+  const _PeerFilterBar({
+    required this.filters,
+    required this.selectedIndex,
+    required this.onSelected,
+  });
+
+  final List<({String label, IconData icon})> filters;
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.94),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE8E8E8)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: List.generate(filters.length, (index) {
+          final filter = filters[index];
+          final selected = selectedIndex == index;
+          return Expanded(
+            child: Material(
+              color: selected ? const Color(0xFFE83C3D) : Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: InkWell(
+                onTap: () => onSelected(index),
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        filter.icon,
+                        size: 18,
+                        color: selected
+                            ? Colors.white
+                            : const Color(0xFF4A4A4A),
+                      ),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            filter.label,
+                            maxLines: 1,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: selected
+                                  ? Colors.white
+                                  : const Color(0xFF404040),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class _PeerScanningRow extends StatelessWidget {
+  const _PeerScanningRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.82),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: const [
+          Icon(Icons.radar_rounded, color: Color(0xFF555555), size: 22),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Scanning nearby peers...',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF6B6B6B),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: Color(0xFFE83C3D),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _MapControlButton extends StatelessWidget {
@@ -2290,14 +3033,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 _categories[_selectedCategory].category,
                               );
                               if (mounted) {
-                                navigator.pop();
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      'SOS queued for local delivery.',
-                                    ),
-                                  ),
-                                );
+                                navigator.pop(true);
                               }
                             } catch (_) {
                               if (mounted) {
@@ -2329,6 +3065,98 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TaskCompletionPopup extends StatelessWidget {
+  const _TaskCompletionPopup({
+    required this.title,
+    required this.message,
+    required this.icon,
+  });
+
+  final String title;
+  final String message;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 34),
+      backgroundColor: Colors.transparent,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 58,
+              height: 58,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE83C3D),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: Colors.white, size: 34),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: Color(0xFF1F1F1F),
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Color(0xFF717173),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: const Color(0xFFE83C3D),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                child: const Text(
+                  'DONE',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
@@ -2394,6 +3222,301 @@ class _ActionCard extends StatelessWidget {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PeerDirectoryCard extends StatelessWidget {
+  const _PeerDirectoryCard({
+    required this.peer,
+    required this.distanceText,
+    required this.signalLabel,
+    required this.signalColor,
+    required this.avatarColor,
+    required this.typeLabel,
+    required this.actionLabel,
+    required this.actionStyle,
+    required this.onActionTap,
+  });
+
+  final messaging.Peer peer;
+  final String distanceText;
+  final String signalLabel;
+  final Color signalColor;
+  final Color avatarColor;
+  final String typeLabel;
+  final String actionLabel;
+  final _PeerActionStyle actionStyle;
+  final VoidCallback onActionTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.09),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: avatarColor.withValues(alpha: 0.24),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              peer.type == messaging.PeerType.relay
+                  ? Icons.router_rounded
+                  : Icons.phone_android_rounded,
+              color: avatarColor,
+              size: 30,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  peer.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFF171717),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'ID: ${peer.id}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF6D6D6D),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 9,
+                  runSpacing: 5,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _SignalBars(
+                          strength: peer.signalStrength,
+                          color: signalColor,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          signalLabel,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF676767),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      width: 1,
+                      height: 14,
+                      color: const Color(0xFFD2D2D2),
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          typeLabel == 'Rescuer'
+                              ? Icons.health_and_safety_outlined
+                              : Icons.person_outline_rounded,
+                          color: typeLabel == 'Rescuer'
+                              ? const Color(0xFFE83C3D)
+                              : const Color(0xFF5F5F5F),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          typeLabel,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF676767),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _PeerActionPill(
+                label: actionLabel,
+                style: actionStyle,
+                onTap: onActionTap,
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.location_on,
+                    color: Color(0xFFE83C3D),
+                    size: 17,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    distanceText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF626262),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PeerActionPill extends StatelessWidget {
+  const _PeerActionPill({
+    required this.label,
+    required this.style,
+    required this.onTap,
+  });
+
+  final String label;
+  final _PeerActionStyle style;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = switch (style) {
+      _PeerActionStyle.filledRed => const Color(0xFFE83C3D),
+      _PeerActionStyle.outlineRed => Colors.white,
+      _PeerActionStyle.outlineOrange => Colors.white,
+    };
+    final foregroundColor = switch (style) {
+      _PeerActionStyle.filledRed => Colors.white,
+      _PeerActionStyle.outlineRed => const Color(0xFFE83C3D),
+      _PeerActionStyle.outlineOrange => const Color(0xFFF07808),
+    };
+    final borderColor = switch (style) {
+      _PeerActionStyle.filledRed => Colors.transparent,
+      _PeerActionStyle.outlineRed => const Color(0xFFE83C3D),
+      _PeerActionStyle.outlineOrange => const Color(0xFFF07808),
+    };
+
+    return Material(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 100),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.4),
+          ),
+          alignment: Alignment.center,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                color: foregroundColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SignalBars extends StatelessWidget {
+  const _SignalBars({required this.strength, required this.color});
+
+  final int? strength;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final activeBars = strength == null
+        ? 4
+        : ((strength! / 25).ceil()).clamp(1, 4);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(4, (index) {
+        final active = index < activeBars;
+        return Container(
+          width: 3,
+          height: 5 + (index * 3),
+          margin: const EdgeInsets.only(right: 2),
+          decoration: BoxDecoration(
+            color: active ? color : const Color(0xFFD0D0D0),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+class _PeerScanButton extends StatelessWidget {
+  const _PeerScanButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFE83C3D),
+      shape: const CircleBorder(),
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.28),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+          ),
+          child: const Icon(Icons.radar_rounded, color: Colors.white, size: 34),
         ),
       ),
     );
@@ -2604,37 +3727,6 @@ class _MessageIcon extends StatelessWidget {
       child: CustomPaint(painter: _MessageIconPainter()),
     );
   }
-}
-
-class _LocationIconPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final cx = size.width / 2;
-    final cy = size.height / 2;
-    final paint = Paint()
-      ..color = const Color(0xFFE83C3D)
-      ..strokeWidth = 2.2
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawCircle(Offset(cx, cy), size.width * 0.35, paint);
-    canvas.drawCircle(Offset(cx, cy), size.width * 0.12, paint);
-    canvas.drawLine(Offset(cx, 0), Offset(cx, cy - size.width * 0.38), paint);
-    canvas.drawLine(
-      Offset(cx, cy + size.width * 0.38),
-      Offset(cx, size.height),
-      paint,
-    );
-    canvas.drawLine(Offset(0, cy), Offset(cx - size.width * 0.38, cy), paint);
-    canvas.drawLine(
-      Offset(cx + size.width * 0.38, cy),
-      Offset(size.width, cy),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _MessageIconPainter extends CustomPainter {

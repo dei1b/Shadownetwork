@@ -41,6 +41,9 @@ void main() {
         createdAt: now,
         latitude: 7.3026,
         longitude: 125.6888,
+        gpsAccuracyMeters: 8.2,
+        hopCount: 2,
+        ttl: const Duration(hours: 4),
       ),
     );
 
@@ -53,5 +56,9 @@ void main() {
     expect(messages.single.sender.id, 'peer-1');
     expect(messages.single.category, Category.medical);
     expect(messages.single.status, MessageStatus.queued);
+    expect(messages.single.messageHash, isNotNull);
+    expect(messages.single.gpsAccuracyMeters, 8.2);
+    expect(messages.single.hopCount, 2);
+    expect(messages.single.ttl, const Duration(hours: 4));
   });
 }

@@ -1,4 +1,5 @@
 import '../../domain/entities/peer.dart';
+import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/scf_peer_status.dart';
 import '../../domain/services/scf_transport.dart';
 import 'scf_service.dart';
@@ -32,17 +33,22 @@ class ScfRelayService {
   }
 
   Future<int> ingestIncoming({DateTime? now}) async {
+    final envelopes = await ingestIncomingEnvelopes(now: now);
+    return envelopes.length;
+  }
+
+  Future<List<ScfEnvelope>> ingestIncomingEnvelopes({DateTime? now}) async {
     final envelopes = await _transport.receiveEnvelopes();
-    var storedCount = 0;
+    final storedEnvelopes = <ScfEnvelope>[];
 
     for (final envelope in envelopes) {
       final stored = await _scfService.storeEnvelope(envelope, now: now);
       if (stored) {
-        storedCount++;
+        storedEnvelopes.add(envelope);
       }
     }
 
-    return storedCount;
+    return storedEnvelopes;
   }
 
   Future<ScfRelayResult> relayToPeer(

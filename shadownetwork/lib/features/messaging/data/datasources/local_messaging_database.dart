@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 2;
+  static const databaseVersion = 3;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -22,6 +22,7 @@ class LocalMessagingDatabase {
   static final Map<int, DatabaseMigration> _migrations = {
     1: _createInitialSchema,
     2: _createScfSchema,
+    3: _addSosRoutingMetadata,
   };
 
   static Future<Database> open({
@@ -194,6 +195,31 @@ class LocalMessagingDatabase {
     await database.execute(
       'CREATE INDEX idx_scf_peer_status_peer '
       'ON $scfPeerStatusesTable (peer_id, status)',
+    );
+  }
+
+  static Future<void> _addSosRoutingMetadata(Database database) async {
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable '
+      'ADD COLUMN message_hash TEXT',
+    );
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable '
+      'ADD COLUMN gps_accuracy_meters REAL',
+    );
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable '
+      'ADD COLUMN hop_count INTEGER NOT NULL DEFAULT 0 '
+      'CHECK (hop_count >= 0)',
+    );
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable '
+      'ADD COLUMN ttl_seconds INTEGER NOT NULL DEFAULT 86400 '
+      'CHECK (ttl_seconds > 0)',
+    );
+    await database.execute(
+      'CREATE INDEX idx_sos_messages_message_hash '
+      'ON $sosMessagesTable (message_hash)',
     );
   }
 

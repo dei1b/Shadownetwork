@@ -1,5 +1,6 @@
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/scf_envelope.dart';
+import '../../domain/entities/transport_status.dart';
 import '../../domain/services/scf_transport.dart';
 
 class MockScfTransportNetwork {
@@ -41,6 +42,15 @@ class MockScfTransportNetwork {
     node.inbox.clear();
     return envelopes;
   }
+
+  Peer localPeer(String peerId) {
+    final node = _nodes[peerId];
+    if (node == null) {
+      throw StateError('Mock peer $peerId is not registered.');
+    }
+
+    return node.peer;
+  }
 }
 
 class MockScfTransportEndpoint implements ScfTransport {
@@ -53,6 +63,27 @@ class MockScfTransportEndpoint implements ScfTransport {
 
   @override
   final String localPeerId;
+
+  @override
+  Future<Peer> getLocalPeer() async {
+    return _network.localPeer(localPeerId);
+  }
+
+  @override
+  Future<TransportStatus> getStatus() async {
+    final localPeer = _network.localPeer(localPeerId);
+    final discoveredPeers = _network.discoverPeers(localPeerId);
+    final connectedPeerCount =
+        discoveredPeers.where((peer) => peer.isConnected).length;
+
+    return TransportStatus(
+      localPeer: localPeer,
+      permissionsGranted: true,
+      isRunning: true,
+      discoveredPeerCount: discoveredPeers.length,
+      connectedPeerCount: connectedPeerCount,
+    );
+  }
 
   @override
   Future<List<Peer>> discoverPeers() async {

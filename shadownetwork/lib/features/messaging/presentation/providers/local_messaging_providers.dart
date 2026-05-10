@@ -44,56 +44,22 @@ final scfServiceProvider = FutureProvider<ScfService>((ref) async {
   return ScfService(database: database);
 });
 
-final mockScfTransportNetworkProvider = Provider<MockScfTransportNetwork>((
-  ref,
-) {
-  final network = MockScfTransportNetwork();
-  network.registerPeer(
-    const Peer(
-      id: 'local-device',
-      name: 'This Device',
-      type: PeerType.civilian,
-      isConnected: true,
-    ),
-  );
-  network.registerPeer(
-    const Peer(
-      id: 'demo-peer-alpha',
-      name: 'Demo Peer Alpha',
-      type: PeerType.relay,
-      isConnected: true,
-      signalStrength: 82,
-    ),
-  );
-  network.registerPeer(
-    const Peer(
-      id: 'demo-peer-bravo',
-      name: 'Demo Peer Bravo',
-      type: PeerType.responder,
-      isConnected: true,
-      signalStrength: 74,
-    ),
-  );
-  return network;
+final mockScfTransportNetworkProvider = Provider<MockScfTransportNetwork>(
+  (ref) => MockScfTransportNetwork(),
+);
+
+final localPeerProvider = FutureProvider<Peer>((ref) async {
+  final transport = ref.watch(scfTransportProvider);
+  return transport.getLocalPeer();
 });
 
 final scfTransportProvider = Provider<ScfTransport>((ref) {
   if (Platform.isAndroid) {
-    return AndroidScfTransport(
-      localPeerId: 'local-device',
-      localPeerName: 'This Device',
-    );
+    return AndroidScfTransport();
   }
 
   final network = ref.watch(mockScfTransportNetworkProvider);
-  return network.registerPeer(
-    const Peer(
-      id: 'local-device',
-      name: 'This Device',
-      type: PeerType.civilian,
-      isConnected: true,
-    ),
-  );
+  return network.registerPeer(_defaultDesktopLocalPeer());
 });
 
 final scfRelayServiceProvider = FutureProvider<ScfRelayService>((ref) async {
@@ -131,3 +97,19 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
     ref.invalidate(nearbyPeersProvider);
   };
 });
+
+Peer _defaultDesktopLocalPeer() {
+  final hostName = Platform.localHostname.trim();
+  final displayName = hostName.isEmpty ? 'Desktop Node' : hostName;
+  final slug = displayName
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+
+  return Peer(
+    id: 'desktop-${slug.isEmpty ? 'node' : slug}',
+    name: displayName,
+    type: PeerType.civilian,
+    isConnected: true,
+  );
+}

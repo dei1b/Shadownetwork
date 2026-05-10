@@ -22,14 +22,16 @@ class ScfService {
     SosMessage message, {
     DateTime? receivedAt,
     Duration? ttl,
-    int hopCount = 0,
+    int? hopCount,
   }) {
-    final payloadJson = SosMessagePayload.canonicalJson(message);
+    final payloadJson = SosMessagePayload.canonicalJson(
+      message.copyWith(hopCount: hopCount ?? message.hopCount),
+    );
     return storePayload(
       payloadJson: payloadJson,
       receivedAt: receivedAt,
-      ttl: ttl,
-      hopCount: hopCount,
+      ttl: ttl ?? message.ttl,
+      hopCount: hopCount ?? message.hopCount,
     );
   }
 
@@ -137,7 +139,15 @@ class ScfService {
       }
 
       return envelopes
-          .map((envelope) => envelope.copyWith(hopCount: envelope.hopCount + 1))
+          .map(
+            (envelope) => envelope.copyWith(
+              hopCount: envelope.hopCount + 1,
+              payloadJson: SosMessagePayload.payloadJsonForRelay(
+                envelope.payloadJson,
+                hopCount: envelope.hopCount + 1,
+              ),
+            ),
+          )
           .toList(growable: false);
     });
   }

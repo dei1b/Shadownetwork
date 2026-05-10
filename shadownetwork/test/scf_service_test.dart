@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/models/sos_message_payload.dart';
@@ -85,11 +87,16 @@ void main() {
       messageHash: SosMessagePayload.messageHash(message),
       peerId: 'peer-2',
     );
+    final relayedMessage = SosMessagePayload.fromPayload(
+      jsonDecode(outbound.single.payloadJson) as Map<String, Object?>,
+    );
 
     expect(outbound, hasLength(1));
     expect(outbound.single.hopCount, 3);
     expect(status?.status, ScfPeerStatus.offered);
     expect(status?.attemptCount, 1);
+    expect(relayedMessage.hopCount, 3);
+    expect(relayedMessage.messageHash, SosMessagePayload.messageHash(message));
   });
 
   test('updates per-peer status and skips delivered peers', () async {
@@ -169,5 +176,7 @@ SosMessage _message() {
     createdAt: DateTime.utc(2026, 5, 2, 5, 30),
     latitude: 7.3026,
     longitude: 125.6888,
+    gpsAccuracyMeters: 6.5,
+    ttl: const Duration(hours: 6),
   );
 }
