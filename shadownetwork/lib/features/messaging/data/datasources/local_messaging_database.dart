@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 3;
+  static const databaseVersion = 4;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -18,11 +18,14 @@ class LocalMessagingDatabase {
   static const sosMessagesTable = 'sos_messages';
   static const scfMessagesTable = 'scf_messages';
   static const scfPeerStatusesTable = 'scf_peer_statuses';
+  static const conversationsTable = 'conversations';
+  static const chatMessagesTable = 'chat_messages';
 
   static final Map<int, DatabaseMigration> _migrations = {
     1: _createInitialSchema,
     2: _createScfSchema,
     3: _addSosRoutingMetadata,
+    4: _createChatSchema,
   };
 
   static Future<Database> open({
@@ -220,6 +223,55 @@ class LocalMessagingDatabase {
     await database.execute(
       'CREATE INDEX idx_sos_messages_message_hash '
       'ON $sosMessagesTable (message_hash)',
+    );
+  }
+
+  static Future<void> _createChatSchema(Database database) async {
+    await database.execute(
+      "ALTER TABLE $scfMessagesTable ADD COLUMN payload_type TEXT NOT NULL DEFAULT 'sos_message'",
+    );
+    await database.execute('''
+      CREATE TABLE $conversationsTable (
+        id TEXT PRIMARY KEY,
+        local_peer_id TEXT NOT NULL,
+        remote_peer_id TEXT NOT NULL,
+        related_sos_message_hash TEXT,
+        last_message_at TEXT,
+        unread_count INTEGER NOT NULL DEFAULT 0 CHECK (unread_count >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (local_peer_id, remote_peer_id),
+        FOREIGN KEY (local_peer_id) REFERENCES $peersTable (id) ON UPDATE CASCADE,
+        FOREIGN KEY (remote_peer_id) REFERENCES $peersTable (id) ON UPDATE CASCADE
+      )
+    ''');
+    await database.execute('''
+      CREATE TABLE $chatMessagesTable (
+        id TEXT PRIMARY KEY,
+        message_hash TEXT NOT NULL UNIQUE,
+        conversation_id TEXT NOT NULL,
+        sender_peer_id TEXT NOT NULL,
+        recipient_peer_id TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL,
+        related_sos_message_hash TEXT,
+        hop_count INTEGER NOT NULL DEFAULT 0 CHECK (hop_count >= 0),
+        ttl_seconds INTEGER NOT NULL DEFAULT 86400 CHECK (ttl_seconds > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (conversation_id) REFERENCES $conversationsTable (id) ON UPDATE CASCADE ON DELETE CASCADE,
+        FOREIGN KEY (sender_peer_id) REFERENCES $peersTable (id) ON UPDATE CASCADE,
+        FOREIGN KEY (recipient_peer_id) REFERENCES $peersTable (id) ON UPDATE CASCADE
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_conversations_timeline ON $conversationsTable (local_peer_id, last_message_at DESC)',
+    );
+    await database.execute(
+      'CREATE INDEX idx_chat_messages_timeline ON $chatMessagesTable (conversation_id, created_at ASC)',
+    );
+    await database.execute(
+      'CREATE INDEX idx_chat_messages_hash ON $chatMessagesTable (message_hash)',
     );
   }
 

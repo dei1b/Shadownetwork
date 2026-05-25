@@ -4,11 +4,15 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/sos_message_payload.dart';
+import '../../data/models/chat_message_payload.dart';
+import '../../data/models/relay_payload_codec.dart';
+import '../../data/services/scf_service.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/repositories/peer_repository.dart';
+import '../../domain/repositories/chat_repository.dart';
 import '../../domain/repositories/sos_message_repository.dart';
 import 'local_messaging_providers.dart';
 
@@ -68,7 +72,9 @@ class RelayRuntimeState {
       discoveredPeers: discoveredPeers ?? this.discoveredPeers,
       connectedPeers: connectedPeers ?? this.connectedPeers,
       lastUpdated: lastUpdated ?? this.lastUpdated,
-      localPeer: identical(localPeer, _sentinel) ? this.localPeer : localPeer as Peer?,
+      localPeer: identical(localPeer, _sentinel)
+          ? this.localPeer
+          : localPeer as Peer?,
       lastError: identical(lastError, _sentinel)
           ? this.lastError
           : lastError as String?,
@@ -137,15 +143,25 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       final transport = ref.read(scfTransportProvider);
       final relayService = await ref.read(scfRelayServiceProvider.future);
       final peerRepository = await ref.read(peerRepositoryProvider.future);
-      final messageRepository = await ref.read(sosMessageRepositoryProvider.future);
+      final messageRepository = await ref.read(
+        sosMessageRepositoryProvider.future,
+      );
+      final chatRepository = await ref.read(chatRepositoryProvider.future);
+      final scfService = await ref.read(scfServiceProvider.future);
+      final localPeer = await transport.getLocalPeer();
 
       final discoveredPeers = await relayService.discoverPeers();
       await _persistPeerSnapshot(peerRepository, discoveredPeers, now);
 
-      final inboundEnvelopes = await relayService.ingestIncomingEnvelopes(now: now);
+      final inboundEnvelopes = await relayService.ingestIncomingEnvelopes(
+        now: now,
+      );
       final receivedCount = await _persistIncomingMessages(
         messageRepository: messageRepository,
+        chatRepository: chatRepository,
+        scfService: scfService,
         peerRepository: peerRepository,
+        localPeer: localPeer,
         envelopes: inboundEnvelopes,
       );
 
@@ -153,6 +169,13 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       for (final peer in discoveredPeers) {
         final result = await relayService.relayToPeer(peer, now: now);
         relayedCount += result.sentCount;
+        for (final hash in result.sentMessageHashes) {
+          await chatRepository.updateOutgoingMessageStatus(
+            messageHash: hash,
+            localPeerId: localPeer.id,
+            status: MessageStatus.relayed,
+          );
+        }
       }
 
       final transportStatus = await transport.getStatus();
@@ -202,16 +225,40 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
 
   Future<int> _persistIncomingMessages({
     required SosMessageRepository messageRepository,
+    required ChatRepository chatRepository,
+    required ScfService scfService,
     required PeerRepository peerRepository,
+    required Peer localPeer,
     required List<ScfEnvelope> envelopes,
   }) async {
     var storedCount = 0;
     for (final envelope in envelopes) {
       try {
-        final payload = jsonDecode(envelope.payloadJson) as Map<String, Object?>;
-        final decoded = SosMessagePayload.fromPayload(payload).copyWith(
-          status: MessageStatus.received,
-        );
+        final payload =
+            jsonDecode(envelope.payloadJson) as Map<String, Object?>;
+        if (RelayPayloadCodec.payloadType(envelope.payloadJson) ==
+            ChatMessagePayload.payloadType) {
+          final chat = ChatMessagePayload.fromPayload(payload);
+          if (chat.recipient.id != localPeer.id) {
+            continue;
+          }
+          final conversation = await chatRepository.openConversation(
+            localPeer: localPeer,
+            remotePeer: chat.sender,
+            relatedSosMessageHash: chat.relatedSosMessageHash,
+          );
+          await chatRepository.saveMessage(
+            chat.copyWith(conversationId: conversation.id),
+            incrementUnread: true,
+          );
+          await scfService.consumeDeliveredPayload(envelope.messageHash);
+          ref.invalidate(chatMessagesProvider(conversation.id));
+          storedCount++;
+          continue;
+        }
+        final decoded = SosMessagePayload.fromPayload(
+          payload,
+        ).copyWith(status: MessageStatus.received);
         await peerRepository.upsertPeer(
           decoded.sender.copyWith(
             isConnected: false,
@@ -233,6 +280,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   void _invalidateViews() {
     ref.invalidate(nearbyPeersProvider);
     ref.invalidate(sosMessagesProvider);
+    ref.invalidate(conversationsProvider);
   }
 
   void _dispose() {

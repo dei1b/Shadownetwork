@@ -60,5 +60,10 @@ void main() {
     expect(messages.single.gpsAccuracyMeters, 8.2);
     expect(messages.single.hopCount, 2);
     expect(messages.single.ttl, const Duration(hours: 4));
+
+    final filteredPeers = await peerRepository.getNearbyPeers(
+      excludingPeerId: peer.id,
+    );
+    expect(filteredPeers, isEmpty);
   });
 }

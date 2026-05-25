@@ -59,13 +59,32 @@ void main() {
     final sosColumns = await database.rawQuery(
       'PRAGMA table_info(${LocalMessagingDatabase.sosMessagesTable})',
     );
-    final columnNames = sosColumns
-        .map((row) => row['name'])
-        .toSet();
+    final columnNames = sosColumns.map((row) => row['name']).toSet();
 
     expect(columnNames, contains('message_hash'));
     expect(columnNames, contains('gps_accuracy_meters'));
     expect(columnNames, contains('hop_count'));
     expect(columnNames, contains('ttl_seconds'));
+
+    final chatTables = await database.query(
+      'sqlite_master',
+      columns: ['name'],
+      where: 'type = ? AND name IN (?, ?)',
+      whereArgs: [
+        'table',
+        LocalMessagingDatabase.conversationsTable,
+        LocalMessagingDatabase.chatMessagesTable,
+      ],
+      orderBy: 'name ASC',
+    );
+    expect(chatTables.map((row) => row['name']), [
+      LocalMessagingDatabase.chatMessagesTable,
+      LocalMessagingDatabase.conversationsTable,
+    ]);
+
+    final relayColumns = await database.rawQuery(
+      'PRAGMA table_info(${LocalMessagingDatabase.scfMessagesTable})',
+    );
+    expect(relayColumns.map((row) => row['name']), contains('payload_type'));
   });
 }

@@ -10,6 +10,7 @@ class ScfEnvelopeModel {
       hopCount: map['hop_count']! as int,
       receivedAt: DateTime.parse(map['received_at']! as String),
       expiresAt: DateTime.parse(map['expires_at']! as String),
+      payloadType: (map['payload_type'] as String?) ?? 'sos_message',
     );
   }
 
@@ -20,6 +21,7 @@ class ScfEnvelopeModel {
       'hop_count': envelope.hopCount,
       'received_at': envelope.receivedAt.toUtc().toIso8601String(),
       'expires_at': envelope.expiresAt.toUtc().toIso8601String(),
+      'payload_type': envelope.payloadType,
     };
   }
 }

@@ -37,10 +37,10 @@ class SqliteSosMessageRepository implements SosMessageRepository {
   @override
   Future<void> saveMessage(SosMessage message) async {
     await _database.transaction((transaction) async {
-      await transaction.insert(
-        LocalMessagingDatabase.peersTable,
-        PeerModel.toMap(message.sender, timestamp: message.createdAt),
-        conflictAlgorithm: ConflictAlgorithm.replace,
+      await PeerModel.upsert(
+        transaction,
+        message.sender,
+        timestamp: message.createdAt,
       );
       await transaction.insert(
         LocalMessagingDatabase.sosMessagesTable,

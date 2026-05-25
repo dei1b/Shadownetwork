@@ -9,12 +9,14 @@ class ScfRelayResult {
     required this.peerId,
     required this.sentCount,
     required this.failedCount,
+    required this.sentMessageHashes,
     this.lastError,
   });
 
   final String peerId;
   final int sentCount;
   final int failedCount;
+  final List<String> sentMessageHashes;
   final String? lastError;
 }
 
@@ -65,6 +67,7 @@ class ScfRelayService {
     var sentCount = 0;
     var failedCount = 0;
     String? lastError;
+    final sentMessageHashes = <String>[];
 
     for (final envelope in outbound) {
       try {
@@ -76,6 +79,7 @@ class ScfRelayService {
           updatedAt: now,
         );
         sentCount++;
+        sentMessageHashes.add(envelope.messageHash);
       } catch (error) {
         lastError = error.toString();
         failedCount++;
@@ -93,6 +97,7 @@ class ScfRelayService {
       peerId: peer.id,
       sentCount: sentCount,
       failedCount: failedCount,
+      sentMessageHashes: sentMessageHashes,
       lastError: lastError,
     );
   }

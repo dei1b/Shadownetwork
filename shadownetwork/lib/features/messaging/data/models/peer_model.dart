@@ -1,3 +1,5 @@
+import 'package:sqflite/sqflite.dart';
+
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 
@@ -32,6 +34,23 @@ class PeerModel {
       'created_at': now.toIso8601String(),
       'updated_at': now.toIso8601String(),
     };
+  }
+
+  static Future<void> upsert(
+    DatabaseExecutor database,
+    Peer peer, {
+    DateTime? timestamp,
+  }) async {
+    final values = toMap(peer, timestamp: timestamp);
+    final updated = await database.update(
+      'peers',
+      values,
+      where: 'id = ?',
+      whereArgs: [peer.id],
+    );
+    if (updated == 0) {
+      await database.insert('peers', values);
+    }
   }
 
   static DateTime? _dateTimeFromMap(Object? value) {

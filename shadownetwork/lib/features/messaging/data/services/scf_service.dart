@@ -3,11 +3,14 @@ import 'package:sqflite/sqflite.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/scf_peer_delivery.dart';
 import '../../domain/entities/scf_peer_status.dart';
+import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/sos_message.dart';
 import '../datasources/local_messaging_database.dart';
 import '../models/scf_envelope_model.dart';
 import '../models/scf_peer_delivery_model.dart';
 import '../models/sos_message_payload.dart';
+import '../models/chat_message_payload.dart';
+import '../models/relay_payload_codec.dart';
 
 class ScfService {
   const ScfService({
@@ -35,6 +38,22 @@ class ScfService {
     );
   }
 
+  Future<bool> storeChatMessage(
+    ChatMessage message, {
+    DateTime? receivedAt,
+    Duration? ttl,
+    int? hopCount,
+  }) {
+    return storePayload(
+      payloadJson: ChatMessagePayload.canonicalJson(
+        message.copyWith(hopCount: hopCount ?? message.hopCount),
+      ),
+      receivedAt: receivedAt,
+      ttl: ttl ?? message.ttl,
+      hopCount: hopCount ?? message.hopCount,
+    );
+  }
+
   Future<bool> storePayload({
     required String payloadJson,
     DateTime? receivedAt,
@@ -47,13 +66,14 @@ class ScfService {
 
     final now = (receivedAt ?? DateTime.now()).toUtc();
     final expiresAt = now.add(ttl ?? defaultTtl);
-    final messageHash = SosMessagePayload.hashPayload(payloadJson);
+    final messageHash = RelayPayloadCodec.hashPayload(payloadJson);
     final envelope = ScfEnvelope(
       messageHash: messageHash,
       payloadJson: payloadJson,
       hopCount: hopCount,
       receivedAt: now,
       expiresAt: expiresAt,
+      payloadType: RelayPayloadCodec.payloadType(payloadJson),
     );
 
     return _database.transaction((transaction) async {
@@ -62,7 +82,7 @@ class ScfService {
   }
 
   Future<bool> storeEnvelope(ScfEnvelope envelope, {DateTime? now}) async {
-    if (SosMessagePayload.hashPayload(envelope.payloadJson) !=
+    if (RelayPayloadCodec.hashPayload(envelope.payloadJson) !=
         envelope.messageHash) {
       throw const FormatException('SCF envelope hash does not match payload.');
     }
@@ -83,6 +103,14 @@ class ScfService {
       LocalMessagingDatabase.scfMessagesTable,
       where: 'expires_at <= ?',
       whereArgs: [cutoff],
+    );
+  }
+
+  Future<void> consumeDeliveredPayload(String messageHash) {
+    return _database.delete(
+      LocalMessagingDatabase.scfMessagesTable,
+      where: 'message_hash = ?',
+      whereArgs: [messageHash],
     );
   }
 
@@ -142,7 +170,7 @@ class ScfService {
           .map(
             (envelope) => envelope.copyWith(
               hopCount: envelope.hopCount + 1,
-              payloadJson: SosMessagePayload.payloadJsonForRelay(
+              payloadJson: RelayPayloadCodec.payloadJsonForRelay(
                 envelope.payloadJson,
                 hopCount: envelope.hopCount + 1,
               ),

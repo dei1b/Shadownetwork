@@ -5,6 +5,7 @@ import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/transport_status.dart';
 import '../../domain/services/scf_transport.dart';
+import '../models/relay_payload_codec.dart';
 
 class AndroidScfTransport implements ScfTransport {
   AndroidScfTransport({
@@ -22,7 +23,9 @@ class AndroidScfTransport implements ScfTransport {
 
   @override
   Future<Peer> getLocalPeer() async {
-    final map = await _channel.invokeMethod<Map<Object?, Object?>>('getLocalPeer');
+    final map = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'getLocalPeer',
+    );
     return _peerFromPlatformMap(map);
   }
 
@@ -139,12 +142,14 @@ class AndroidScfTransport implements ScfTransport {
   }
 
   ScfEnvelope _envelopeFromPlatformMap(Map<Object?, Object?> map) {
+    final payloadJson = map['payloadJson']! as String;
     return ScfEnvelope(
       messageHash: map['messageHash']! as String,
-      payloadJson: map['payloadJson']! as String,
+      payloadJson: payloadJson,
       hopCount: map['hopCount']! as int,
       receivedAt: DateTime.parse(map['receivedAt']! as String),
       expiresAt: DateTime.parse(map['expiresAt']! as String),
+      payloadType: RelayPayloadCodec.payloadType(payloadJson),
     );
   }
 }

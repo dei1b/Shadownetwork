@@ -14,7 +14,9 @@ import '../../domain/entities/message_status.dart' as messaging;
 import '../../domain/entities/peer.dart' as messaging;
 import '../../domain/entities/peer_type.dart' as messaging;
 import '../../domain/entities/sos_message.dart' as messaging;
+import '../../domain/entities/conversation.dart' as messaging;
 import '../../data/services/offline_panabo_tile_server.dart';
+import 'conversation_page.dart';
 import '../providers/local_messaging_providers.dart';
 import '../providers/relay_runtime_provider.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
@@ -322,10 +324,33 @@ class _HomePageState extends ConsumerState<HomePage> {
     await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
   }
 
+  Future<void> _openConversation(
+    messaging.Peer peer, {
+    messaging.SosMessage? linkedSosMessage,
+  }) async {
+    final conversation = await ref.read(openConversationProvider)(
+      remotePeer: peer,
+      relatedSosMessageHash: linkedSosMessage?.messageHash,
+    );
+    if (!mounted) {
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ConversationPage(
+          conversation: conversation,
+          linkedSosMessage: linkedSosMessage,
+        ),
+      ),
+    );
+    ref.invalidate(conversationsProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final peers = ref.watch(nearbyPeersProvider);
     final messages = ref.watch(sosMessagesProvider);
+    final conversations = ref.watch(conversationsProvider);
     final tileCacheStore = ref.watch(mapTileCacheStoreProvider);
 
     return Scaffold(
@@ -349,7 +374,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                                 Transform.translate(
                                   offset: const Offset(0, -25),
                                   child: _selectedTab == 1
-                                      ? _buildMessagesTabContent(messages)
+                                      ? _buildMessagesTabContent(
+                                          messages,
+                                          conversations,
+                                        )
                                       : _selectedTab == 3
                                       ? _buildPeersTabContent(peers)
                                       : _buildHomeTabContent(
@@ -460,6 +488,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildMessagesTabContent(
     AsyncValue<List<messaging.SosMessage>> messages,
+    AsyncValue<List<messaging.Conversation>> conversations,
   ) {
     final List<(String, IconData, String)> filters = [
       ('All Messages', Icons.chat_bubble_outline_rounded, 'ALL'),
@@ -613,6 +642,19 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
+        if (activeType == 'ALL')
+          conversations.when(
+            data: (items) => items.isEmpty
+                ? const SizedBox.shrink()
+                : Column(
+                    children: [
+                      ...items.map(_buildConversationCard),
+                      const SizedBox(height: 2),
+                    ],
+                  ),
+            loading: () => const SizedBox.shrink(),
+            error: (_, _) => const SizedBox.shrink(),
+          ),
         messages.when(
           data: (items) {
             final feedItems = items
@@ -631,7 +673,15 @@ class _HomePageState extends ConsumerState<HomePage> {
 
             return Column(
               children: filteredMessages
-                  .map(_buildMessageFeedCard)
+                  .map(
+                    (item) => _buildMessageFeedCard(
+                      item,
+                      onTap: () => _openConversation(
+                        item.message.sender,
+                        linkedSosMessage: item.message,
+                      ),
+                    ),
+                  )
                   .toList(growable: false),
             );
           },
@@ -796,114 +846,219 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildMessageFeedCard(_MessageFeedItem item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
+  Widget _buildMessageFeedCard(
+    _MessageFeedItem item, {
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: item.iconColor,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(item.icon, color: Colors.white, size: 28),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: item.iconColor,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(item.icon, color: Colors.white, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(
-                        item.title,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: item.type == 'SOS'
-                              ? const Color(0xFFE83C3D)
-                              : const Color(0xFF1F1F1F),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: item.type == 'SOS'
+                                  ? const Color(0xFFE83C3D)
+                                  : const Color(0xFF1F1F1F),
+                            ),
+                          ),
                         ),
-                      ),
+                        Text(
+                          item.time,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF888888),
+                          ),
+                        ),
+                      ],
                     ),
+                    const SizedBox(height: 6),
                     Text(
-                      item.time,
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF888888),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  item.description,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF666666),
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.location_on,
-                      size: 16,
-                      color: Color(0xFFE83C3D),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      item.distance,
+                      item.description,
                       style: const TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF585858),
+                        color: Color(0xFF666666),
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
-                    const Spacer(),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: item.badgeColor,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        item.badge,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on,
+                          size: 16,
+                          color: Color(0xFFE83C3D),
                         ),
+                        const SizedBox(width: 4),
+                        Text(
+                          item.distance,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF585858),
+                          ),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: item.badgeColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            item.badge,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConversationCard(messaging.Conversation conversation) {
+    final peer = conversation.remotePeer;
+    final status = conversation.latestStatus?.name ?? 'ready';
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => _openConversation(peer),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 25,
+                backgroundColor: _avatarColorForPeer(peer),
+                child: const Icon(Icons.person, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            peer.name,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        if (conversation.lastMessageAt != null)
+                          Text(
+                            _relativeTime(conversation.lastMessageAt!),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              color: Color(0xFF888888),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      conversation.latestBody ?? 'Open conversation',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF666666),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      status.toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFE83C3D),
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+              if (conversation.unreadCount > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE83C3D),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${conversation.unreadCount}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -915,6 +1070,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final accentColor = _colorForCategory(message.category);
 
     return _MessageFeedItem(
+      message: message,
       title:
           '${_labelForCategory(message.category)} from ${message.sender.name}',
       description: message.body,
@@ -1517,9 +1673,8 @@ class _HomePageState extends ConsumerState<HomePage> {
             width: markerSize,
             height: markerSize,
             child: GestureDetector(
-              onTap: () => _showMessage(
-                '${_labelForCategory(message.category)}: ${message.body}',
-              ),
+              onTap: () =>
+                  _openConversation(message.sender, linkedSosMessage: message),
               child: _TriageMarker(
                 icon: _iconForCategory(message.category),
                 color: _colorForCategory(message.category),
@@ -1546,7 +1701,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             width: markerSize,
             height: markerSize,
             child: GestureDetector(
-              onTap: () => _showMessage('${peer.name} nearby'),
+              onTap: () => _openConversation(peer),
               child: _PeerMapMarker(isConnected: peer.isConnected),
             ),
           ),
@@ -2060,6 +2215,7 @@ class _OfflineMapPreparingView extends StatelessWidget {
 }
 
 class _MessageFeedItem {
+  final messaging.SosMessage message;
   final String title;
   final String description;
   final String distance;
@@ -2071,6 +2227,7 @@ class _MessageFeedItem {
   final Color badgeColor;
 
   const _MessageFeedItem({
+    required this.message,
     required this.title,
     required this.description,
     required this.distance,

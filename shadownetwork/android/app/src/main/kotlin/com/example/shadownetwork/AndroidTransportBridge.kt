@@ -26,6 +26,8 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pGroup
 import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
+import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import android.os.Build
 import android.os.ParcelUuid
 import android.provider.Settings
@@ -68,6 +70,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private var advertiseCallback: AdvertiseCallback? = null
     private var scanCallback: ScanCallback? = null
     private var wifiReceiver: BroadcastReceiver? = null
+    private var wifiServiceRequest: WifiP2pDnsSdServiceRequest? = null
     private var bluetoothServerSocket: BluetoothServerSocket? = null
     private var bluetoothAcceptThread: Thread? = null
     private var wifiServerSocket: ServerSocket? = null
@@ -167,7 +170,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
     private fun currentPeers(): List<Map<String, Any?>> {
         return synchronized(discoveredPeers) {
-            discoveredPeers.values.map(DiscoveredPeer::toPlatformMap)
+            discoveredPeers.values
+                .filter { it.isVerifiedAppPeer && it.id != localPeerId }
+                .map(DiscoveredPeer::toPlatformMap)
         }
     }
 
@@ -305,6 +310,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                             bluetoothAddress = result.device.address,
                             isConnected = bluetoothConnections[peerId]?.isActive == true,
                             signalStrength = normalizeRssi(result.rssi),
+                            isVerifiedAppPeer = true,
                         ),
                     )
                 }
@@ -334,11 +340,6 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             wifiReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context, intent: Intent) {
                     when (intent.action) {
-                        WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
-                            manager.requestPeers(channel) { peerList ->
-                                peerList.deviceList.forEach(::rememberWifiPeer)
-                            }
-                        }
                         WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION -> {
                             manager.requestConnectionInfo(channel) { info ->
                                 manager.requestGroupInfo(channel) { group ->
@@ -361,7 +362,6 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         }
 
         val filter = IntentFilter().apply {
-            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
             addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
         }
@@ -372,10 +372,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             context.registerReceiver(wifiReceiver, filter)
         }
 
-        manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = Unit
-            override fun onFailure(reason: Int) = Unit
-        })
+        advertiseAndDiscoverWifiAppServices(manager, channel)
     }
 
     @SuppressLint("MissingPermission")
@@ -383,6 +380,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val manager = wifiP2pManager
         val channel = wifiChannel
         if (manager != null && channel != null) {
+            wifiServiceRequest?.let { request ->
+                manager.removeServiceRequest(channel, request, emptyActionListener())
+            }
+            manager.clearServiceRequests(channel, emptyActionListener())
+            manager.clearLocalServices(channel, emptyActionListener())
             manager.stopPeerDiscovery(channel, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() = Unit
                 override fun onFailure(reason: Int) = Unit
@@ -392,6 +394,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 override fun onFailure(reason: Int) = Unit
             })
         }
+        wifiServiceRequest = null
 
         wifiReceiver?.let {
             runCatching { context.unregisterReceiver(it) }
@@ -459,16 +462,81 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         }
     }
 
-    private fun rememberWifiPeer(device: WifiP2pDevice) {
-        val peerId = "wifi:${device.deviceAddress}"
+    private fun advertiseAndDiscoverWifiAppServices(
+        manager: WifiP2pManager,
+        channel: WifiP2pManager.Channel,
+    ) {
+        val serviceRecord = mapOf(
+            "app_id" to APP_ID,
+            "protocol_version" to PROTOCOL_VERSION.toString(),
+            "peer_id" to localPeerId,
+            "peer_name" to localPeerName,
+            "port" to WIFI_DIRECT_PORT.toString(),
+        )
+        val localService = WifiP2pDnsSdServiceInfo.newInstance(
+            WIFI_SERVICE_INSTANCE,
+            WIFI_SERVICE_TYPE,
+            serviceRecord,
+        )
+        manager.clearLocalServices(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                manager.addLocalService(channel, localService, emptyActionListener())
+            }
+
+            override fun onFailure(reason: Int) = Unit
+        })
+
+        manager.setDnsSdResponseListeners(
+            channel,
+            { _, _, _ -> Unit },
+            { _, record, device ->
+                rememberVerifiedWifiPeer(device, record)
+            },
+        )
+
+        val request = WifiP2pDnsSdServiceRequest.newInstance(WIFI_SERVICE_TYPE)
+        wifiServiceRequest = request
+        manager.clearServiceRequests(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                manager.addServiceRequest(channel, request, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        manager.discoverServices(channel, emptyActionListener())
+                    }
+
+                    override fun onFailure(reason: Int) = Unit
+                })
+            }
+
+            override fun onFailure(reason: Int) = Unit
+        })
+    }
+
+    private fun emptyActionListener(): WifiP2pManager.ActionListener {
+        return object : WifiP2pManager.ActionListener {
+            override fun onSuccess() = Unit
+            override fun onFailure(reason: Int) = Unit
+        }
+    }
+
+    private fun rememberVerifiedWifiPeer(device: WifiP2pDevice, record: Map<String, String>) {
+        if (record["app_id"] != APP_ID ||
+            record["protocol_version"] != PROTOCOL_VERSION.toString()
+        ) {
+            return
+        }
+        val peerId = record["peer_id"]?.trim()?.takeIf { it.isNotBlank() } ?: return
+        if (peerId == localPeerId) return
         rememberPeer(
             DiscoveredPeer(
                 id = peerId,
-                name = device.deviceName ?: "Wi-Fi Direct Peer",
+                name = record["peer_name"]?.takeIf { it.isNotBlank() }
+                    ?: device.deviceName
+                    ?: "Shadow Network Peer",
                 transport = TransportKind.WIFI_DIRECT,
                 deviceAddress = device.deviceAddress,
                 isConnected = device.status == WifiP2pDevice.CONNECTED ||
                     wifiConnections[peerId]?.isActive == true,
+                isVerifiedAppPeer = true,
             ),
         )
     }
@@ -605,9 +673,8 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 val helloLine = reader.readLine()
                     ?: throw IOException("Socket closed before handshake.")
                 val hello = JSONObject(helloLine)
-                val peerId = hello.optString("peerId").ifBlank {
-                    throw IOException("Handshake missing peerId.")
-                }
+                validateHello(hello)
+                val peerId = hello.getString("peerId")
                 val peerName = hello.optString("peerName").ifBlank { "Nearby Peer" }
 
                 val connection = ManagedConnection(
@@ -626,6 +693,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                         transport = transport,
                         bluetoothAddress = hello.optString("bluetoothAddress").ifBlank { null },
                         isConnected = true,
+                        isVerifiedAppPeer = true,
                     ),
                 )
                 connection.start()
@@ -649,6 +717,22 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         )
     }
 
+    private fun validateHello(hello: JSONObject) {
+        if (hello.optString("type") != "hello" ||
+            hello.optString("appId") != APP_ID ||
+            hello.optInt("protocolVersion", -1) != PROTOCOL_VERSION
+        ) {
+            throw IOException("Peer is not a compatible Shadow Network node.")
+        }
+        val peerId = hello.optString("peerId").trim()
+        if (peerId.isBlank()) {
+            throw IOException("Handshake missing peerId.")
+        }
+        if (peerId == localPeerId) {
+            throw IOException("Ignoring local Shadow Network peer.")
+        }
+    }
+
     private fun onConnectionClosed(connection: ManagedConnection) {
         connectionStore(connection.transport).remove(connection.peerId, connection)
         synchronized(discoveredPeers) {
@@ -668,6 +752,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private fun handleIncomingFrame(connection: ManagedConnection, frame: JSONObject) {
         when (frame.optString("type")) {
             "hello" -> {
+                runCatching { validateHello(frame) }.getOrElse {
+                    connection.close()
+                    return
+                }
                 val peerName = frame.optString("peerName").ifBlank { connection.peerName }
                 val bluetoothAddress = frame.optString("bluetoothAddress").ifBlank { null }
                 rememberPeer(
@@ -677,6 +765,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                         transport = connection.transport,
                         bluetoothAddress = bluetoothAddress,
                         isConnected = true,
+                        isVerifiedAppPeer = true,
                     ),
                 )
             }
@@ -879,6 +968,8 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         fun sendHello() {
             val hello = JSONObject().apply {
                 put("type", "hello")
+                put("appId", APP_ID)
+                put("protocolVersion", PROTOCOL_VERSION)
                 put("peerId", localPeerId)
                 put("peerName", localPeerName)
                 bluetoothAdapter?.address?.takeIf { it.isNotBlank() }?.let { address ->
@@ -917,6 +1008,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val bluetoothAddress: String? = null,
         val isConnected: Boolean = false,
         val signalStrength: Int? = null,
+        val isVerifiedAppPeer: Boolean = false,
     ) {
         fun merge(other: DiscoveredPeer): DiscoveredPeer {
             return copy(
@@ -925,6 +1017,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 bluetoothAddress = other.bluetoothAddress ?: bluetoothAddress,
                 isConnected = other.isConnected || isConnected,
                 signalStrength = other.signalStrength ?: signalStrength,
+                isVerifiedAppPeer = isVerifiedAppPeer || other.isVerifiedAppPeer,
             )
         }
 
@@ -980,6 +1073,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     companion object {
         const val CHANNEL_NAME = "shadownetwork/android_transport"
         private const val BLUETOOTH_SERVICE_NAME = "ShadowNetworkTransport"
+        private const val APP_ID = "shadownetwork"
+        private const val PROTOCOL_VERSION = 1
+        private const val WIFI_SERVICE_INSTANCE = "ShadowNetwork"
+        private const val WIFI_SERVICE_TYPE = "_shadownetwork._tcp"
         private const val DEFAULT_LOCAL_PEER_ID = "local-device"
         private const val DEFAULT_LOCAL_PEER_NAME = "This Device"
         private const val PERMISSION_REQUEST_CODE = 4207

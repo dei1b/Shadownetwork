@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/models/sos_message_payload.dart';
+import 'package:shadownetwork/features/messaging/data/models/chat_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/services/scf_service.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
@@ -159,6 +161,51 @@ void main() {
     expect(status?.status, ScfPeerStatus.offered);
     expect(status?.attemptCount, 2);
   });
+
+  test(
+    'queues and relays targeted chat payloads without changing recipient',
+    () async {
+      await openService();
+      final now = DateTime.utc(2026, 5, 25, 10);
+      final chat = ChatMessage(
+        id: 'chat-1',
+        conversationId: 'conversation-peer-1-peer-2',
+        sender: _message().sender,
+        recipient: const Peer(
+          id: 'peer-2',
+          name: 'Recipient',
+          type: PeerType.responder,
+          isConnected: false,
+        ),
+        body: 'Proceed to the covered court.',
+        status: MessageStatus.queued,
+        createdAt: now,
+        ttl: const Duration(hours: 2),
+      );
+
+      await service.storeChatMessage(chat, receivedAt: now);
+      final outbound = await service.prepareOutboundForPeer(
+        'relay-peer',
+        now: now.add(const Duration(minutes: 1)),
+      );
+      final relayedChat = ChatMessagePayload.fromPayload(
+        jsonDecode(outbound.single.payloadJson) as Map<String, Object?>,
+      );
+
+      expect(outbound.single.payloadType, ChatMessagePayload.payloadType);
+      expect(relayedChat.recipient.id, 'peer-2');
+      expect(relayedChat.hopCount, 1);
+      expect(relayedChat.messageHash, ChatMessagePayload.messageHash(chat));
+
+      await service.consumeDeliveredPayload(relayedChat.messageHash!);
+      expect(
+        await service.getStoredEnvelopes(
+          now: now.add(const Duration(minutes: 2)),
+        ),
+        isEmpty,
+      );
+    },
+  );
 }
 
 SosMessage _message() {

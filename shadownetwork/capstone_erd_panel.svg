@@ -1,0 +1,228 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1900" height="1220" viewBox="0 0 1900 1220">
+  <defs>
+    <style>
+      .page { fill: #fcfbf9; }
+      .box { fill: #fff; stroke: #151515; stroke-width: 2.4; }
+      .rule { stroke: #202020; stroke-width: 1.1; }
+      .line { fill: none; stroke: #151515; stroke-width: 2.1; }
+      .header { font: 700 23px Arial, Helvetica, sans-serif; fill: #121212; text-anchor: middle; }
+      .col { font: 700 13.5px Arial, Helvetica, sans-serif; fill: #171717; }
+      .txt { font: 14px Arial, Helvetica, sans-serif; fill: #161616; }
+      .key { font: 700 14px Arial, Helvetica, sans-serif; fill: #161616; }
+      .rel { font: 15px Arial, Helvetica, sans-serif; fill: #131313; }
+    </style>
+    <marker id="oneStart" viewBox="0 0 22 24" refX="4" refY="12" markerWidth="16" markerHeight="16" orient="auto">
+      <path d="M 4 2 L 4 22 M 11 2 L 11 22" stroke="#151515" stroke-width="2.2" fill="none"/>
+    </marker>
+    <marker id="oneEnd" viewBox="0 0 22 24" refX="18" refY="12" markerWidth="16" markerHeight="16" orient="auto">
+      <path d="M 11 2 L 11 22 M 18 2 L 18 22" stroke="#151515" stroke-width="2.2" fill="none"/>
+    </marker>
+    <marker id="manyEnd" viewBox="0 0 36 30" refX="34" refY="15" markerWidth="25" markerHeight="20" orient="auto">
+      <path d="M 0 15 L 11 15 M 11 3 L 11 27 M 11 15 L 18 15 M 18 15 L 34 2 M 18 15 L 34 15 M 18 15 L 34 28" stroke="#151515" stroke-width="2.3" fill="none"/>
+    </marker>
+  </defs>
+
+  <rect class="page" width="1900" height="1220"/>
+
+  <!-- Relationships: one-to-many crow's-foot lines are drawn behind entity boxes. -->
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 210 194 L 210 264"/>
+  <text class="rel" x="225" y="236">classifies</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 694 194 L 694 254"/>
+  <text class="rel" x="708" y="229">categorizes</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 424 374 L 492 374"/>
+  <text class="rel" x="435" y="360">sends</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#oneEnd)" d="M 884 397 L 978 397"/>
+  <text class="rel" x="898" y="383">queued as</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 1338 411 L 1432 411"/>
+  <text class="rel" x="1353" y="396">tracked in</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 176 588 L 176 790"/>
+  <text class="rel" x="191" y="700">encounters</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)"
+        d="M 278 588 L 278 672 L 1042 672 L 1042 851 L 1092 851"/>
+  <text class="rel" x="610" y="659">sends</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)"
+        d="M 322 588 L 322 712 L 1552 712 L 1552 950 L 1518 950"/>
+  <text class="rel" x="805" y="701">receives</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)"
+        d="M 245 588 L 245 748 L 542 748 L 542 908 L 562 908"/>
+  <text class="rel" x="366" y="737">participates in</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)"
+        d="M 738 622 L 738 772 L 668 772 L 668 810"/>
+  <text class="rel" x="678" y="761">relates to</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)" d="M 932 902 L 1092 902"/>
+  <text class="rel" x="977" y="887">contains</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#oneEnd)"
+        d="M 1298 770 L 1298 646 L 1156 646 L 1156 570"/>
+  <text class="rel" x="1175" y="635">queued as</text>
+
+  <path class="line" marker-start="url(#oneStart)" marker-end="url(#manyEnd)"
+        d="M 390 588 L 454 588 L 454 1156 L 1610 1156 L 1610 568"/>
+  <text class="rel" x="1254" y="1144">delivery target</text>
+
+  <!-- PEER_TYPES -->
+  <g>
+    <rect class="box" x="40" y="32" width="340" height="162" rx="13"/>
+    <text class="header" x="210" y="62">PEER_TYPES</text>
+    <line class="rule" x1="40" y1="76" x2="380" y2="76"/>
+    <line class="rule" x1="40" y1="104" x2="380" y2="104"/>
+    <line class="rule" x1="125" y1="76" x2="125" y2="194"/>
+    <line class="rule" x1="305" y1="76" x2="305" y2="194"/>
+    <text class="col" x="57" y="95">Type</text><text class="col" x="143" y="95">Attribute</text><text class="col" x="321" y="95">Key</text>
+    <text class="txt" x="57" y="130">int</text><text class="txt" x="143" y="130">peer_type_id</text><text class="key" x="321" y="130">PK</text>
+    <text class="txt" x="57" y="154">string</text><text class="txt" x="143" y="154">type_name</text>
+    <text class="txt" x="57" y="178">string</text><text class="txt" x="143" y="178">description</text>
+  </g>
+
+  <!-- CATEGORIES -->
+  <g>
+    <rect class="box" x="530" y="32" width="328" height="162" rx="13"/>
+    <text class="header" x="694" y="62">CATEGORIES</text>
+    <line class="rule" x1="530" y1="76" x2="858" y2="76"/>
+    <line class="rule" x1="530" y1="104" x2="858" y2="104"/>
+    <line class="rule" x1="612" y1="76" x2="612" y2="194"/>
+    <line class="rule" x1="790" y1="76" x2="790" y2="194"/>
+    <text class="col" x="547" y="95">Type</text><text class="col" x="630" y="95">Attribute</text><text class="col" x="806" y="95">Key</text>
+    <text class="txt" x="547" y="130">int</text><text class="txt" x="630" y="130">category_id</text><text class="key" x="806" y="130">PK</text>
+    <text class="txt" x="547" y="154">string</text><text class="txt" x="630" y="154">category_name</text>
+    <text class="txt" x="547" y="178">string</text><text class="txt" x="630" y="178">description</text>
+  </g>
+
+  <!-- PEERS -->
+  <g>
+    <rect class="box" x="32" y="264" width="392" height="324" rx="13"/>
+    <text class="header" x="228" y="294">PEERS</text>
+    <line class="rule" x1="32" y1="308" x2="424" y2="308"/>
+    <line class="rule" x1="32" y1="336" x2="424" y2="336"/>
+    <line class="rule" x1="122" y1="308" x2="122" y2="588"/>
+    <line class="rule" x1="335" y1="308" x2="335" y2="588"/>
+    <text class="col" x="49" y="327">Type</text><text class="col" x="140" y="327">Attribute</text><text class="col" x="352" y="327">Key</text>
+    <text class="txt" x="49" y="362">string</text><text class="txt" x="140" y="362">peer_id</text><text class="key" x="352" y="362">PK</text>
+    <text class="txt" x="49" y="388">string</text><text class="txt" x="140" y="388">display_name</text>
+    <text class="txt" x="49" y="414">int</text><text class="txt" x="140" y="414">peer_type_id</text><text class="key" x="352" y="414">FK</text>
+    <text class="txt" x="49" y="440">float</text><text class="txt" x="140" y="440">latitude</text>
+    <text class="txt" x="49" y="466">float</text><text class="txt" x="140" y="466">longitude</text>
+    <text class="txt" x="49" y="492">float</text><text class="txt" x="140" y="492">gps_accuracy</text>
+    <text class="txt" x="49" y="518">timestamp</text><text class="txt" x="140" y="518">location_updated_at</text>
+    <text class="txt" x="49" y="544">timestamp</text><text class="txt" x="140" y="544">last_seen_at</text>
+  </g>
+
+  <!-- SOS_MESSAGES -->
+  <g>
+    <rect class="box" x="492" y="254" width="392" height="368" rx="13"/>
+    <text class="header" x="688" y="284">SOS_MESSAGES</text>
+    <line class="rule" x1="492" y1="298" x2="884" y2="298"/>
+    <line class="rule" x1="492" y1="326" x2="884" y2="326"/>
+    <line class="rule" x1="579" y1="298" x2="579" y2="622"/>
+    <line class="rule" x1="797" y1="298" x2="797" y2="622"/>
+    <text class="col" x="509" y="317">Type</text><text class="col" x="597" y="317">Attribute</text><text class="col" x="814" y="317">Key</text>
+    <text class="txt" x="509" y="352">int</text><text class="txt" x="597" y="352">sos_message_id</text><text class="key" x="814" y="352">PK</text>
+    <text class="txt" x="509" y="378">string</text><text class="txt" x="597" y="378">message_hash</text><text class="key" x="814" y="378">UNIQUE</text>
+    <text class="txt" x="509" y="404">string</text><text class="txt" x="597" y="404">sender_peer_id</text><text class="key" x="814" y="404">FK</text>
+    <text class="txt" x="509" y="430">int</text><text class="txt" x="597" y="430">category_id</text><text class="key" x="814" y="430">FK</text>
+    <text class="txt" x="509" y="456">string</text><text class="txt" x="597" y="456">payload_text</text>
+    <text class="txt" x="509" y="482">float</text><text class="txt" x="597" y="482">latitude</text>
+    <text class="txt" x="509" y="508">float</text><text class="txt" x="597" y="508">longitude</text>
+    <text class="txt" x="509" y="534">int</text><text class="txt" x="597" y="534">hop_count</text>
+    <text class="txt" x="509" y="560">int</text><text class="txt" x="597" y="560">ttl_seconds</text>
+    <text class="txt" x="509" y="586">timestamp</text><text class="txt" x="597" y="586">created_at</text>
+  </g>
+
+  <!-- RELAY_PAYLOADS -->
+  <g>
+    <rect class="box" x="978" y="272" width="360" height="298" rx="13"/>
+    <text class="header" x="1158" y="302">RELAY_PAYLOADS</text>
+    <line class="rule" x1="978" y1="316" x2="1338" y2="316"/>
+    <line class="rule" x1="978" y1="344" x2="1338" y2="344"/>
+    <line class="rule" x1="1063" y1="316" x2="1063" y2="570"/>
+    <line class="rule" x1="1270" y1="316" x2="1270" y2="570"/>
+    <text class="col" x="995" y="335">Type</text><text class="col" x="1081" y="335">Attribute</text><text class="col" x="1285" y="335">Key</text>
+    <text class="txt" x="995" y="370">string</text><text class="txt" x="1081" y="370">message_hash</text><text class="key" x="1285" y="370">PK</text>
+    <text class="txt" x="995" y="396">string</text><text class="txt" x="1081" y="396">payload_type</text>
+    <text class="txt" x="995" y="422">string</text><text class="txt" x="1081" y="422">payload_json</text>
+    <text class="txt" x="995" y="448">int</text><text class="txt" x="1081" y="448">hop_count</text>
+    <text class="txt" x="995" y="474">int</text><text class="txt" x="1081" y="474">ttl_seconds</text>
+    <text class="txt" x="995" y="500">timestamp</text><text class="txt" x="1081" y="500">received_at</text>
+    <text class="txt" x="995" y="526">timestamp</text><text class="txt" x="1081" y="526">expires_at</text>
+  </g>
+
+  <!-- RELAY_DELIVERIES -->
+  <g>
+    <rect class="box" x="1432" y="284" width="356" height="284" rx="13"/>
+    <text class="header" x="1610" y="314">RELAY_DELIVERIES</text>
+    <line class="rule" x1="1432" y1="328" x2="1788" y2="328"/>
+    <line class="rule" x1="1432" y1="356" x2="1788" y2="356"/>
+    <line class="rule" x1="1516" y1="328" x2="1516" y2="568"/>
+    <line class="rule" x1="1720" y1="328" x2="1720" y2="568"/>
+    <text class="col" x="1449" y="347">Type</text><text class="col" x="1534" y="347">Attribute</text><text class="col" x="1735" y="347">Key</text>
+    <text class="txt" x="1449" y="382">int</text><text class="txt" x="1534" y="382">delivery_id</text><text class="key" x="1735" y="382">PK</text>
+    <text class="txt" x="1449" y="408">string</text><text class="txt" x="1534" y="408">message_hash</text><text class="key" x="1735" y="408">FK</text>
+    <text class="txt" x="1449" y="434">string</text><text class="txt" x="1534" y="434">peer_id</text><text class="key" x="1735" y="434">FK</text>
+    <text class="txt" x="1449" y="460">string</text><text class="txt" x="1534" y="460">status</text>
+    <text class="txt" x="1449" y="486">int</text><text class="txt" x="1534" y="486">attempt_count</text>
+    <text class="txt" x="1449" y="512">timestamp</text><text class="txt" x="1534" y="512">updated_at</text>
+  </g>
+
+  <!-- TRANSPORT_SESSIONS -->
+  <g>
+    <rect class="box" x="30" y="790" width="394" height="298" rx="13"/>
+    <text class="header" x="227" y="820">TRANSPORT_SESSIONS</text>
+    <line class="rule" x1="30" y1="834" x2="424" y2="834"/>
+    <line class="rule" x1="30" y1="862" x2="424" y2="862"/>
+    <line class="rule" x1="116" y1="834" x2="116" y2="1088"/>
+    <line class="rule" x1="335" y1="834" x2="335" y2="1088"/>
+    <text class="col" x="47" y="853">Type</text><text class="col" x="134" y="853">Attribute</text><text class="col" x="351" y="853">Key</text>
+    <text class="txt" x="47" y="888">int</text><text class="txt" x="134" y="888">session_id</text><text class="key" x="351" y="888">PK</text>
+    <text class="txt" x="47" y="914">string</text><text class="txt" x="134" y="914">peer_id</text><text class="key" x="351" y="914">FK</text>
+    <text class="txt" x="47" y="940">string</text><text class="txt" x="134" y="940">transport_type</text>
+    <text class="txt" x="47" y="966">int</text><text class="txt" x="134" y="966">signal_strength</text>
+    <text class="txt" x="47" y="992">timestamp</text><text class="txt" x="134" y="992">started_at</text>
+    <text class="txt" x="47" y="1018">timestamp</text><text class="txt" x="134" y="1018">ended_at</text>
+    <text class="txt" x="47" y="1044">string</text><text class="txt" x="134" y="1044">result</text>
+  </g>
+
+  <!-- CONVERSATIONS -->
+  <g>
+    <rect class="box" x="562" y="810" width="370" height="258" rx="13"/>
+    <text class="header" x="747" y="840">CONVERSATIONS</text>
+    <line class="rule" x1="562" y1="854" x2="932" y2="854"/>
+    <line class="rule" x1="562" y1="882" x2="932" y2="882"/>
+    <line class="rule" x1="650" y1="854" x2="650" y2="1068"/>
+    <line class="rule" x1="854" y1="854" x2="854" y2="1068"/>
+    <text class="col" x="579" y="873">Type</text><text class="col" x="668" y="873">Attribute</text><text class="col" x="870" y="873">Key</text>
+    <text class="txt" x="579" y="908">int</text><text class="txt" x="668" y="908">conversation_id</text><text class="key" x="870" y="908">PK</text>
+    <text class="txt" x="579" y="934">string</text><text class="txt" x="668" y="934">local_peer_id</text><text class="key" x="870" y="934">FK</text>
+    <text class="txt" x="579" y="960">string</text><text class="txt" x="668" y="960">remote_peer_id</text><text class="key" x="870" y="960">FK</text>
+    <text class="txt" x="579" y="986">int</text><text class="txt" x="668" y="986">related_sos_id</text><text class="key" x="870" y="986">FK</text>
+    <text class="txt" x="579" y="1012">timestamp</text><text class="txt" x="668" y="1012">created_at</text>
+    <text class="txt" x="579" y="1038">timestamp</text><text class="txt" x="668" y="1038">updated_at</text>
+  </g>
+
+  <!-- CHAT_MESSAGES -->
+  <g>
+    <rect class="box" x="1092" y="770" width="426" height="340" rx="13"/>
+    <text class="header" x="1305" y="800">CHAT_MESSAGES</text>
+    <line class="rule" x1="1092" y1="814" x2="1518" y2="814"/>
+    <line class="rule" x1="1092" y1="842" x2="1518" y2="842"/>
+    <line class="rule" x1="1183" y1="814" x2="1183" y2="1110"/>
+    <line class="rule" x1="1429" y1="814" x2="1429" y2="1110"/>
+    <text class="col" x="1109" y="833">Type</text><text class="col" x="1201" y="833">Attribute</text><text class="col" x="1445" y="833">Key</text>
+    <text class="txt" x="1109" y="868">int</text><text class="txt" x="1201" y="868">chat_message_id</text><text class="key" x="1445" y="868">PK</text>
+    <text class="txt" x="1109" y="894">string</text><text class="txt" x="1201" y="894">message_hash</text><text class="key" x="1445" y="894">UNIQUE</text>
+    <text class="txt" x="1109" y="920">int</text><text class="txt" x="1201" y="920">conversation_id</text><text class="key" x="1445" y="920">FK</text>
+    <text class="txt" x="1109" y="946">string</text><text class="txt" x="1201" y="946">sender_peer_id</text><text class="key" x="1445" y="946">FK</text>
+    <text class="txt" x="1109" y="972">string</text><text class="txt" x="1201" y="972">recipient_peer_id</text><text class="key" x="1445" y="972">FK</text>
+    <text class="txt" x="1109" y="998">string</text><text class="txt" x="1201" y="998">body</text>
+    <text class="txt" x="1109" y="1024">timestamp</text><text class="txt" x="1201" y="1024">created_at</text>
+  </g>
+</svg>
