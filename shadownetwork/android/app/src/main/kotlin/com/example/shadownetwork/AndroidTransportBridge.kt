@@ -4,9 +4,17 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattServer
+import android.bluetooth.BluetoothGattServerCallback
+import android.bluetooth.BluetoothGattService
 import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothProfile
 import android.bluetooth.BluetoothServerSocket
 import android.bluetooth.BluetoothSocket
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.AdvertiseCallback
 import android.bluetooth.le.AdvertiseData
 import android.bluetooth.le.AdvertiseSettings
@@ -47,7 +55,11 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private val context: Context = activity.applicationContext
@@ -69,6 +81,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private var scanner: BluetoothLeScanner? = null
     private var advertiseCallback: AdvertiseCallback? = null
     private var scanCallback: ScanCallback? = null
+    private var bleGattServer: BluetoothGattServer? = null
+    private val bleFrameBuffers = ConcurrentHashMap<String, StringBuilder>()
+    private val bleIdentityLookups = ConcurrentHashMap.newKeySet<String>()
+    private val resolvedBlePeerIds = ConcurrentHashMap<String, String>()
     private var wifiReceiver: BroadcastReceiver? = null
     private var wifiServiceRequest: WifiP2pDnsSdServiceRequest? = null
     private var bluetoothServerSocket: BluetoothServerSocket? = null
@@ -98,6 +114,28 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 result.success(true)
             }
             "discoverPeers" -> result.success(currentPeers())
+            "connectPeer" -> {
+                val peerId = call.argument<String>("peerId")
+                if (peerId.isNullOrBlank()) {
+                    result.error("INVALID_ARGUMENT", "connectPeer requires peerId.", null)
+                    return
+                }
+                start()
+                Thread {
+                    try {
+                        val connectedPeer = connectPeerInternal(peerId)
+                        postResult(result) { success(connectedPeer.toPlatformMap()) }
+                    } catch (throwable: Throwable) {
+                        postResult(result) {
+                            this.error(
+                                "TRANSPORT_CONNECT_FAILED",
+                                throwable.message ?: "Failed to connect to peer.",
+                                null,
+                            )
+                        }
+                    }
+                }.start()
+            }
             "sendEnvelope" -> {
                 val peerId = call.argument<String>("peerId")
                 val envelope = call.argument<Map<*, *>>("envelope")
@@ -264,6 +302,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val adapter = bluetoothAdapter ?: return
         if (!adapter.isEnabled || advertiseCallback != null || scanCallback != null) return
 
+        startBleGattServer()
         advertiser = adapter.bluetoothLeAdvertiser
         scanner = adapter.bluetoothLeScanner
 
@@ -271,11 +310,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             val settings = AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
-                .setConnectable(false)
+                .setConnectable(true)
                 .build()
             val data = AdvertiseData.Builder()
                 .addServiceUuid(serviceUuid)
-                .addServiceData(serviceUuid, localPeerId.toByteArray(Charsets.UTF_8))
                 .setIncludeDeviceName(false)
                 .build()
 
@@ -293,26 +331,22 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
             scanCallback = object : ScanCallback() {
                 override fun onScanResult(callbackType: Int, result: ScanResult) {
-                    val serviceData = result.scanRecord?.getServiceData(serviceUuid)
-                    val peerId = serviceData
-                        ?.toString(Charsets.UTF_8)
-                        ?.takeIf { it.isNotBlank() }
-                        ?: "ble:${result.device.address}"
-                    if (peerId == localPeerId) return
-
-                    rememberPeer(
-                        DiscoveredPeer(
-                            id = peerId,
-                            name = result.scanRecord?.deviceName
-                                ?: result.device.name
-                                ?: "BLE Peer",
-                            transport = TransportKind.BLUETOOTH,
-                            bluetoothAddress = result.device.address,
-                            isConnected = bluetoothConnections[peerId]?.isActive == true,
-                            signalStrength = normalizeRssi(result.rssi),
-                            isVerifiedAppPeer = true,
-                        ),
-                    )
+                    // Keep the BLE packet small enough for legacy Android advertising.
+                    // Read identity over GATT before exposing the peer to Flutter.
+                    val address = result.device.address
+                    val signalStrength = normalizeRssi(result.rssi)
+                    resolvedBlePeerIds[address]?.let { peerId ->
+                        findPeer(peerId)?.let { peer ->
+                            rememberPeer(
+                                peer.copy(
+                                    bluetoothAddress = address,
+                                    signalStrength = signalStrength,
+                                ),
+                            )
+                        }
+                        return
+                    }
+                    resolveBleIdentityInBackground(result.device, signalStrength)
                 }
             }
             bleScanner.startScan(listOf(filter), settings, scanCallback)
@@ -325,6 +359,171 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         scanCallback?.let { scanner?.stopScan(it) }
         advertiseCallback = null
         scanCallback = null
+        runCatching { bleGattServer?.close() }
+        bleGattServer = null
+        bleFrameBuffers.clear()
+        bleIdentityLookups.clear()
+        resolvedBlePeerIds.clear()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startBleGattServer() {
+        if (bleGattServer != null) return
+
+        val server = bluetoothManager.openGattServer(
+            context,
+            object : BluetoothGattServerCallback() {
+                override fun onCharacteristicWriteRequest(
+                    device: BluetoothDevice,
+                    requestId: Int,
+                    characteristic: BluetoothGattCharacteristic,
+                    preparedWrite: Boolean,
+                    responseNeeded: Boolean,
+                    offset: Int,
+                    value: ByteArray,
+                ) {
+                    val accepted = characteristic.uuid == BLE_ENVELOPE_UUID &&
+                        !preparedWrite &&
+                        offset == 0 &&
+                        receiveBleChunk(device.address, value)
+                    if (responseNeeded) {
+                        bleGattServer?.sendResponse(
+                            device,
+                            requestId,
+                            if (accepted) BluetoothGatt.GATT_SUCCESS else BluetoothGatt.GATT_FAILURE,
+                            0,
+                            null,
+                        )
+                    }
+                }
+
+                override fun onCharacteristicReadRequest(
+                    device: BluetoothDevice,
+                    requestId: Int,
+                    offset: Int,
+                    characteristic: BluetoothGattCharacteristic,
+                ) {
+                    if (characteristic.uuid != BLE_IDENTITY_UUID) {
+                        bleGattServer?.sendResponse(
+                            device,
+                            requestId,
+                            BluetoothGatt.GATT_FAILURE,
+                            offset,
+                            null,
+                        )
+                        return
+                    }
+                    val value = JSONObject().apply {
+                        put("appId", APP_ID)
+                        put("protocolVersion", PROTOCOL_VERSION)
+                        put("peerId", localPeerId)
+                        put("peerName", localPeerName)
+                        put("peerType", "civilian")
+                    }.toString().toByteArray(Charsets.UTF_8)
+                    val response = if (offset <= value.size) {
+                        value.copyOfRange(offset, value.size)
+                    } else {
+                        byteArrayOf()
+                    }
+                    bleGattServer?.sendResponse(
+                        device,
+                        requestId,
+                        BluetoothGatt.GATT_SUCCESS,
+                        offset,
+                        response,
+                    )
+                }
+            },
+        ) ?: return
+
+        val envelopeCharacteristic = BluetoothGattCharacteristic(
+            BLE_ENVELOPE_UUID,
+            BluetoothGattCharacteristic.PROPERTY_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE,
+        )
+        val identityCharacteristic = BluetoothGattCharacteristic(
+            BLE_IDENTITY_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ,
+            BluetoothGattCharacteristic.PERMISSION_READ,
+        )
+        val service = BluetoothGattService(
+            SERVICE_UUID,
+            BluetoothGattService.SERVICE_TYPE_PRIMARY,
+        ).apply {
+            addCharacteristic(envelopeCharacteristic)
+            addCharacteristic(identityCharacteristic)
+        }
+        bleGattServer = server
+        server.addService(service)
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun resolveBleIdentityInBackground(device: BluetoothDevice, signalStrength: Int) {
+        val address = device.address
+        if (!bleIdentityLookups.add(address)) return
+
+        Thread {
+            try {
+                val peer = readBleIdentity(
+                    DiscoveredPeer(
+                        id = "ble:$address",
+                        name = "BLE Peer",
+                        transport = TransportKind.BLUETOOTH,
+                        bluetoothAddress = address,
+                        signalStrength = signalStrength,
+                    ),
+                    markConnected = false,
+                )
+                rememberResolvedBlePeer(address, peer)
+            } catch (_: Throwable) {
+                // A later scan result retries transient identity failures.
+            } finally {
+                bleIdentityLookups.remove(address)
+            }
+        }.start()
+    }
+
+    private fun rememberResolvedBlePeer(address: String, peer: DiscoveredPeer) {
+        resolvedBlePeerIds[address] = peer.id
+        synchronized(discoveredPeers) {
+            discoveredPeers.remove("ble:$address")
+        }
+        rememberPeer(peer)
+    }
+
+    private fun receiveBleChunk(address: String, value: ByteArray): Boolean {
+        if (value.isEmpty()) return false
+
+        val content = value.copyOfRange(1, value.size).toString(Charsets.UTF_8)
+        val completeFrame = when (value[0]) {
+            BLE_FRAME_SINGLE -> content
+            BLE_FRAME_START -> {
+                bleFrameBuffers[address] = StringBuilder(content)
+                null
+            }
+            BLE_FRAME_CONTINUE -> {
+                val buffer = bleFrameBuffers[address] ?: return false
+                buffer.append(content)
+                null
+            }
+            BLE_FRAME_END -> {
+                val buffer = bleFrameBuffers.remove(address) ?: return false
+                buffer.append(content).toString()
+            }
+            else -> return false
+        }
+
+        if (completeFrame != null) {
+            return runCatching {
+                val frame = JSONObject(completeFrame)
+                if (frame.optString("type") != "envelope") {
+                    return false
+                }
+                enqueueEnvelope(frame)
+                true
+            }.getOrDefault(false)
+        }
+        return true
     }
 
     @SuppressLint("MissingPermission")
@@ -770,19 +969,40 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 )
             }
             "envelope" -> {
-                synchronized(inbox) {
-                    inbox.add(
-                        mapOf(
-                            "messageHash" to frame.getString("messageHash"),
-                            "payloadJson" to frame.getString("payloadJson"),
-                            "hopCount" to frame.getInt("hopCount"),
-                            "receivedAt" to frame.getString("receivedAt"),
-                            "expiresAt" to frame.getString("expiresAt"),
-                        ),
-                    )
-                }
+                enqueueEnvelope(frame)
             }
         }
+    }
+
+    private fun enqueueEnvelope(frame: JSONObject) {
+        synchronized(inbox) {
+            inbox.add(
+                mapOf(
+                    "messageHash" to frame.getString("messageHash"),
+                    "payloadJson" to frame.getString("payloadJson"),
+                    "hopCount" to frame.getInt("hopCount"),
+                    "receivedAt" to frame.getString("receivedAt"),
+                    "expiresAt" to frame.getString("expiresAt"),
+                ),
+            )
+        }
+    }
+
+    private fun connectPeerInternal(peerId: String): DiscoveredPeer {
+        val peer = findPeer(peerId)
+            ?: throw IOException("Peer $peerId is not available for connection.")
+        if (peer.transport == TransportKind.WIFI_DIRECT) {
+            ensureWifiConnection(peer)
+            val connected = peer.copy(isConnected = true)
+            rememberPeer(connected)
+            return connected
+        }
+
+        val connected = readBleIdentity(peer, markConnected = true)
+        val address = connected.bluetoothAddress
+            ?: throw IOException("Connected BLE peer has no device address.")
+        rememberResolvedBlePeer(address, connected)
+        return connected
     }
 
     private fun sendEnvelopeInternal(peerId: String, envelope: Map<*, *>) {
@@ -821,7 +1041,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 }
             }
             else -> {
-                ensureBluetoothConnection(peer).sendFrame(envelopeJson)
+                sendBleEnvelope(peer, envelopeJson)
                 true
             }
         }
@@ -851,6 +1071,273 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             transport = TransportKind.BLUETOOTH,
             socket = BluetoothTransportSocket(socket),
         )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun sendBleEnvelope(peer: DiscoveredPeer, frame: JSONObject) {
+        val adapter = bluetoothAdapter ?: throw IOException("Bluetooth is unavailable.")
+        if (!adapter.isEnabled) {
+            throw IOException("Bluetooth is disabled.")
+        }
+        val address = peer.bluetoothAddress
+            ?: throw IOException("Peer ${peer.id} has no Bluetooth address.")
+        val chunks = bleFrameChunks(frame)
+        val completed = CountDownLatch(1)
+        val nextIndex = AtomicInteger(0)
+        val failure = AtomicReference<IOException?>()
+
+        val callback = object : BluetoothGattCallback() {
+            private fun fail(message: String) {
+                failure.compareAndSet(null, IOException(message))
+                completed.countDown()
+            }
+
+            private fun writeNext(gatt: BluetoothGatt) {
+                val characteristic = gatt.getService(SERVICE_UUID)
+                    ?.getCharacteristic(BLE_ENVELOPE_UUID)
+                    ?: run {
+                        fail("Nearby BLE peer does not expose the relay service.")
+                        return
+                    }
+                val index = nextIndex.getAndIncrement()
+                val chunk = chunks.getOrNull(index) ?: run {
+                    completed.countDown()
+                    return
+                }
+                val started = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt.writeCharacteristic(
+                        characteristic,
+                        chunk,
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT,
+                    ) == BluetoothStatusCodes.SUCCESS
+                } else {
+                    characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                    characteristic.value = chunk
+                    gatt.writeCharacteristic(characteristic)
+                }
+                if (!started) {
+                    fail("Unable to write relay payload over BLE.")
+                }
+            }
+
+            override fun onConnectionStateChange(
+                gatt: BluetoothGatt,
+                status: Int,
+                newState: Int,
+            ) {
+                if (status != BluetoothGatt.GATT_SUCCESS ||
+                    newState != BluetoothProfile.STATE_CONNECTED
+                ) {
+                    fail("Unable to connect to ${peer.id} over BLE.")
+                    return
+                }
+                if (!gatt.discoverServices()) {
+                    fail("Unable to discover ${peer.id} BLE relay service.")
+                }
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail("BLE relay service discovery failed for ${peer.id}.")
+                    return
+                }
+                writeNext(gatt)
+            }
+
+            override fun onCharacteristicWrite(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int,
+            ) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail("BLE payload delivery failed for ${peer.id}.")
+                } else if (nextIndex.get() < chunks.size) {
+                    writeNext(gatt)
+                } else {
+                    completed.countDown()
+                }
+            }
+        }
+
+        val device = adapter.getRemoteDevice(address)
+        val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        } else {
+            device.connectGatt(context, false, callback)
+        }
+
+        try {
+            if (!completed.await(BLE_SEND_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                throw IOException("Timed out sending relay payload to ${peer.id} over BLE.")
+            }
+            failure.get()?.let { throw it }
+            rememberPeer(peer.copy(isConnected = true))
+        } finally {
+            runCatching { gatt.disconnect() }
+            runCatching { gatt.close() }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun readBleIdentity(peer: DiscoveredPeer, markConnected: Boolean): DiscoveredPeer {
+        val adapter = bluetoothAdapter ?: throw IOException("Bluetooth is unavailable.")
+        val address = peer.bluetoothAddress
+            ?: throw IOException("Peer ${peer.id} has no Bluetooth address.")
+        val completed = CountDownLatch(1)
+        val resolved = AtomicReference<DiscoveredPeer?>()
+        val failure = AtomicReference<IOException?>()
+        val finished = AtomicBoolean(false)
+        val discoveryStarted = AtomicBoolean(false)
+
+        val callback = object : BluetoothGattCallback() {
+            private fun fail(message: String) {
+                if (finished.compareAndSet(false, true)) {
+                    failure.set(IOException(message))
+                    completed.countDown()
+                }
+            }
+
+            private fun discover(gatt: BluetoothGatt) {
+                if (discoveryStarted.compareAndSet(false, true) && !gatt.discoverServices()) {
+                    fail("Unable to discover ${peer.name} BLE identity service.")
+                }
+            }
+
+            private fun completeIdentity(value: ByteArray, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail("Unable to read ${peer.name} BLE identity.")
+                    return
+                }
+                if (finished.get()) return
+                try {
+                    val identity = JSONObject(value.toString(Charsets.UTF_8))
+                    if (identity.optString("appId") != APP_ID ||
+                        identity.optInt("protocolVersion", -1) != PROTOCOL_VERSION
+                    ) {
+                        fail("Nearby BLE device is not a compatible Shadow Network peer.")
+                        return
+                    }
+                    val identityPeerId = identity.optString("peerId").trim()
+                    if (identityPeerId.isBlank() || identityPeerId == localPeerId) {
+                        fail("Nearby BLE peer identity is invalid.")
+                        return
+                    }
+                    val identified = DiscoveredPeer(
+                        id = identityPeerId,
+                        name = identity.optString("peerName").ifBlank { "Nearby Peer" },
+                        peerType = identity.optString("peerType").ifBlank { "civilian" },
+                        transport = TransportKind.BLUETOOTH,
+                        bluetoothAddress = address,
+                        isConnected = markConnected,
+                        signalStrength = peer.signalStrength,
+                        isVerifiedAppPeer = true,
+                    )
+                    if (finished.compareAndSet(false, true)) {
+                        resolved.set(identified)
+                        completed.countDown()
+                    }
+                } catch (_: Throwable) {
+                    fail("Received an invalid BLE identity from ${peer.name}.")
+                }
+            }
+
+            override fun onConnectionStateChange(
+                gatt: BluetoothGatt,
+                status: Int,
+                newState: Int,
+            ) {
+                if (status != BluetoothGatt.GATT_SUCCESS ||
+                    newState != BluetoothProfile.STATE_CONNECTED
+                ) {
+                    fail("Unable to connect to ${peer.name} over BLE.")
+                    return
+                }
+                if (!gatt.requestMtu(BLE_IDENTITY_MTU)) {
+                    discover(gatt)
+                }
+            }
+
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                discover(gatt)
+            }
+
+            override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    fail("BLE identity service discovery failed for ${peer.name}.")
+                    return
+                }
+                val characteristic = gatt.getService(SERVICE_UUID)
+                    ?.getCharacteristic(BLE_IDENTITY_UUID)
+                    ?: run {
+                        fail("Nearby BLE peer does not expose identity.")
+                        return
+                    }
+                if (!gatt.readCharacteristic(characteristic)) {
+                    fail("Unable to request ${peer.name} BLE identity.")
+                }
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                status: Int,
+            ) {
+                if (characteristic.uuid == BLE_IDENTITY_UUID) {
+                    completeIdentity(characteristic.value ?: byteArrayOf(), status)
+                }
+            }
+
+            override fun onCharacteristicRead(
+                gatt: BluetoothGatt,
+                characteristic: BluetoothGattCharacteristic,
+                value: ByteArray,
+                status: Int,
+            ) {
+                if (characteristic.uuid == BLE_IDENTITY_UUID) {
+                    completeIdentity(value, status)
+                }
+            }
+        }
+
+        val device = adapter.getRemoteDevice(address)
+        val gatt = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+        } else {
+            device.connectGatt(context, false, callback)
+        }
+
+        try {
+            if (!completed.await(BLE_IDENTITY_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                throw IOException("Timed out reading identity from ${peer.name}.")
+            }
+            failure.get()?.let { throw it }
+            return resolved.get() ?: throw IOException("No identity received from ${peer.name}.")
+        } finally {
+            runCatching { gatt.disconnect() }
+            runCatching { gatt.close() }
+        }
+    }
+
+    private fun bleFrameChunks(frame: JSONObject): List<ByteArray> {
+        val payload = frame.toString().toByteArray(Charsets.UTF_8)
+        if (payload.size <= BLE_CHUNK_PAYLOAD_BYTES) {
+            return listOf(byteArrayOf(BLE_FRAME_SINGLE) + payload)
+        }
+
+        val chunks = mutableListOf<ByteArray>()
+        var offset = 0
+        while (offset < payload.size) {
+            val end = minOf(offset + BLE_CHUNK_PAYLOAD_BYTES, payload.size)
+            val marker = when {
+                offset == 0 -> BLE_FRAME_START
+                end == payload.size -> BLE_FRAME_END
+                else -> BLE_FRAME_CONTINUE
+            }
+            chunks.add(byteArrayOf(marker) + payload.copyOfRange(offset, end))
+            offset = end
+        }
+        return chunks
     }
 
     @SuppressLint("MissingPermission")
@@ -1003,6 +1490,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private data class DiscoveredPeer(
         val id: String,
         val name: String,
+        val peerType: String = "unknown",
         val transport: String,
         val deviceAddress: String? = null,
         val bluetoothAddress: String? = null,
@@ -1013,6 +1501,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         fun merge(other: DiscoveredPeer): DiscoveredPeer {
             return copy(
                 name = if (other.name.isNotBlank()) other.name else name,
+                peerType = if (other.peerType != "unknown") other.peerType else peerType,
                 deviceAddress = other.deviceAddress ?: deviceAddress,
                 bluetoothAddress = other.bluetoothAddress ?: bluetoothAddress,
                 isConnected = other.isConnected || isConnected,
@@ -1025,7 +1514,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             return linkedMapOf(
                 "id" to id,
                 "name" to name,
-                "type" to "unknown",
+                "type" to peerType,
                 "isConnected" to isConnected,
                 "signalStrength" to signalStrength,
                 "transport" to transport,
@@ -1083,7 +1572,20 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         private const val WIFI_DIRECT_PORT = 8988
         private const val SOCKET_CONNECT_TIMEOUT_MS = 10_000
         private const val WIFI_CONNECT_TIMEOUT_MS = 20_000L
+        private const val BLE_SEND_TIMEOUT_MS = 15_000L
+        private const val BLE_IDENTITY_TIMEOUT_MS = 10_000L
+        private const val BLE_IDENTITY_MTU = 256
+        // One protocol byte plus 18 payload bytes fits the default ATT MTU.
+        private const val BLE_CHUNK_PAYLOAD_BYTES = 18
+        private const val BLE_FRAME_SINGLE: Byte = 0x01
+        private const val BLE_FRAME_START: Byte = 0x02
+        private const val BLE_FRAME_CONTINUE: Byte = 0x03
+        private const val BLE_FRAME_END: Byte = 0x04
         private val SERVICE_UUID: UUID =
             UUID.fromString("9f7a7770-1b31-4f1d-8f99-6d7a9f50a101")
+        private val BLE_ENVELOPE_UUID: UUID =
+            UUID.fromString("9f7a7771-1b31-4f1d-8f99-6d7a9f50a101")
+        private val BLE_IDENTITY_UUID: UUID =
+            UUID.fromString("9f7a7772-1b31-4f1d-8f99-6d7a9f50a101")
     }
 }

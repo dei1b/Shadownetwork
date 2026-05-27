@@ -11,6 +11,8 @@ abstract class ScfTransport {
 
   Future<List<Peer>> discoverPeers();
 
+  Future<Peer> connectPeer(Peer peer);
+
   Future<void> sendEnvelope({
     required Peer peer,
     required ScfEnvelope envelope,

@@ -19,6 +19,15 @@ class MockScfTransportNetwork {
         .toList(growable: false);
   }
 
+  Peer connectPeer(String peerId) {
+    final node = _nodes[peerId];
+    if (node == null) {
+      throw StateError('Mock peer $peerId is not registered.');
+    }
+    node.peer = node.peer.copyWith(isConnected: true);
+    return node.peer;
+  }
+
   void send({
     required String fromPeerId,
     required String toPeerId,
@@ -73,8 +82,9 @@ class MockScfTransportEndpoint implements ScfTransport {
   Future<TransportStatus> getStatus() async {
     final localPeer = _network.localPeer(localPeerId);
     final discoveredPeers = _network.discoverPeers(localPeerId);
-    final connectedPeerCount =
-        discoveredPeers.where((peer) => peer.isConnected).length;
+    final connectedPeerCount = discoveredPeers
+        .where((peer) => peer.isConnected)
+        .length;
 
     return TransportStatus(
       localPeer: localPeer,
@@ -88,6 +98,11 @@ class MockScfTransportEndpoint implements ScfTransport {
   @override
   Future<List<Peer>> discoverPeers() async {
     return _network.discoverPeers(localPeerId);
+  }
+
+  @override
+  Future<Peer> connectPeer(Peer peer) async {
+    return _network.connectPeer(peer.id);
   }
 
   @override

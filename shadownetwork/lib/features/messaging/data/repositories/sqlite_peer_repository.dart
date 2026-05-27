@@ -13,7 +13,7 @@ class SqlitePeerRepository implements PeerRepository {
 
   @override
   Future<List<Peer>> getNearbyPeers({String? excludingPeerId}) async {
-    final where = <String>["id NOT LIKE 'wifi:%'"];
+    final where = <String>["id NOT LIKE 'wifi:%'", "id NOT LIKE 'ble:%'"];
     final whereArgs = <Object?>[];
     if (excludingPeerId != null) {
       where.add('id != ?');
@@ -21,8 +21,8 @@ class SqlitePeerRepository implements PeerRepository {
     }
     final rows = await _database.query(
       LocalMessagingDatabase.peersTable,
-      // Older builds persisted every raw Wi-Fi Direct device as wifi:<address>.
-      // Verified Shadow Network Wi-Fi peers now use their advertised app peer id.
+      // Older builds stored raw radio addresses as peers. Verified discovery now
+      // persists only the stable application peer identity.
       where: where.join(' AND '),
       whereArgs: whereArgs,
       orderBy: 'is_connected DESC, last_seen_at DESC, display_name ASC',

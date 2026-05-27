@@ -1,0 +1,195 @@
+SHADOW NETWORK APP CHECKPOINT
+Date: 2026-05-26 (Asia/Manila)
+Repository: C:\Users\Dave\Desktop\Shadownetwork\shadownetwork
+Branch/commit reviewed: main @ 10d84f5 (Add verified Wi-Fi Direct peer discovery and chat schema)
+
+PURPOSE
+-------
+Shadow Network is an Android-first offline peer-to-peer disaster messaging app.
+It is intended to let nearby phones with the app exchange SOS reports and
+follow-up chat using Store-Carry-Forward (SCF) relay through BLE and Wi-Fi
+Direct when internet/mobile networks are unavailable.
+
+CURRENT READINESS VERDICT
+-------------------------
+The app is now a functional capstone prototype with the main offline
+architecture represented in code: persisted SOS messages, SCF routing,
+Android transport integration, offline Panabo map tiles, and peer chat.
+
+It should NOT yet be described as a real-world deployment-ready disaster app.
+The remaining proof is significant: repeated two-or-more physical phone
+testing in no-internet conditions, reliable background discovery/relay,
+security/privacy protection for private chats, operational metrics, and
+stress/battery/recovery validation.
+
+IMPLEMENTED PROGRESS
+--------------------
+1. SOS message domain and persistence
+   - SOS records use structured data including sender, category, body,
+     location, GPS accuracy, message hash, hop count, TTL, and timestamps.
+   - SQLite repositories persist peers and SOS messages locally.
+   - Database migration version is currently 4.
+
+2. Store-Carry-Forward relay engine
+   - SCF envelopes are persisted in scf_messages.
+   - Per-peer relay/delivery attempts are recorded in scf_peer_statuses.
+   - Payloads are deduplicated using deterministic message hashes.
+   - TTL expiration and relay hop-count updates are implemented.
+   - Both SOS and chat use a payload_type contract so ingestion can distinguish
+     broadcast SOS payloads from targeted chat payloads.
+
+3. Android BLE and Wi-Fi Direct transport
+   - Native Android transport bridge exists for discovery and socket transfer.
+   - BLE discovery is scoped to the Shadow Network service UUID.
+   - Wi-Fi Direct uses Shadow Network DNS-SD advertising/discovery records
+     instead of displaying every public Wi-Fi Direct device.
+   - Socket hello messages validate the Shadow Network app/protocol identity.
+   - The local phone and old unverified wifi:<address> peer rows are filtered
+     from the visible nearby-peer list.
+   - This is app filtering, not cryptographic authentication.
+
+4. App lifecycle and live relay state
+   - Relay runtime starts when the application shell is running/resumed.
+   - The runtime discovers peers, ingests inbound envelopes, sends queued
+     envelopes, and refreshes the message/peer/chat views.
+   - The UI reports live transport state, discovered peers, connected peers,
+     received payloads, and relayed payloads.
+   - Current lifecycle behavior stops relay activity while the app is paused,
+     hidden, or detached.
+
+5. Offline map work
+   - The map renderer is MapLibre rather than the blocked OpenStreetMap raster
+     tile request path.
+   - Bundled Panabo vector tiles, fonts, sprites, and style assets are included
+     in the application for offline use.
+   - A local tile server supplies bundled Panabo data without network access.
+   - Outside bundled coverage, OpenFreeMap data can be downloaded while online
+     and stored in the local cache for later reuse.
+   - Marker projection/rendering was corrected to avoid the earlier drift and
+     zoom-position mismatch.
+
+6. Private peer chat workflow
+   - Separate conversations and chat_messages SQLite tables are implemented;
+     chat is not mixed into SOS map records.
+   - Users can open a conversation from a peer or SOS marker.
+   - A conversation can retain an optional link to the originating SOS alert.
+   - Outgoing chat saves locally first, is queued in SCF, and displays
+     queued/relayed state.
+   - Inbound targeted chat is displayed only for its intended local recipient;
+     intermediate relay nodes carry it without adding a visible chat thread.
+   - Chat content is recipient-targeted but is not yet encrypted.
+
+7. ERD/design documentation artifacts
+   - Current ERD image/SVG artifacts exist for capstone presentation work:
+     capstone_erd_panel.png/svg and capstone_erd_updated.png/svg.
+   - The implemented database includes categories, peer_types, peers,
+     sos_messages, scf_messages, scf_peer_statuses, conversations, and
+     chat_messages.
+   - TRANSPORT_SESSIONS has been discussed as a proposed table for field
+     measurements, but it is not currently persisted in the database.
+
+VERIFICATION COMPLETED FOR THIS CHECKPOINT
+------------------------------------------
+- dart analyze lib test
+  Result: No issues found.
+
+- flutter test --no-pub
+  Result: All 19 tests passed.
+
+Tests currently cover:
+- SOS payload serialization, parsing, and deterministic hash behavior.
+- Chat payload serialization, recipient targeting, and stable hash behavior.
+- SQLite schema/repository persistence for messaging and chat.
+- SCF deduplication, TTL handling, hop incrementing, status attempts, and
+  targeted chat relay.
+- Mock peer relay and returned-payload deduplication.
+
+IMPORTANT LIMITATIONS AND RISKS
+-------------------------------
+1. Physical mesh proof is not complete.
+   - Unit/mock tests pass, but a capstone-ready demonstration requires repeated
+     Android-to-Android transfer tests with Wi-Fi/internet disabled.
+
+2. Relay does not continue in the background.
+   - The current lifecycle stops relay work when the application is paused or
+     hidden. In an actual disaster network, relay reliability requires a
+     properly declared Android foreground service and battery-aware scanning.
+
+3. Private chat is not protected from relay-node inspection.
+   - Chat is targeted to a recipient, but intermediate devices carry payload
+     content without end-to-end encryption or peer key verification.
+
+4. Wi-Fi/BLE peer identity is only protocol-filtered.
+   - Normal public devices are filtered out, but a different app could imitate
+     the service and hello fields without cryptographic authentication.
+
+5. Offline map coverage is limited.
+   - Panabo bundled tiles work offline within packaged coverage. Areas outside
+     Panabo are available offline only after their online tiles have previously
+     been cached.
+
+6. Transport/session metrics are missing from persistence.
+   - There is no transport_sessions table yet for connection history, latency,
+     delivery success, signal quality by session, or battery test reporting.
+
+7. Authentication is not part of emergency offline identity.
+   - Firebase authentication screens exist, but core emergency device identity,
+     trust, and offline user/account recovery still need an explicit policy for
+     real deployment.
+
+SUGGESTED NEXT PLANS (RECOMMENDED ORDER)
+----------------------------------------
+PHASE 1 - Prove the offline core flow on physical devices
+1. Install the same current APK on at least two Android phones.
+2. Disable mobile data/internet and test:
+   - app-only peer discovery over BLE and Wi-Fi Direct;
+   - SOS send, receive, persistence after restart, and map placement;
+   - private chat send/receive from a marker;
+   - queued payload delivery after peers move out of range then reconnect.
+3. Capture exact failures, timings, hop counts, and Android logs per test run.
+4. Fix transport connection/reconnection issues revealed by these runs before
+   adding more user-facing features.
+
+PHASE 2 - Add capstone validation data (and update the ERD)
+1. Implement transport_sessions persistence with fields such as:
+   session_id, peer_id, transport_type, started_at, ended_at,
+   signal_strength, connection_result, and error_detail.
+2. Record delivery timestamps and relay outcomes so the paper can report:
+   successful delivery rate, delay/latency, hop count, failure causes, and
+   comparison of BLE versus Wi-Fi Direct.
+3. Update the final ERD/data dictionary to show only actually implemented
+   measurement tables once this migration is complete.
+
+PHASE 3 - Make relay usable when phones are not kept open
+1. Implement an Android foreground relay service with a visible notification.
+2. Use duty-cycled discovery and queued sends to limit battery drain.
+3. Test background behavior with screen locked, app minimized, process
+   restarted, Bluetooth toggled, and Wi-Fi toggled.
+4. Measure battery impact over an agreed test duration.
+
+PHASE 4 - Protect peer-to-peer private communication
+1. Add device identity keys and authenticated peer handshakes.
+2. End-to-end encrypt chat payload bodies before SCF storage/forwarding.
+3. Clearly separate public SOS broadcast confidentiality rules from private
+   conversation rules in the paper and UI.
+4. Add replay/tamper tests and an identity reset/recovery strategy.
+
+PHASE 5 - Strengthen operational map/offline readiness
+1. Confirm the exact barangay/city coverage required for the capstone demo.
+2. Package verified vector tile coverage for that required offline area, with
+   documented source/attribution and app size trade-offs.
+3. Test full offline cold launch after clearing online caches.
+4. Add a simple visible indication of bundled coverage versus cached-only
+   coverage if responders may leave Panabo.
+
+CAPSTONE DEMO MILESTONE TO TARGET NEXT
+--------------------------------------
+A strong next milestone is a recorded two-phone, no-internet demonstration:
+
+Phone A creates an SOS while fully offline -> Phone B discovers Phone A and
+receives the SOS -> the SOS appears on Phone B's offline Panabo map -> Phone B
+opens chat from that SOS marker and replies -> Phone A receives the reply ->
+both phones preserve their records after restarting the app.
+
+Call the app "offline-capable functional prototype" until that workflow is
+repeatable and the remaining background/security/measurement work is complete.

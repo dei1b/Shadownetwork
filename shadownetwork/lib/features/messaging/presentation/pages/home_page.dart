@@ -246,6 +246,24 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
+  Future<void> _connectToPeer(messaging.Peer peer) async {
+    if (peer.isConnected) {
+      _showMessage('${peer.name} is already connected.');
+      return;
+    }
+    final connected = await ref
+        .read(relayRuntimeProvider.notifier)
+        .connectToPeer(peer);
+    if (!mounted) {
+      return;
+    }
+    _showMessage(
+      connected
+          ? 'Connected to nearby peer.'
+          : 'Unable to connect to ${peer.name}. Keep both apps open.',
+    );
+  }
+
   String _formatLocationText() {
     final position = _myPosition;
     if (position == null) {
@@ -816,11 +834,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         typeLabel: _peerTypeLabel(peer),
                         actionLabel: _peerActionLabel(peer),
                         actionStyle: _peerActionStyle(peer),
-                        onActionTap: () => _showMessage(
-                          peer.isConnected
-                              ? '${peer.name} is already connected.'
-                              : 'Connection request queued for ${peer.name}.',
-                        ),
+                        onActionTap: () => _connectToPeer(peer),
                       ),
                     ),
                   )
@@ -2129,7 +2143,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                   .map(
                     (peer) => Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: _PeerCard(peer: peer),
+                      child: _PeerCard(
+                        peer: peer,
+                        onConnect: () => _connectToPeer(peer),
+                      ),
                     ),
                   )
                   .toList(growable: false),
@@ -3681,9 +3698,10 @@ class _PeerScanButton extends StatelessWidget {
 }
 
 class _PeerCard extends StatelessWidget {
-  const _PeerCard({required this.peer});
+  const _PeerCard({required this.peer, required this.onConnect});
 
   final messaging.Peer peer;
+  final VoidCallback onConnect;
 
   @override
   Widget build(BuildContext context) {
@@ -3767,7 +3785,7 @@ class _PeerCard extends StatelessWidget {
           ),
           isConnected
               ? const _ConnectedBadge()
-              : _ConnectButton(onPressed: () {}),
+              : _ConnectButton(onPressed: onConnect),
         ],
       ),
     );

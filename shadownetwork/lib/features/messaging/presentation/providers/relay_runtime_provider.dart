@@ -130,6 +130,25 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     );
   }
 
+  Future<bool> connectToPeer(Peer peer) async {
+    final now = DateTime.now();
+    try {
+      final transport = ref.read(scfTransportProvider);
+      final repository = await ref.read(peerRepositoryProvider.future);
+      final connectedPeer = await transport.connectPeer(peer);
+      await repository.upsertPeer(
+        connectedPeer.copyWith(isConnected: true, lastSeenAt: now),
+      );
+      state = state.copyWith(lastUpdated: now, lastError: null);
+      _invalidateViews();
+      await syncNow(force: true);
+      return true;
+    } catch (error) {
+      state = state.copyWith(lastUpdated: now, lastError: error.toString());
+      return false;
+    }
+  }
+
   Future<void> syncNow({bool force = true}) async {
     if (_syncInFlight || (!force && !state.isRunning)) {
       return;

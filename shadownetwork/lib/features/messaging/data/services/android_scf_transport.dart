@@ -78,6 +78,15 @@ class AndroidScfTransport implements ScfTransport {
   }
 
   @override
+  Future<Peer> connectPeer(Peer peer) async {
+    final map = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'connectPeer',
+      {'peerId': peer.id},
+    );
+    return _peerFromPlatformMap(map);
+  }
+
+  @override
   Future<void> sendEnvelope({
     required Peer peer,
     required ScfEnvelope envelope,
