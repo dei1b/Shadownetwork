@@ -88,6 +88,8 @@ const _sentinel = Object();
 
 class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   Timer? _syncTimer;
+  Timer? _ecbDebounceTimer;
+  StreamSubscription<void>? _relayEventSubscription;
   bool _syncInFlight = false;
 
   @override
@@ -116,18 +118,35 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     _syncTimer = Timer.periodic(_syncInterval, (_) {
       unawaited(syncNow(force: false));
     });
+    _relayEventSubscription?.cancel();
+    _relayEventSubscription = transport.relayEvents.listen((_) {
+      _scheduleEmergencyCellBroadcastSync();
+    });
     await syncNow(force: true);
   }
 
   void stop() {
     _syncTimer?.cancel();
     _syncTimer = null;
+    _ecbDebounceTimer?.cancel();
+    _ecbDebounceTimer = null;
+    _relayEventSubscription?.cancel();
+    _relayEventSubscription = null;
     state = state.copyWith(
       isRunning: false,
       isSyncing: false,
       discoveredPeers: 0,
       connectedPeers: 0,
     );
+  }
+
+  void _scheduleEmergencyCellBroadcastSync() {
+    if (!state.isRunning) return;
+
+    _ecbDebounceTimer?.cancel();
+    _ecbDebounceTimer = Timer(_ecbDebounceDelay, () {
+      unawaited(syncNow(force: true));
+    });
   }
 
   Future<bool> connectToPeer(Peer peer) async {
@@ -305,6 +324,10 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   void _dispose() {
     _syncTimer?.cancel();
     _syncTimer = null;
+    _ecbDebounceTimer?.cancel();
+    _ecbDebounceTimer = null;
+    _relayEventSubscription?.cancel();
+    _relayEventSubscription = null;
   }
 }
 
@@ -313,4 +336,5 @@ final relayRuntimeProvider =
       RelayRuntimeController.new,
     );
 
-const _syncInterval = Duration(seconds: 12);
+const _syncInterval = Duration(seconds: 4);
+const _ecbDebounceDelay = Duration(milliseconds: 350);

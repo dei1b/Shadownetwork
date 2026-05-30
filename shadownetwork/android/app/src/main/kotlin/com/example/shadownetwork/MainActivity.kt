@@ -10,10 +10,12 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         androidTransport = AndroidTransportBridge(this)
-        MethodChannel(
+        val channel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             AndroidTransportBridge.CHANNEL_NAME,
-        ).setMethodCallHandler(androidTransport::handle)
+        )
+        androidTransport.attachChannel(channel)
+        channel.setMethodCallHandler(androidTransport::handle)
     }
 
     override fun onDestroy() {

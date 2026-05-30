@@ -24,7 +24,6 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    ref.read(relayRuntimeProvider.notifier).stop();
     super.dispose();
   }
 
@@ -36,11 +35,13 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
         controller.start();
         break;
       case AppLifecycleState.paused:
-      case AppLifecycleState.detached:
       case AppLifecycleState.hidden:
-        controller.stop();
-        break;
       case AppLifecycleState.inactive:
+        // Keep the relay alive while the UI is backgrounded. Android keeps the
+        // native radio work visible through a foreground service notification.
+        break;
+      case AppLifecycleState.detached:
+        controller.stop();
         break;
     }
   }

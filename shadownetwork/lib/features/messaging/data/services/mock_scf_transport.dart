@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/transport_status.dart';
@@ -5,6 +7,8 @@ import '../../domain/services/scf_transport.dart';
 
 class MockScfTransportNetwork {
   final Map<String, _MockNode> _nodes = {};
+  final StreamController<void> _relayEvents =
+      StreamController<void>.broadcast();
 
   MockScfTransportEndpoint registerPeer(Peer peer) {
     final node = _nodes.putIfAbsent(peer.id, () => _MockNode(peer));
@@ -39,6 +43,7 @@ class MockScfTransportNetwork {
     }
 
     recipient.inbox.add(envelope);
+    _relayEvents.add(null);
   }
 
   List<ScfEnvelope> drainInbox(String peerId) {
@@ -72,6 +77,9 @@ class MockScfTransportEndpoint implements ScfTransport {
 
   @override
   final String localPeerId;
+
+  @override
+  Stream<void> get relayEvents => _network._relayEvents.stream;
 
   @override
   Future<Peer> getLocalPeer() async {

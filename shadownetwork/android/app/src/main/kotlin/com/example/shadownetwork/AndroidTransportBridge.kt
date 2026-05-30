@@ -97,6 +97,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private var pendingWifiPeerId: String? = null
     private var localPeerId: String = DEFAULT_LOCAL_PEER_ID
     private var localPeerName: String = DEFAULT_LOCAL_PEER_NAME
+    private var methodChannel: MethodChannel? = null
+
+    fun attachChannel(channel: MethodChannel) {
+        methodChannel = channel
+    }
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -184,6 +189,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
     fun stop() {
         running.set(false)
+        RelayForegroundService.stop(context)
         stopBle()
         stopWifiDirect()
         closeBluetoothServer()
@@ -279,6 +285,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         return permissions.distinct()
@@ -289,6 +296,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         if (!ensurePermissions()) {
             return
         }
+        RelayForegroundService.start(context)
         if (running.compareAndSet(false, true)) {
             startBluetoothSocketServer()
             startWifiSocketServer()
@@ -731,6 +739,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 name = record["peer_name"]?.takeIf { it.isNotBlank() }
                     ?: device.deviceName
                     ?: "Shadow Network Peer",
+                peerType = "civilian",
                 transport = TransportKind.WIFI_DIRECT,
                 deviceAddress = device.deviceAddress,
                 isConnected = device.status == WifiP2pDevice.CONNECTED ||
@@ -741,13 +750,26 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     }
 
     private fun rememberPeer(peer: DiscoveredPeer) {
+        var shouldNotify = false
         synchronized(discoveredPeers) {
             val existing = discoveredPeers[peer.id]
-            discoveredPeers[peer.id] = if (existing == null) {
+            val merged = if (existing == null) {
+                shouldNotify = peer.isVerifiedAppPeer && peer.id != localPeerId
                 peer
             } else {
-                existing.merge(peer)
+                existing.merge(peer).also { mergedPeer ->
+                    shouldNotify = mergedPeer.isVerifiedAppPeer &&
+                        mergedPeer.id != localPeerId &&
+                        (mergedPeer.transport != existing.transport ||
+                            mergedPeer.isConnected != existing.isConnected ||
+                            mergedPeer.deviceAddress != existing.deviceAddress ||
+                            mergedPeer.bluetoothAddress != existing.bluetoothAddress)
+                }
             }
+            discoveredPeers[peer.id] = merged
+        }
+        if (shouldNotify) {
+            notifyRelayEvent("peer_available")
         }
     }
 
@@ -986,16 +1008,28 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 ),
             )
         }
+        notifyRelayEvent("envelope_available")
+    }
+
+    private fun notifyRelayEvent(type: String) {
+        activity.runOnUiThread {
+            methodChannel?.invokeMethod("onRelayEvent", mapOf("type" to type))
+        }
     }
 
     private fun connectPeerInternal(peerId: String): DiscoveredPeer {
         val peer = findPeer(peerId)
             ?: throw IOException("Peer $peerId is not available for connection.")
         if (peer.transport == TransportKind.WIFI_DIRECT) {
-            ensureWifiConnection(peer)
-            val connected = peer.copy(isConnected = true)
-            rememberPeer(connected)
-            return connected
+            return runCatching {
+                ensureWifiConnection(peer)
+                peer.copy(isConnected = true)
+            }.getOrElse {
+                if (peer.bluetoothAddress.isNullOrBlank()) {
+                    throw it
+                }
+                readBleIdentity(peer.copy(transport = TransportKind.BLUETOOTH), markConnected = true)
+            }.also(::rememberPeer)
         }
 
         val connected = readBleIdentity(peer, markConnected = true)
@@ -1033,12 +1067,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 ensureWifiConnection(peer).sendFrame(envelopeJson)
                 true
             }.getOrElse {
-                if (peer.bluetoothAddress != null) {
-                    ensureBluetoothConnection(peer).sendFrame(envelopeJson)
-                    true
-                } else {
+                if (peer.bluetoothAddress.isNullOrBlank()) {
                     throw it
                 }
+                sendBleEnvelope(peer.copy(transport = TransportKind.BLUETOOTH), envelopeJson)
+                true
             }
             else -> {
                 sendBleEnvelope(peer, envelopeJson)
@@ -1499,9 +1532,15 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val isVerifiedAppPeer: Boolean = false,
     ) {
         fun merge(other: DiscoveredPeer): DiscoveredPeer {
+            val preferredTransport = when {
+                transport == TransportKind.WIFI_DIRECT -> transport
+                other.transport == TransportKind.WIFI_DIRECT -> other.transport
+                else -> other.transport
+            }
             return copy(
                 name = if (other.name.isNotBlank()) other.name else name,
                 peerType = if (other.peerType != "unknown") other.peerType else peerType,
+                transport = preferredTransport,
                 deviceAddress = other.deviceAddress ?: deviceAddress,
                 bluetoothAddress = other.bluetoothAddress ?: bluetoothAddress,
                 isConnected = other.isConnected || isConnected,

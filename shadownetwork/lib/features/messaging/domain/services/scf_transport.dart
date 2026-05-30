@@ -5,6 +5,8 @@ import '../entities/transport_status.dart';
 abstract class ScfTransport {
   String get localPeerId;
 
+  Stream<void> get relayEvents;
+
   Future<Peer> getLocalPeer();
 
   Future<TransportStatus> getStatus();

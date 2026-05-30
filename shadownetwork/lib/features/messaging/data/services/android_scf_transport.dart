@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../../domain/entities/peer.dart';
@@ -13,13 +15,26 @@ class AndroidScfTransport implements ScfTransport {
     this.localPeerName = 'This Device',
     MethodChannel? channel,
   }) : _channel =
-           channel ?? const MethodChannel('shadownetwork/android_transport');
+           channel ?? const MethodChannel('shadownetwork/android_transport') {
+    _channel.setMethodCallHandler(_handleNativeRelayEvent);
+  }
 
   final MethodChannel _channel;
   final String localPeerName;
+  static final StreamController<void> _relayEvents =
+      StreamController<void>.broadcast();
 
   @override
   final String localPeerId;
+
+  @override
+  Stream<void> get relayEvents => _relayEvents.stream;
+
+  static Future<void> _handleNativeRelayEvent(MethodCall call) async {
+    if (call.method == 'onRelayEvent') {
+      _relayEvents.add(null);
+    }
+  }
 
   @override
   Future<Peer> getLocalPeer() async {
