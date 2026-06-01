@@ -1,0 +1,65 @@
+name: Android release APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shadownetwork
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.7'
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Read app version
+        id: app_version
+        shell: bash
+        run: |
+          VERSION_NAME="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          TAG="v${VERSION_NAME}+${BUILD_NUMBER}"
+          echo "version_name=${VERSION_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "build_number=${BUILD_NUMBER}" >> "${GITHUB_OUTPUT}"
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release APK
+        run: >
+          flutter build apk --release
+          --build-name "${{ steps.app_version.outputs.version_name }}"
+          --build-number "${{ steps.app_version.outputs.build_number }}"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.app_version.outputs.tag }}
+        run: |
+          gh release create "${RELEASE_TAG}" \
+            build/app/outputs/flutter-apk/app-release.apk \
+            --title "Shadow Network ${RELEASE_TAG}" \
+            --notes "Automatic Android APK build from commit ${GITHUB_SHA}."

@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_chat_repository.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
@@ -44,6 +45,9 @@ void main() {
         body: 'Rescue team is on the way.',
         status: MessageStatus.received,
         createdAt: DateTime.utc(2026, 5, 25, 10),
+        moderationStatus: MessageModerationStatus.spam,
+        moderationReason: 'levenshtein_similarity',
+        moderationScore: 0.92,
       ),
       incrementUnread: true,
     );
@@ -54,8 +58,12 @@ void main() {
     expect(threads, hasLength(1));
     expect(threads.single.unreadCount, 1);
     expect(threads.single.latestBody, 'Rescue team is on the way.');
+    expect(threads.single.latestModerationStatus, MessageModerationStatus.spam);
     expect(messages.single.recipient.id, local.id);
     expect(messages.single.status, MessageStatus.received);
+    expect(messages.single.moderationStatus, MessageModerationStatus.spam);
+    expect(messages.single.moderationReason, 'levenshtein_similarity');
+    expect(messages.single.moderationScore, 0.92);
 
     await repository.updateOutgoingMessageStatus(
       messageHash: messages.single.messageHash!,

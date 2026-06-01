@@ -75,7 +75,8 @@ class SqliteChatRepository implements ChatRepository {
         peers.latitude AS remote_latitude,
         peers.longitude AS remote_longitude,
         latest.body AS latest_body,
-        latest.status AS latest_status
+        latest.status AS latest_status,
+        latest.moderation_status AS latest_moderation_status
       FROM ${LocalMessagingDatabase.conversationsTable} AS conversations
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = conversations.remote_peer_id
@@ -115,6 +116,36 @@ class SqliteChatRepository implements ChatRepository {
       ORDER BY messages.created_at ASC
     ''',
       [conversationId],
+    );
+    return rows.map(ChatMessageModel.fromMap).toList(growable: false);
+  }
+
+  @override
+  Future<List<ChatMessage>> getRecentMessagesBySender({
+    required String senderPeerId,
+    required DateTime since,
+  }) async {
+    final rows = await _database.rawQuery(
+      '''
+      SELECT messages.*,
+        sender.display_name AS sender_display_name,
+        sender.peer_type_code AS sender_peer_type,
+        sender.is_connected AS sender_is_connected,
+        sender.signal_strength AS sender_signal_strength,
+        sender.last_seen_at AS sender_last_seen_at,
+        recipient.display_name AS recipient_display_name,
+        recipient.peer_type_code AS recipient_peer_type,
+        recipient.is_connected AS recipient_is_connected,
+        recipient.signal_strength AS recipient_signal_strength,
+        recipient.last_seen_at AS recipient_last_seen_at
+      FROM ${LocalMessagingDatabase.chatMessagesTable} AS messages
+      INNER JOIN ${LocalMessagingDatabase.peersTable} AS sender ON sender.id = messages.sender_peer_id
+      INNER JOIN ${LocalMessagingDatabase.peersTable} AS recipient ON recipient.id = messages.recipient_peer_id
+      WHERE messages.sender_peer_id = ?
+        AND messages.created_at >= ?
+      ORDER BY messages.created_at DESC
+    ''',
+      [senderPeerId, since.toUtc().toIso8601String()],
     );
     return rows.map(ChatMessageModel.fromMap).toList(growable: false);
   }

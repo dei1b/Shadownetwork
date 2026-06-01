@@ -18,13 +18,16 @@ import '../../data/services/scf_service.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/conversation.dart';
+import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/sos_message.dart';
+import '../../domain/entities/spam_detection_result.dart';
 import '../../domain/repositories/peer_repository.dart';
 import '../../domain/repositories/chat_repository.dart';
 import '../../domain/repositories/sos_message_repository.dart';
 import '../../domain/services/scf_transport.dart';
+import '../../domain/services/spam_detection_service.dart';
 
 final localMessagingDatabaseProvider = FutureProvider<Database>((ref) async {
   final database = await LocalMessagingDatabase.open();
@@ -77,6 +80,10 @@ final scfRelayServiceProvider = FutureProvider<ScfRelayService>((ref) async {
   final transport = ref.watch(scfTransportProvider);
   return ScfRelayService(scfService: scfService, transport: transport);
 });
+
+final spamDetectionServiceProvider = Provider<SpamDetectionService>(
+  (ref) => const SpamDetectionService(),
+);
 
 final mapTileCacheStoreProvider = FutureProvider<CacheStore>((ref) async {
   final directory = await getApplicationSupportDirectory();
@@ -142,6 +149,7 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
     final localPeer = await ref.read(localPeerProvider.future);
     final repository = await ref.read(chatRepositoryProvider.future);
     final scfService = await ref.read(scfServiceProvider.future);
+    final spamDetectionService = ref.read(spamDetectionServiceProvider);
     final now = DateTime.now().toUtc();
     final message = ChatMessage(
       id: 'chat-${now.microsecondsSinceEpoch}',
@@ -153,8 +161,17 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
       createdAt: now,
       relatedSosMessageHash: conversation.relatedSosMessageHash,
     );
-    await repository.saveMessage(message);
-    await scfService.storeChatMessage(message);
+    final recentMessages = await repository.getRecentMessagesBySender(
+      senderPeerId: localPeer.id,
+      since: now.subtract(spamDetectionService.window),
+    );
+    final moderation = spamDetectionService.classify(
+      candidate: _chatSimilaritySample(message),
+      priorMessages: recentMessages.map(_chatSimilaritySample),
+    );
+    final moderatedMessage = _withChatModeration(message, moderation);
+    await repository.saveMessage(moderatedMessage);
+    await scfService.storeChatMessage(moderatedMessage);
     ref.invalidate(conversationsProvider);
     ref.invalidate(chatMessagesProvider(conversation.id));
   };
@@ -176,12 +193,65 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
   return (message) async {
     final repository = await ref.read(sosMessageRepositoryProvider.future);
     final scfService = await ref.read(scfServiceProvider.future);
-    await repository.saveMessage(message);
-    await scfService.storeMessage(message);
+    final spamDetectionService = ref.read(spamDetectionServiceProvider);
+    final recentMessages = await repository.getRecentMessagesBySender(
+      senderPeerId: message.sender.id,
+      since: message.createdAt.toUtc().subtract(spamDetectionService.window),
+    );
+    final moderation = spamDetectionService.classify(
+      candidate: _sosSimilaritySample(message),
+      priorMessages: recentMessages.map(_sosSimilaritySample),
+    );
+    final moderatedMessage = _withSosModeration(message, moderation);
+    await repository.saveMessage(moderatedMessage);
+    await scfService.storeMessage(moderatedMessage);
     ref.invalidate(sosMessagesProvider);
     ref.invalidate(nearbyPeersProvider);
   };
 });
+
+MessageSimilaritySample _sosSimilaritySample(SosMessage message) {
+  return MessageSimilaritySample(
+    senderPeerId: message.sender.id,
+    body: message.body,
+    createdAt: message.createdAt,
+    messageId: message.id,
+    messageHash: message.messageHash,
+  );
+}
+
+MessageSimilaritySample _chatSimilaritySample(ChatMessage message) {
+  return MessageSimilaritySample(
+    senderPeerId: message.sender.id,
+    body: message.body,
+    createdAt: message.createdAt,
+    messageId: message.id,
+    messageHash: message.messageHash,
+  );
+}
+
+SosMessage _withSosModeration(SosMessage message, SpamDetectionResult result) {
+  return message.copyWith(
+    moderationStatus: result.status,
+    moderationReason: result.reason,
+    moderationScore: result.status == MessageModerationStatus.spam
+        ? result.score
+        : null,
+  );
+}
+
+ChatMessage _withChatModeration(
+  ChatMessage message,
+  SpamDetectionResult result,
+) {
+  return message.copyWith(
+    moderationStatus: result.status,
+    moderationReason: result.reason,
+    moderationScore: result.status == MessageModerationStatus.spam
+        ? result.score
+        : null,
+  );
+}
 
 Peer _defaultDesktopLocalPeer() {
   final hostName = Platform.localHostname.trim();

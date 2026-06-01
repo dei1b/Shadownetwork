@@ -14,6 +14,11 @@ abstract class ChatRepository {
 
   Future<List<ChatMessage>> getMessages(String conversationId);
 
+  Future<List<ChatMessage>> getRecentMessagesBySender({
+    required String senderPeerId,
+    required DateTime since,
+  });
+
   Future<void> saveMessage(ChatMessage message, {bool incrementUnread = false});
 
   Future<void> updateOutgoingMessageStatus({

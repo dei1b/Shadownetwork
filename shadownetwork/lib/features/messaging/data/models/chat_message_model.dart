@@ -1,4 +1,5 @@
 import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
@@ -23,6 +24,12 @@ class ChatMessageModel {
       updatedAt: map['updated_at'] == null
           ? null
           : DateTime.parse(map['updated_at']! as String),
+      moderationStatus: MessageModerationStatus.values.byName(
+        (map['moderation_status'] as String?) ??
+            MessageModerationStatus.normal.name,
+      ),
+      moderationReason: map['moderation_reason'] as String?,
+      moderationScore: (map['moderation_score'] as num?)?.toDouble(),
     );
   }
 
@@ -38,6 +45,9 @@ class ChatMessageModel {
     'related_sos_message_hash': message.relatedSosMessageHash,
     'hop_count': message.hopCount,
     'ttl_seconds': message.ttl.inSeconds,
+    'moderation_status': message.moderationStatus.name,
+    'moderation_reason': message.moderationReason,
+    'moderation_score': message.moderationScore,
     'created_at': message.createdAt.toUtc().toIso8601String(),
     'updated_at': message.updatedAt?.toUtc().toIso8601String(),
   };

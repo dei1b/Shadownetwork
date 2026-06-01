@@ -1,4 +1,5 @@
 import 'category.dart';
+import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
 
@@ -17,6 +18,9 @@ class SosMessage {
     this.gpsAccuracyMeters,
     this.hopCount = 0,
     this.ttl = const Duration(hours: 24),
+    this.moderationStatus = MessageModerationStatus.normal,
+    this.moderationReason,
+    this.moderationScore,
   });
 
   final String id;
@@ -32,6 +36,9 @@ class SosMessage {
   final double? gpsAccuracyMeters;
   final int hopCount;
   final Duration ttl;
+  final MessageModerationStatus moderationStatus;
+  final String? moderationReason;
+  final double? moderationScore;
 
   SosMessage copyWith({
     String? id,
@@ -47,6 +54,9 @@ class SosMessage {
     double? gpsAccuracyMeters,
     int? hopCount,
     Duration? ttl,
+    MessageModerationStatus? moderationStatus,
+    String? moderationReason,
+    double? moderationScore,
   }) {
     return SosMessage(
       id: id ?? this.id,
@@ -62,6 +72,9 @@ class SosMessage {
       gpsAccuracyMeters: gpsAccuracyMeters ?? this.gpsAccuracyMeters,
       hopCount: hopCount ?? this.hopCount,
       ttl: ttl ?? this.ttl,
+      moderationStatus: moderationStatus ?? this.moderationStatus,
+      moderationReason: moderationReason ?? this.moderationReason,
+      moderationScore: moderationScore ?? this.moderationScore,
     );
   }
 }

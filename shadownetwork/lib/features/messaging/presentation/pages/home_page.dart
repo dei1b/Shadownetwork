@@ -8,8 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
+import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
 
 import '../../domain/entities/category.dart' as messaging;
+import '../../domain/entities/message_moderation_status.dart' as messaging;
 import '../../domain/entities/message_status.dart' as messaging;
 import '../../domain/entities/peer.dart' as messaging;
 import '../../domain/entities/peer_type.dart' as messaging;
@@ -19,6 +22,7 @@ import '../../data/services/offline_panabo_tile_server.dart';
 import 'conversation_page.dart';
 import '../providers/local_messaging_providers.dart';
 import '../providers/relay_runtime_provider.dart';
+import '../utils/message_feed_filter.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -37,6 +41,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   };
   bool _showMapPeers = true;
   bool _showMapLocation = true;
+  bool _isCheckingAppUpdate = false;
 
   static const String _mapFilterAllMarkers = 'all-markers';
   static const String _mapFilterPeers = 'peers';
@@ -228,6 +233,109 @@ class _HomePageState extends ConsumerState<HomePage> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    if (_isCheckingAppUpdate) {
+      return;
+    }
+
+    setState(() => _isCheckingAppUpdate = true);
+    try {
+      final update = await ref
+          .read(appUpdateServiceProvider)
+          .checkLatestRelease();
+      if (!mounted) {
+        return;
+      }
+
+      switch (update.status) {
+        case AppUpdateStatus.updateAvailable:
+          final shouldDownload = await _showAppUpdateDialog(
+            title: 'Update available',
+            message:
+                'Current: ${update.currentVersion}. Latest: ${update.latestVersion}.',
+            actionLabel: 'DOWNLOAD',
+          );
+          if (shouldDownload == true) {
+            await _openAppUpdateDownload(update);
+          }
+          break;
+        case AppUpdateStatus.latestVersionUnknown:
+          final shouldDownload = await _showAppUpdateDialog(
+            title: 'Latest APK found',
+            message: 'Version could not be compared. Open the download anyway?',
+            actionLabel: 'OPEN',
+          );
+          if (shouldDownload == true) {
+            await _openAppUpdateDownload(update);
+          }
+          break;
+        case AppUpdateStatus.upToDate:
+          await _showAppUpdateDialog(
+            title: 'App is up to date',
+            message: 'Installed version: ${update.currentVersion}.',
+            actionLabel: update.canDownload ? 'VIEW APK' : 'OK',
+            showCancel: update.canDownload,
+          ).then((shouldOpen) async {
+            if (shouldOpen == true) {
+              await _openAppUpdateDownload(update);
+            }
+          });
+          break;
+        case AppUpdateStatus.noRelease:
+          _showMessage(
+            'No GitHub release found yet. Upload an APK release first.',
+          );
+          break;
+        case AppUpdateStatus.noAndroidApk:
+          _showMessage('Latest GitHub release has no APK asset.');
+          break;
+      }
+    } catch (_) {
+      _showMessage('Unable to check for app updates right now.');
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingAppUpdate = false);
+      }
+    }
+  }
+
+  Future<void> _openAppUpdateDownload(AppUpdateCheck update) async {
+    final opened = await ref
+        .read(appUpdateServiceProvider)
+        .openDownload(update);
+    if (!opened) {
+      _showMessage('Unable to open the APK download link.');
+    }
+  }
+
+  Future<bool?> _showAppUpdateDialog({
+    required String title,
+    required String message,
+    required String actionLabel,
+    bool showCancel = true,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            if (showCancel)
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('CANCEL'),
+              ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: Text(actionLabel),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _syncRelayNow() async {
@@ -513,6 +621,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       ('SOS Alerts', Icons.sos_rounded, 'SOS'),
       ('Requests', Icons.pan_tool_outlined, 'REQUEST'),
       ('Updates', Icons.campaign_outlined, 'UPDATE'),
+      ('Spam', Icons.report_gmailerrorred_rounded, 'SPAM'),
     ];
 
     final String activeType = filters[_selectedMessageFilter].$3;
@@ -660,16 +769,34 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
-        if (activeType == 'ALL')
+        if (activeType == 'ALL' || activeType == 'SPAM')
           conversations.when(
-            data: (items) => items.isEmpty
-                ? const SizedBox.shrink()
-                : Column(
-                    children: [
-                      ...items.map(_buildConversationCard),
-                      const SizedBox(height: 2),
-                    ],
-                  ),
+            data: (items) {
+              final visibleConversations = items
+                  .where((conversation) {
+                    return shouldShowConversationForFilter(
+                      conversation: conversation,
+                      activeFilter: activeType,
+                    );
+                  })
+                  .toList(growable: false);
+
+              return visibleConversations.isEmpty
+                  ? const SizedBox.shrink()
+                  : Column(
+                      children: [
+                        ...visibleConversations.map(
+                          (conversation) => _buildConversationCard(
+                            conversation,
+                            isSpam:
+                                conversation.latestModerationStatus ==
+                                messaging.MessageModerationStatus.spam,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                      ],
+                    );
+            },
             loading: () => const SizedBox.shrink(),
             error: (_, _) => const SizedBox.shrink(),
           ),
@@ -678,9 +805,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             final feedItems = items
                 .map(_messageFeedItemFromSosMessage)
                 .toList();
-            final filteredMessages = activeType == 'ALL'
-                ? feedItems
-                : feedItems.where((item) => item.type == activeType).toList();
+            final filteredMessages = feedItems
+                .where((item) {
+                  return shouldShowSosMessageForFilter(
+                    message: item.message,
+                    messageType: item.type,
+                    activeFilter: activeType,
+                  );
+                })
+                .toList(growable: false);
 
             if (filteredMessages.isEmpty) {
               return _buildEmptyState(
@@ -790,8 +923,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             const SizedBox(width: 12),
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: _PeerSearchButton(
-                onTap: () => _showMessage('Peer search is not active yet.'),
+              child: _PeerUpdateButton(
+                isLoading: _isCheckingAppUpdate,
+                onTap: _checkForAppUpdate,
               ),
             ),
           ],
@@ -864,8 +998,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     _MessageFeedItem item, {
     required VoidCallback onTap,
   }) {
+    final isSpam = item.isSpam;
+    final cardColor = isSpam ? const Color(0xFFFFFAF0) : Colors.white;
+    final titleColor = isSpam
+        ? const Color(0xFF6F5315)
+        : item.type == 'SOS'
+        ? const Color(0xFFE83C3D)
+        : const Color(0xFF1F1F1F);
     return Material(
-      color: Colors.white,
+      color: cardColor,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -874,8 +1015,9 @@ class _HomePageState extends ConsumerState<HomePage> {
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: cardColor,
             borderRadius: BorderRadius.circular(8),
+            border: isSpam ? Border.all(color: const Color(0xFFE5C56C)) : null,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.06),
@@ -910,9 +1052,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
-                              color: item.type == 'SOS'
-                                  ? const Color(0xFFE83C3D)
-                                  : const Color(0xFF1F1F1F),
+                              color: titleColor,
                             ),
                           ),
                         ),
@@ -938,10 +1078,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.location_on,
                           size: 16,
-                          color: Color(0xFFE83C3D),
+                          color: isSpam
+                              ? const Color(0xFF8A6A1F)
+                              : const Color(0xFFE83C3D),
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -983,11 +1125,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Widget _buildConversationCard(messaging.Conversation conversation) {
+  Widget _buildConversationCard(
+    messaging.Conversation conversation, {
+    bool isSpam = false,
+  }) {
     final peer = conversation.remotePeer;
-    final status = conversation.latestStatus?.name ?? 'ready';
+    final status = isSpam ? 'spam' : conversation.latestStatus?.name ?? 'ready';
+    final cardColor = isSpam ? const Color(0xFFFFFAF0) : Colors.white;
     return Material(
-      color: Colors.white,
+      color: cardColor,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -995,11 +1141,18 @@ class _HomePageState extends ConsumerState<HomePage> {
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(8),
+            border: isSpam ? Border.all(color: const Color(0xFFE5C56C)) : null,
+          ),
           child: Row(
             children: [
               CircleAvatar(
                 radius: 25,
-                backgroundColor: _avatarColorForPeer(peer),
+                backgroundColor: isSpam
+                    ? const Color(0xFF8A6A1F)
+                    : _avatarColorForPeer(peer),
                 child: const Icon(Icons.person, color: Colors.white),
               ),
               const SizedBox(width: 12),
@@ -1041,10 +1194,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                     const SizedBox(height: 6),
                     Text(
                       status.toUpperCase(),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFFE83C3D),
+                        color: isSpam
+                            ? const Color(0xFF8A6A1F)
+                            : const Color(0xFFE83C3D),
                       ),
                     ),
                   ],
@@ -1080,8 +1235,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   _MessageFeedItem _messageFeedItemFromSosMessage(
     messaging.SosMessage message,
   ) {
-    final type = _messageTypeForCategory(message.category);
-    final accentColor = _colorForCategory(message.category);
+    final isSpam =
+        message.moderationStatus == messaging.MessageModerationStatus.spam;
+    final type = isSpam ? 'SPAM' : _messageTypeForCategory(message.category);
+    final accentColor = isSpam
+        ? const Color(0xFF8A6A1F)
+        : _colorForCategory(message.category);
 
     return _MessageFeedItem(
       message: message,
@@ -1092,9 +1251,12 @@ class _HomePageState extends ConsumerState<HomePage> {
       time: _relativeTime(message.createdAt),
       badge: type,
       type: type,
-      icon: _iconForCategory(message.category),
+      icon: isSpam
+          ? Icons.report_gmailerrorred_rounded
+          : _iconForCategory(message.category),
       iconColor: accentColor,
       badgeColor: accentColor,
+      isSpam: isSpam,
     );
   }
 
@@ -1675,10 +1837,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return items
         .where(
-          (message) =>
-              activeCategories.contains(message.category) &&
-              message.latitude != null &&
-              message.longitude != null,
+          (message) => shouldShowSosMessageOnMap(
+            message: message,
+            visibleCategories: activeCategories,
+          ),
         )
         .map(
           (message) => _MapOverlayMarker(
@@ -2242,6 +2404,7 @@ class _MessageFeedItem {
   final IconData icon;
   final Color iconColor;
   final Color badgeColor;
+  final bool isSpam;
 
   const _MessageFeedItem({
     required this.message,
@@ -2254,6 +2417,7 @@ class _MessageFeedItem {
     required this.icon,
     required this.iconColor,
     required this.badgeColor,
+    this.isSpam = false,
   });
 }
 
@@ -2266,9 +2430,10 @@ class _NavItem {
 
 enum _PeerActionStyle { filledRed, outlineRed, outlineOrange }
 
-class _PeerSearchButton extends StatelessWidget {
-  const _PeerSearchButton({required this.onTap});
+class _PeerUpdateButton extends StatelessWidget {
+  const _PeerUpdateButton({required this.isLoading, required this.onTap});
 
+  final bool isLoading;
   final VoidCallback onTap;
 
   @override
@@ -2281,10 +2446,22 @@ class _PeerSearchButton extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
-        child: const SizedBox(
+        child: SizedBox(
           width: 46,
           height: 46,
-          child: Icon(Icons.search_rounded, size: 28, color: Colors.black),
+          child: isLoading
+              ? const Padding(
+                  padding: EdgeInsets.all(13),
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.2,
+                    color: Color(0xFFE83C3D),
+                  ),
+                )
+              : const Icon(
+                  Icons.system_update_alt_rounded,
+                  size: 27,
+                  color: Color(0xFFE83C3D),
+                ),
         ),
       ),
     );
@@ -2929,318 +3106,327 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
           color: const Color(0xFFF6F6F7),
           borderRadius: BorderRadius.circular(22),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD8D8D8),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFE83C3D),
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text(
-                    'SOS',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18,
-                    ),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD8D8D8),
+                    borderRadius: BorderRadius.circular(99),
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Send SOS Message',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF1F1F1F),
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Alert nearby peers about your situation',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF737373),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Message',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF222222),
               ),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _messageController,
-              maxLength: 250,
-              minLines: 3,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: 'Describe your situation...',
-                counterText: '',
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: Color(0xFFE83C3D)),
-                ),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                '${_messageController.text.length}/250',
-                style: const TextStyle(color: Color(0xFF8A8A8A), fontSize: 12),
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Category',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF222222),
-              ),
-            ),
-            const SizedBox(height: 8),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: _categories.length,
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 4,
-                mainAxisSpacing: 10,
-                crossAxisSpacing: 10,
-                childAspectRatio: 1.35,
-              ),
-              itemBuilder: (context, index) {
-                final isSelected = _selectedCategory == index;
-                final item = _categories[index];
-                return InkWell(
-                  onTap: () => setState(() => _selectedCategory = index),
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? const Color(0xFFFFF5F5)
-                          : const Color(0xFFF0EEEF),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected
-                            ? const Color(0xFFE83C3D)
-                            : Colors.transparent,
-                        width: 1.2,
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          item.icon,
-                          color: const Color(0xFFE83C3D),
-                          size: 20,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item.label,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Color(0xFFDD3D3D),
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFEFF0),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
+              const SizedBox(height: 10),
+              Row(
                 children: [
-                  const Icon(
-                    Icons.location_on,
-                    color: Color(0xFF8B1618),
-                    size: 23,
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFE83C3D),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'SOS',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                      ),
+                    ),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
+                  const SizedBox(width: 12),
+                  const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Your Location',
+                        Text(
+                          'Send SOS Message',
                           style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF2C2C2C),
-                            fontSize: 16,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF1F1F1F),
                           ),
                         ),
+                        SizedBox(height: 2),
                         Text(
-                          widget.locationText,
-                          style: const TextStyle(
-                            color: Color(0xFF777777),
-                            fontSize: 12,
+                          'Alert nearby peers about your situation',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF737373),
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                  TextButton.icon(
-                    onPressed: _updatingLocation
-                        ? null
-                        : () async {
-                            setState(() => _updatingLocation = true);
-                            await widget.onUpdateLocation();
-                            if (mounted) {
-                              setState(() => _updatingLocation = false);
-                            }
-                          },
-                    icon: _updatingLocation
-                        ? const SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.gps_fixed),
-                    label: const Text('Update'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFFE83C3D),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _sending
-                        ? null
-                        : () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      side: const BorderSide(color: Color(0xFFE83C3D)),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+              const SizedBox(height: 14),
+              const Text(
+                'Message',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF222222),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _messageController,
+                maxLength: 250,
+                minLines: 3,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Describe your situation...',
+                  counterText: '',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFE83C3D)),
+                  ),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '${_messageController.text.length}/250',
+                  style: const TextStyle(
+                    color: Color(0xFF8A8A8A),
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Category',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF222222),
+                ),
+              ),
+              const SizedBox(height: 8),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _categories.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 1.35,
+                ),
+                itemBuilder: (context, index) {
+                  final isSelected = _selectedCategory == index;
+                  final item = _categories[index];
+                  return InkWell(
+                    onTap: () => setState(() => _selectedCategory = index),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFFFFF5F5)
+                            : const Color(0xFFF0EEEF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFFE83C3D)
+                              : Colors.transparent,
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            item.icon,
+                            color: const Color(0xFFE83C3D),
+                            size: 20,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            item.label,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFFDD3D3D),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    child: const Text(
-                      'CANCEL',
-                      style: TextStyle(
-                        color: Color(0xFFD23434),
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFEFF0),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on,
+                      color: Color(0xFF8B1618),
+                      size: 23,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Your Location',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF2C2C2C),
+                              fontSize: 16,
+                            ),
+                          ),
+                          Text(
+                            widget.locationText,
+                            style: const TextStyle(
+                              color: Color(0xFF777777),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _updatingLocation
+                          ? null
+                          : () async {
+                              setState(() => _updatingLocation = true);
+                              await widget.onUpdateLocation();
+                              if (mounted) {
+                                setState(() => _updatingLocation = false);
+                              }
+                            },
+                      icon: _updatingLocation
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.gps_fixed),
+                      label: const Text('Update'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFE83C3D),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _sending
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                        side: const BorderSide(color: Color(0xFFE83C3D)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Text(
+                        'CANCEL',
+                        style: TextStyle(
+                          color: Color(0xFFD23434),
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _sending
-                        ? null
-                        : () async {
-                            final messenger = ScaffoldMessenger.of(context);
-                            final navigator = Navigator.of(context);
-                            final body = _messageController.text.trim();
-                            if (body.isEmpty) {
-                              messenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text('Message cannot be empty.'),
-                                ),
-                              );
-                              return;
-                            }
-
-                            setState(() => _sending = true);
-                            try {
-                              await widget.onSend(
-                                body,
-                                _categories[_selectedCategory].category,
-                              );
-                              if (mounted) {
-                                navigator.pop(true);
-                              }
-                            } catch (_) {
-                              if (mounted) {
-                                setState(() => _sending = false);
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _sending
+                          ? null
+                          : () async {
+                              final messenger = ScaffoldMessenger.of(context);
+                              final navigator = Navigator.of(context);
+                              final body = _messageController.text.trim();
+                              if (body.isEmpty) {
                                 messenger.showSnackBar(
                                   const SnackBar(
-                                    content: Text('Unable to queue SOS.'),
+                                    content: Text('Message cannot be empty.'),
                                   ),
                                 );
+                                return;
                               }
-                            }
-                          },
-                    icon: const Icon(Icons.near_me, color: Colors.white),
-                    label: const Text(
-                      'SEND SOS',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
+
+                              setState(() => _sending = true);
+                              try {
+                                await widget.onSend(
+                                  body,
+                                  _categories[_selectedCategory].category,
+                                );
+                                if (mounted) {
+                                  navigator.pop(true);
+                                }
+                              } catch (_) {
+                                if (mounted) {
+                                  setState(() => _sending = false);
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Unable to queue SOS.'),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                      icon: const Icon(Icons.near_me, color: Colors.white),
+                      label: const Text(
+                        'SEND SOS',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 20,
+                        ),
                       ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      backgroundColor: const Color(0xFFE83C3D),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                        backgroundColor: const Color(0xFFE83C3D),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

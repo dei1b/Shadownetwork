@@ -1,0 +1,1 @@
+enum MessageModerationStatus { normal, spam }

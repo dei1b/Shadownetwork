@@ -7,13 +7,18 @@ import '../../data/models/sos_message_payload.dart';
 import '../../data/models/chat_message_payload.dart';
 import '../../data/models/relay_payload_codec.dart';
 import '../../data/services/scf_service.dart';
+import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
+import '../../domain/entities/sos_message.dart';
+import '../../domain/entities/spam_detection_result.dart';
 import '../../domain/repositories/peer_repository.dart';
 import '../../domain/repositories/chat_repository.dart';
 import '../../domain/repositories/sos_message_repository.dart';
+import '../../domain/services/spam_detection_service.dart';
 import 'local_messaging_providers.dart';
 
 class RelayRuntimeState {
@@ -186,6 +191,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       );
       final chatRepository = await ref.read(chatRepositoryProvider.future);
       final scfService = await ref.read(scfServiceProvider.future);
+      final spamDetectionService = ref.read(spamDetectionServiceProvider);
       final localPeer = await transport.getLocalPeer();
 
       final discoveredPeers = await relayService.discoverPeers();
@@ -198,6 +204,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         messageRepository: messageRepository,
         chatRepository: chatRepository,
         scfService: scfService,
+        spamDetectionService: spamDetectionService,
         peerRepository: peerRepository,
         localPeer: localPeer,
         envelopes: inboundEnvelopes,
@@ -265,6 +272,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     required SosMessageRepository messageRepository,
     required ChatRepository chatRepository,
     required ScfService scfService,
+    required SpamDetectionService spamDetectionService,
     required PeerRepository peerRepository,
     required Peer localPeer,
     required List<ScfEnvelope> envelopes,
@@ -285,8 +293,19 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             remotePeer: chat.sender,
             relatedSosMessageHash: chat.relatedSosMessageHash,
           );
+          final candidate = chat.copyWith(conversationId: conversation.id);
+          final recentMessages = await chatRepository.getRecentMessagesBySender(
+            senderPeerId: candidate.sender.id,
+            since: candidate.createdAt.toUtc().subtract(
+              spamDetectionService.window,
+            ),
+          );
+          final moderation = spamDetectionService.classify(
+            candidate: _chatSimilaritySample(candidate),
+            priorMessages: recentMessages.map(_chatSimilaritySample),
+          );
           await chatRepository.saveMessage(
-            chat.copyWith(conversationId: conversation.id),
+            _withChatModeration(candidate, moderation),
             incrementUnread: true,
           );
           await scfService.consumeDeliveredPayload(envelope.messageHash);
@@ -305,7 +324,20 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
                 : decoded.sender.type,
           ),
         );
-        await messageRepository.saveMessage(decoded);
+        final recentMessages = await messageRepository
+            .getRecentMessagesBySender(
+              senderPeerId: decoded.sender.id,
+              since: decoded.createdAt.toUtc().subtract(
+                spamDetectionService.window,
+              ),
+            );
+        final moderation = spamDetectionService.classify(
+          candidate: _sosSimilaritySample(decoded),
+          priorMessages: recentMessages.map(_sosSimilaritySample),
+        );
+        await messageRepository.saveMessage(
+          _withSosModeration(decoded, moderation),
+        );
         storedCount++;
       } on FormatException {
         continue;
@@ -329,6 +361,49 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     _relayEventSubscription?.cancel();
     _relayEventSubscription = null;
   }
+}
+
+MessageSimilaritySample _sosSimilaritySample(SosMessage message) {
+  return MessageSimilaritySample(
+    senderPeerId: message.sender.id,
+    body: message.body,
+    createdAt: message.createdAt,
+    messageId: message.id,
+    messageHash: message.messageHash,
+  );
+}
+
+MessageSimilaritySample _chatSimilaritySample(ChatMessage message) {
+  return MessageSimilaritySample(
+    senderPeerId: message.sender.id,
+    body: message.body,
+    createdAt: message.createdAt,
+    messageId: message.id,
+    messageHash: message.messageHash,
+  );
+}
+
+SosMessage _withSosModeration(SosMessage message, SpamDetectionResult result) {
+  return message.copyWith(
+    moderationStatus: result.status,
+    moderationReason: result.reason,
+    moderationScore: result.status == MessageModerationStatus.spam
+        ? result.score
+        : null,
+  );
+}
+
+ChatMessage _withChatModeration(
+  ChatMessage message,
+  SpamDetectionResult result,
+) {
+  return message.copyWith(
+    moderationStatus: result.status,
+    moderationReason: result.reason,
+    moderationScore: result.status == MessageModerationStatus.spam
+        ? result.score
+        : null,
+  );
 }
 
 final relayRuntimeProvider =

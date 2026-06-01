@@ -1,3 +1,4 @@
+import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
 
@@ -15,6 +16,9 @@ class ChatMessage {
     this.relatedSosMessageHash,
     this.hopCount = 0,
     this.ttl = const Duration(hours: 24),
+    this.moderationStatus = MessageModerationStatus.normal,
+    this.moderationReason,
+    this.moderationScore,
   });
 
   final String id;
@@ -29,6 +33,9 @@ class ChatMessage {
   final String? relatedSosMessageHash;
   final int hopCount;
   final Duration ttl;
+  final MessageModerationStatus moderationStatus;
+  final String? moderationReason;
+  final double? moderationScore;
 
   ChatMessage copyWith({
     String? id,
@@ -43,6 +50,9 @@ class ChatMessage {
     String? relatedSosMessageHash,
     int? hopCount,
     Duration? ttl,
+    MessageModerationStatus? moderationStatus,
+    String? moderationReason,
+    double? moderationScore,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -58,6 +68,9 @@ class ChatMessage {
           relatedSosMessageHash ?? this.relatedSosMessageHash,
       hopCount: hopCount ?? this.hopCount,
       ttl: ttl ?? this.ttl,
+      moderationStatus: moderationStatus ?? this.moderationStatus,
+      moderationReason: moderationReason ?? this.moderationReason,
+      moderationScore: moderationScore ?? this.moderationScore,
     );
   }
 }

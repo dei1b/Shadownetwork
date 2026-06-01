@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 4;
+  static const databaseVersion = 5;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -26,6 +26,7 @@ class LocalMessagingDatabase {
     2: _createScfSchema,
     3: _addSosRoutingMetadata,
     4: _createChatSchema,
+    5: _addModerationMetadata,
   };
 
   static Future<Database> open({
@@ -273,6 +274,26 @@ class LocalMessagingDatabase {
     await database.execute(
       'CREATE INDEX idx_chat_messages_hash ON $chatMessagesTable (message_hash)',
     );
+  }
+
+  static Future<void> _addModerationMetadata(Database database) async {
+    for (final table in [sosMessagesTable, chatMessagesTable]) {
+      await database.execute(
+        'ALTER TABLE $table '
+        "ADD COLUMN moderation_status TEXT NOT NULL DEFAULT 'normal' "
+        "CHECK (moderation_status IN ('normal', 'spam'))",
+      );
+      await database.execute(
+        'ALTER TABLE $table ADD COLUMN moderation_reason TEXT',
+      );
+      await database.execute(
+        'ALTER TABLE $table ADD COLUMN moderation_score REAL',
+      );
+      await database.execute(
+        'CREATE INDEX idx_${table}_moderation_status '
+        'ON $table (moderation_status)',
+      );
+    }
   }
 
   static Future<void> seedLookupTables(Database database) async {

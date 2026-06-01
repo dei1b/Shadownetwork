@@ -1,3 +1,4 @@
+import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
 
@@ -13,6 +14,7 @@ class Conversation {
     this.lastMessageAt,
     this.latestBody,
     this.latestStatus,
+    this.latestModerationStatus,
   });
 
   final String id;
@@ -25,4 +27,5 @@ class Conversation {
   final int unreadCount;
   final String? latestBody;
   final MessageStatus? latestStatus;
+  final MessageModerationStatus? latestModerationStatus;
 }

@@ -65,6 +65,15 @@ void main() {
     expect(columnNames, contains('gps_accuracy_meters'));
     expect(columnNames, contains('hop_count'));
     expect(columnNames, contains('ttl_seconds'));
+    expect(columnNames, contains('moderation_status'));
+    expect(columnNames, contains('moderation_reason'));
+    expect(columnNames, contains('moderation_score'));
+    expect(
+      sosColumns.singleWhere(
+        (row) => row['name'] == 'moderation_status',
+      )['dflt_value'],
+      "'normal'",
+    );
 
     final chatTables = await database.query(
       'sqlite_master',
@@ -86,5 +95,20 @@ void main() {
       'PRAGMA table_info(${LocalMessagingDatabase.scfMessagesTable})',
     );
     expect(relayColumns.map((row) => row['name']), contains('payload_type'));
+
+    final chatColumns = await database.rawQuery(
+      'PRAGMA table_info(${LocalMessagingDatabase.chatMessagesTable})',
+    );
+    final chatColumnNames = chatColumns.map((row) => row['name']).toSet();
+
+    expect(chatColumnNames, contains('moderation_status'));
+    expect(chatColumnNames, contains('moderation_reason'));
+    expect(chatColumnNames, contains('moderation_score'));
+    expect(
+      chatColumns.singleWhere(
+        (row) => row['name'] == 'moderation_status',
+      )['dflt_value'],
+      "'normal'",
+    );
   });
 }

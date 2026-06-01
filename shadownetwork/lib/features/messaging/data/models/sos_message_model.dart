@@ -1,4 +1,5 @@
 import '../../domain/entities/category.dart';
+import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
@@ -32,6 +33,12 @@ class SosMessageModel {
       gpsAccuracyMeters: map['gps_accuracy_meters'] as double?,
       hopCount: (map['hop_count'] as num?)?.toInt() ?? 0,
       ttl: Duration(seconds: (map['ttl_seconds'] as num?)?.toInt() ?? 86400),
+      moderationStatus: MessageModerationStatus.values.byName(
+        (map['moderation_status'] as String?) ??
+            MessageModerationStatus.normal.name,
+      ),
+      moderationReason: map['moderation_reason'] as String?,
+      moderationScore: (map['moderation_score'] as num?)?.toDouble(),
     );
   }
 
@@ -42,12 +49,16 @@ class SosMessageModel {
       'body': message.body,
       'category_code': message.category.name,
       'status': message.status.name,
-      'message_hash': message.messageHash ?? SosMessagePayload.messageHash(message),
+      'message_hash':
+          message.messageHash ?? SosMessagePayload.messageHash(message),
       'latitude': message.latitude,
       'longitude': message.longitude,
       'gps_accuracy_meters': message.gpsAccuracyMeters,
       'hop_count': message.hopCount,
       'ttl_seconds': message.ttl.inSeconds,
+      'moderation_status': message.moderationStatus.name,
+      'moderation_reason': message.moderationReason,
+      'moderation_score': message.moderationScore,
       'created_at': message.createdAt.toIso8601String(),
       'updated_at': message.updatedAt?.toIso8601String(),
     };

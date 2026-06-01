@@ -3,6 +3,7 @@ import 'package:shadownetwork/features/messaging/data/datasources/local_messagin
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_peer_repository.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_sos_message_repository.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
@@ -60,6 +61,29 @@ void main() {
     expect(messages.single.gpsAccuracyMeters, 8.2);
     expect(messages.single.hopCount, 2);
     expect(messages.single.ttl, const Duration(hours: 4));
+    expect(messages.single.moderationStatus, MessageModerationStatus.normal);
+
+    await messageRepository.saveMessage(
+      SosMessage(
+        id: 'sos-spam',
+        sender: peer,
+        body: 'Need medical assistance.',
+        category: Category.medical,
+        status: MessageStatus.queued,
+        createdAt: now.add(const Duration(minutes: 1)),
+        moderationStatus: MessageModerationStatus.spam,
+        moderationReason: 'jaccard_similarity',
+        moderationScore: 1,
+      ),
+    );
+
+    final moderatedMessages = await messageRepository.getMessages();
+    final spamMessage = moderatedMessages.firstWhere(
+      (message) => message.id == 'sos-spam',
+    );
+    expect(spamMessage.moderationStatus, MessageModerationStatus.spam);
+    expect(spamMessage.moderationReason, 'jaccard_similarity');
+    expect(spamMessage.moderationScore, 1);
 
     final filteredPeers = await peerRepository.getNearbyPeers(
       excludingPeerId: peer.id,
