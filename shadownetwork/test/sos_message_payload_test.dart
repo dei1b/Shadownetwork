@@ -16,6 +16,12 @@ void main() {
     isConnected: true,
     signalStrength: 88,
   );
+  const recipient = Peer(
+    id: 'rescuer-1',
+    name: 'Rescuer Endpoint',
+    type: PeerType.responder,
+    isConnected: false,
+  );
 
   final message = SosMessage(
     id: 'sos-1',
@@ -39,7 +45,7 @@ void main() {
     final senderPayload = payload['sender']! as Map<String, Object?>;
 
     expect(firstJson, secondJson);
-    expect(payload['schema_version'], 2);
+    expect(payload['schema_version'], 3);
     expect(payload['message_id'], 'sos-1');
     expect(payload['message_hash'], SosMessagePayload.messageHash(message));
     expect(payload['payload_text'], 'Need medical assistance.');
@@ -100,9 +106,74 @@ void main() {
     final relayedPayload = jsonDecode(relayedJson) as Map<String, Object?>;
     final decoded = SosMessagePayload.fromPayload(relayedPayload);
 
-    expect(relayedPayload['message_hash'], SosMessagePayload.messageHash(message));
-    expect((relayedPayload['routing']! as Map<String, Object?>)['hop_count'], 3);
+    expect(
+      relayedPayload['message_hash'],
+      SosMessagePayload.messageHash(message),
+    );
+    expect(
+      (relayedPayload['routing']! as Map<String, Object?>)['hop_count'],
+      3,
+    );
     expect(decoded.hopCount, 3);
     expect(decoded.messageHash, SosMessagePayload.messageHash(message));
+  });
+
+  test('encrypts targeted SOS payloads for the selected recipient', () {
+    final targeted = message.copyWith(recipient: recipient, isEncrypted: true);
+    final payload =
+        jsonDecode(SosMessagePayload.canonicalJson(targeted))
+            as Map<String, Object?>;
+    final security = payload['security']! as Map<String, Object?>;
+    final recipientPayload = payload['recipient']! as Map<String, Object?>;
+
+    expect(payload['payload_text'], isNull);
+    expect(security['encrypted'], isTrue);
+    expect(security['cipher_text'], isNot(contains(targeted.body)));
+    expect(recipientPayload['peer_id'], recipient.id);
+
+    final decoded = SosMessagePayload.fromPayload(
+      payload,
+      localPeerId: recipient.id,
+    );
+    expect(decoded.body, targeted.body);
+    expect(decoded.recipient?.id, recipient.id);
+    expect(decoded.isEncrypted, isTrue);
+  });
+
+  test('rejects targeted SOS payloads on non-recipient devices', () {
+    final targetedPayload =
+        jsonDecode(
+              SosMessagePayload.canonicalJson(
+                message.copyWith(recipient: recipient, isEncrypted: true),
+              ),
+            )
+            as Map<String, Object?>;
+
+    expect(
+      () => SosMessagePayload.fromPayload(
+        targetedPayload,
+        localPeerId: 'relay-only-peer',
+      ),
+      throwsFormatException,
+    );
+  });
+
+  test('relays targeted SOS without decrypting plaintext', () {
+    final targeted = message.copyWith(recipient: recipient, isEncrypted: true);
+    final relayedJson = SosMessagePayload.payloadJsonForRelay(
+      SosMessagePayload.canonicalJson(targeted),
+      hopCount: 2,
+    );
+    final relayedPayload = jsonDecode(relayedJson) as Map<String, Object?>;
+
+    expect(relayedJson, isNot(contains(targeted.body)));
+    expect(
+      (relayedPayload['routing']! as Map<String, Object?>)['hop_count'],
+      2,
+    );
+    expect(
+      relayedPayload['message_hash'],
+      SosMessagePayload.messageHash(targeted),
+    );
   });
 }

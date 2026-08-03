@@ -27,6 +27,9 @@ dependencies:
   http: ^1.6.0
   package_info_plus: ^9.0.1
   url_launcher: ^6.3.2
+  shared_preferences: ^2.5.5
+  qr_flutter: ^4.1.0
+  mobile_scanner: ^7.4.0
 
 dev_dependencies:
   flutter_test:

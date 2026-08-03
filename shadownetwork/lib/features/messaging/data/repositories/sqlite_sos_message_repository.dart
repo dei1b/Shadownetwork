@@ -24,10 +24,20 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         peers.signal_strength AS sender_signal_strength,
         peers.last_seen_at AS sender_last_seen_at,
         peers.latitude AS sender_latitude,
-        peers.longitude AS sender_longitude
+        peers.longitude AS sender_longitude,
+        recipient.id AS recipient_peer_id,
+        recipient.display_name AS recipient_display_name,
+        recipient.peer_type_code AS recipient_peer_type,
+        recipient.is_connected AS recipient_is_connected,
+        recipient.signal_strength AS recipient_signal_strength,
+        recipient.last_seen_at AS recipient_last_seen_at,
+        recipient.latitude AS recipient_latitude,
+        recipient.longitude AS recipient_longitude
       FROM ${LocalMessagingDatabase.sosMessagesTable} AS messages
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = messages.sender_peer_id
+      LEFT JOIN ${LocalMessagingDatabase.peersTable} AS recipient
+        ON recipient.id = messages.recipient_peer_id
       ORDER BY messages.created_at DESC
     ''');
 
@@ -50,10 +60,20 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         peers.signal_strength AS sender_signal_strength,
         peers.last_seen_at AS sender_last_seen_at,
         peers.latitude AS sender_latitude,
-        peers.longitude AS sender_longitude
+        peers.longitude AS sender_longitude,
+        recipient.id AS recipient_peer_id,
+        recipient.display_name AS recipient_display_name,
+        recipient.peer_type_code AS recipient_peer_type,
+        recipient.is_connected AS recipient_is_connected,
+        recipient.signal_strength AS recipient_signal_strength,
+        recipient.last_seen_at AS recipient_last_seen_at,
+        recipient.latitude AS recipient_latitude,
+        recipient.longitude AS recipient_longitude
       FROM ${LocalMessagingDatabase.sosMessagesTable} AS messages
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = messages.sender_peer_id
+      LEFT JOIN ${LocalMessagingDatabase.peersTable} AS recipient
+        ON recipient.id = messages.recipient_peer_id
       WHERE messages.sender_peer_id = ?
         AND messages.created_at >= ?
       ORDER BY messages.created_at DESC
@@ -72,6 +92,14 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         message.sender,
         timestamp: message.createdAt,
       );
+      final recipient = message.recipient;
+      if (recipient != null) {
+        await PeerModel.upsert(
+          transaction,
+          recipient,
+          timestamp: message.createdAt,
+        );
+      }
       await transaction.insert(
         LocalMessagingDatabase.sosMessagesTable,
         SosMessageModel.toMap(message),

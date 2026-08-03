@@ -18,6 +18,8 @@ class SosMessage {
     this.gpsAccuracyMeters,
     this.hopCount = 0,
     this.ttl = const Duration(hours: 24),
+    this.recipient,
+    this.isEncrypted = false,
     this.moderationStatus = MessageModerationStatus.normal,
     this.moderationReason,
     this.moderationScore,
@@ -36,6 +38,8 @@ class SosMessage {
   final double? gpsAccuracyMeters;
   final int hopCount;
   final Duration ttl;
+  final Peer? recipient;
+  final bool isEncrypted;
   final MessageModerationStatus moderationStatus;
   final String? moderationReason;
   final double? moderationScore;
@@ -54,6 +58,8 @@ class SosMessage {
     double? gpsAccuracyMeters,
     int? hopCount,
     Duration? ttl,
+    Object? recipient = _sentinel,
+    bool? isEncrypted,
     MessageModerationStatus? moderationStatus,
     String? moderationReason,
     double? moderationScore,
@@ -72,9 +78,15 @@ class SosMessage {
       gpsAccuracyMeters: gpsAccuracyMeters ?? this.gpsAccuracyMeters,
       hopCount: hopCount ?? this.hopCount,
       ttl: ttl ?? this.ttl,
+      recipient: identical(recipient, _sentinel)
+          ? this.recipient
+          : recipient as Peer?,
+      isEncrypted: isEncrypted ?? this.isEncrypted,
       moderationStatus: moderationStatus ?? this.moderationStatus,
       moderationReason: moderationReason ?? this.moderationReason,
       moderationScore: moderationScore ?? this.moderationScore,
     );
   }
 }
+
+const _sentinel = Object();

@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1000" viewBox="0 0 2000 1000">
+  <rect width="100%" height="100%" fill="white"/>
+  <style>
+    .title { font-family: 'Arial', sans-serif; font-weight: 700; font-size: 38px; fill: #2c3e50; }
+    .label { font-family: 'Arial', sans-serif; font-weight: 700; font-size: 26px; fill: #2c3e50; }
+    .process-num { font-family: 'Arial', sans-serif; font-weight: 700; font-size: 26px; fill: #7f8c8d; }
+    .process-title { font-family: 'Arial', sans-serif; font-weight: 700; font-size: 24px; fill: #2c3e50; }
+    .flow-text { font-family: 'Arial', sans-serif; font-size: 18px; fill: #2c3e50; font-weight: bold; }
+    .sub-text { font-family: 'Arial', sans-serif; font-size: 16px; fill: #7f8c8d; font-weight: bold; }
+  </style>
+  
+  <defs>
+    <!-- Arrowhead markers -->
+    <marker id="arrow-right" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#2c3e50"/>
+    </marker>
+    <marker id="arrow-left" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 10 1 L 0 5 L 10 9 z" fill="#2c3e50"/>
+    </marker>
+    <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 0 L 5 10 L 9 0 z" fill="#2c3e50"/>
+    </marker>
+    <marker id="arrow-up" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 1 10 L 5 0 L 9 10 z" fill="#2c3e50"/>
+    </marker>
+    
+    <!-- Subtle drop shadows for nodes -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="3" dy="5" stdDeviation="4" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Title -->
+  <text x="1000" y="80" text-anchor="middle" class="title">DFD Level 0: Shadow Network Context Flow Diagram</text>
+
+  <!-- ================= PROCESS 0 (Center) ================= -->
+  <g filter="url(#shadow)">
+    <!-- Main Box -->
+    <rect x="800" y="400" width="400" height="200" rx="8" ry="8" fill="#ffffff" stroke="#2c3e50" stroke-width="4"/>
+    <!-- Division line -->
+    <line x1="800" y1="460" x2="1200" y2="460" stroke="#2c3e50" stroke-width="3"/>
+    <!-- Process number -->
+    <text x="1000" y="435" text-anchor="middle" class="process-num">0</text>
+    <!-- Process title -->
+    <text x="1000" y="505" text-anchor="middle" class="process-title">Shadow Network P2P</text>
+    <text x="1000" y="545" text-anchor="middle" class="process-title">Messaging System</text>
+  </g>
+
+  <!-- ================= EXTERNAL ENTITY: USER (Left) ================= -->
+  <g filter="url(#shadow)">
+    <rect x="125" y="410" width="250" height="180" rx="8" ry="8" fill="#ffffff" stroke="#34495e" stroke-width="3"/>
+    <text x="250" y="495" text-anchor="middle" class="label">User</text>
+    <text x="250" y="530" text-anchor="middle" class="sub-text">(Resident)</text>
+  </g>
+
+  <!-- ================= EXTERNAL ENTITY: RESCUER (Right) ================= -->
+  <g filter="url(#shadow)">
+    <rect x="1625" y="410" width="250" height="180" rx="8" ry="8" fill="#ffffff" stroke="#34495e" stroke-width="3"/>
+    <text x="1750" y="495" text-anchor="middle" class="label">Rescuer</text>
+    <text x="1750" y="530" text-anchor="middle" class="sub-text">(Responder)</text>
+  </g>
+
+  <!-- ================= EXTERNAL ENTITY: PEER NODE (Bottom) ================= -->
+  <g filter="url(#shadow)">
+    <rect x="875" y="760" width="250" height="180" rx="8" ry="8" fill="#ffffff" stroke="#34495e" stroke-width="3"/>
+    <text x="1000" y="845" text-anchor="middle" class="label">Peer Node</text>
+    <text x="1000" y="880" text-anchor="middle" class="sub-text">(Nearby Device)</text>
+  </g>
+
+  <!-- ================= FLOW ARROWS & LABELS ================= -->
+  
+  <!-- 1. User -> System (SOS & Chats) -->
+  <path d="M 375 465 L 790 465" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-right)"/>
+  <rect x="420" y="425" width="310" height="30" fill="#ffffff" opacity="0.9"/>
+  <text x="575" y="445" text-anchor="middle" class="flow-text">SOS Payload &amp; Chat Messages</text>
+
+  <!-- 2. System -> User (Incoming Feeds) -->
+  <path d="M 800 535 L 385 535" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-left)"/>
+  <rect x="420" y="545" width="310" height="30" fill="#ffffff" opacity="0.9"/>
+  <text x="575" y="565" text-anchor="middle" class="flow-text">Incoming Messages &amp; Alerts</text>
+
+  <!-- 3. Rescuer -> System (Rescue Status & Chats) -->
+  <path d="M 1625 465 L 1210 465" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-left)"/>
+  <rect x="1270" y="425" width="310" height="30" fill="#ffffff" opacity="0.9"/>
+  <text x="1425" y="445" text-anchor="middle" class="flow-text">Rescue Chats &amp; Status Updates</text>
+
+  <!-- 4. System -> Rescuer (SOS Coordinates & Feeds) -->
+  <path d="M 1200 535 L 1615 535" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-right)"/>
+  <rect x="1270" y="545" width="310" height="30" fill="#ffffff" opacity="0.9"/>
+  <text x="1425" y="565" text-anchor="middle" class="flow-text">SOS Map Markers &amp; Chat Feed</text>
+
+  <!-- 5. System -> Peer Node (Outgoing Relay) -->
+  <path d="M 910 600 L 910 750" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-down)"/>
+  <text x="890" y="665" text-anchor="end" class="flow-text">Outgoing Relay
+    <tspan x="890" dy="25">Payloads</tspan>
+  </text>
+
+  <!-- 6. Peer Node -> System (Incoming Relay) -->
+  <path d="M 1090 760 L 1090 610" fill="none" stroke="#2c3e50" stroke-width="3" marker-end="url(#arrow-up)"/>
+  <text x="1110" y="665" text-anchor="start" class="flow-text">Incoming Relay
+    <tspan x="1110" dy="25">Payloads</tspan>
+  </text>
+</svg>

@@ -313,8 +313,15 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           storedCount++;
           continue;
         }
+        final targetPeerId = SosMessagePayload.targetPeerId(
+          envelope.payloadJson,
+        );
+        if (targetPeerId != null && targetPeerId != localPeer.id) {
+          continue;
+        }
         final decoded = SosMessagePayload.fromPayload(
           payload,
+          localPeerId: localPeer.id,
         ).copyWith(status: MessageStatus.received);
         await peerRepository.upsertPeer(
           decoded.sender.copyWith(
@@ -338,6 +345,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         await messageRepository.saveMessage(
           _withSosModeration(decoded, moderation),
         );
+        if (decoded.recipient?.id == localPeer.id) {
+          await scfService.consumeDeliveredPayload(envelope.messageHash);
+        }
         storedCount++;
       } on FormatException {
         continue;

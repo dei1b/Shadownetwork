@@ -10,6 +10,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
+import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
+import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 
 import '../../domain/entities/category.dart' as messaging;
 import '../../domain/entities/message_moderation_status.dart' as messaging;
@@ -386,6 +388,14 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _openSosComposerModal() async {
+    final trustBundle = await TrustBundleStore().loadBundle();
+    final localPeer = await ref.read(localPeerProvider.future);
+    if (!mounted) {
+      return;
+    }
+    final trustedRecipients = (trustBundle?.approvedDevices ?? const [])
+        .where((device) => device.deviceId != localPeer.id)
+        .toList(growable: false);
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -396,6 +406,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       builder: (context) {
         return _SosComposerSheet(
           locationText: _formatLocationText(),
+          trustedRecipients: trustedRecipients,
           onUpdateLocation: _locateMe,
           onSend: _saveSosMessage,
         );
@@ -425,7 +436,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  Future<void> _saveSosMessage(String body, messaging.Category category) async {
+  Future<void> _saveSosMessage(
+    String body,
+    messaging.Category category,
+    TrustedDevice? recipient,
+  ) async {
     final now = DateTime.now();
     final position = _myPosition;
     final localPeer = await ref.read(localPeerProvider.future);
@@ -444,10 +459,28 @@ class _HomePageState extends ConsumerState<HomePage> {
       createdAt: now,
       latitude: position?.latitude,
       longitude: position?.longitude,
+      recipient: recipient == null ? null : _peerFromTrustedDevice(recipient),
+      isEncrypted: recipient != null,
     );
 
     await ref.read(saveSosMessageProvider)(message);
     await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
+  }
+
+  messaging.Peer _peerFromTrustedDevice(TrustedDevice device) {
+    return messaging.Peer(
+      id: device.deviceId,
+      name: device.ownerName,
+      type: _peerTypeFromTrustedRole(device.role),
+      isConnected: false,
+    );
+  }
+
+  messaging.PeerType _peerTypeFromTrustedRole(String role) {
+    return messaging.PeerType.values.firstWhere(
+      (type) => type.name == role,
+      orElse: () => messaging.PeerType.unknown,
+    );
   }
 
   Future<void> _openConversation(
@@ -482,45 +515,41 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Scaffold(
       backgroundColor: Colors.white,
       body: AuthBackground(
-        child: Stack(
-          children: [
-            SafeArea(
-              child: Column(
-                children: [
-                  Expanded(
-                    child: _selectedTab == 2
-                        ? _buildMapTabContent(peers, messages, tileCacheStore)
-                        : SingleChildScrollView(
-                            physics: const BouncingScrollPhysics(),
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildLogo(),
-                                Transform.translate(
-                                  offset: const Offset(0, -25),
-                                  child: _selectedTab == 1
-                                      ? _buildMessagesTabContent(
-                                          messages,
-                                          conversations,
-                                        )
-                                      : _selectedTab == 3
-                                      ? _buildPeersTabContent(peers)
-                                      : _buildHomeTabContent(
-                                          peers,
-                                          messages,
-                                          tileCacheStore,
-                                        ),
-                                ),
-                              ],
+        child: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: _selectedTab == 2
+                    ? _buildMapTabContent(peers, messages, tileCacheStore)
+                    : SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildLogo(),
+                            Transform.translate(
+                              offset: const Offset(0, -25),
+                              child: _selectedTab == 1
+                                  ? _buildMessagesTabContent(
+                                      messages,
+                                      conversations,
+                                    )
+                                  : _selectedTab == 3
+                                  ? _buildPeersTabContent(peers)
+                                  : _buildHomeTabContent(
+                                      peers,
+                                      messages,
+                                      tileCacheStore,
+                                    ),
                             ),
-                          ),
-                  ),
-                  _buildBottomBar(),
-                ],
+                          ],
+                        ),
+                      ),
               ),
-            ),
-          ],
+              _buildBottomBar(),
+            ],
+          ),
         ),
       ),
     );
@@ -2228,43 +2257,64 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildActionButtons() {
-    return Row(
+    return Column(
       children: [
-        Expanded(
-          child: _ActionCard(
-            icon: _isLocating
-                ? const SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: Padding(
-                      padding: EdgeInsets.all(6),
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                icon: _isLocating
+                    ? const SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: Padding(
+                          padding: EdgeInsets.all(6),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFE83C3D),
+                          ),
+                        ),
+                      )
+                    : const Icon(
+                        Icons.gps_fixed_rounded,
                         color: Color(0xFFE83C3D),
+                        size: 34,
                       ),
-                    ),
-                  )
-                : const Icon(
-                    Icons.gps_fixed_rounded,
-                    color: Color(0xFFE83C3D),
-                    size: 34,
-                  ),
-            label: 'LOCATE ME',
-            labelColor: const Color(0xFFE83C3D),
-            subtitle: _isLocating
-                ? 'Locating...'
-                : (_isFollowing ? 'Showing my location' : 'Show my location'),
-            onTap: () => _startFollowing(),
-          ),
+                label: 'LOCATE ME',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: _isLocating
+                    ? 'Locating...'
+                    : (_isFollowing
+                          ? 'Showing my location'
+                          : 'Show my location'),
+                onTap: () => _startFollowing(),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _ActionCard(
+                icon: const _MessageIcon(),
+                label: 'MESSAGES',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: 'View all messages',
+                onTap: () => setState(() => _selectedTab = 1),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 14),
-        Expanded(
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
           child: _ActionCard(
-            icon: const _MessageIcon(),
-            label: 'MESSAGES',
+            icon: const Icon(
+              Icons.qr_code_scanner_rounded,
+              color: Color(0xFFE83C3D),
+              size: 34,
+            ),
+            label: 'TRUST BUNDLE',
             labelColor: const Color(0xFFE83C3D),
-            subtitle: 'View all messages',
-            onTap: () => setState(() => _selectedTab = 1),
+            subtitle: 'Scan admin QR or paste JSON',
+            onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
           ),
         ),
       ],
@@ -3032,13 +3082,20 @@ class _PeerMapMarker extends StatelessWidget {
 class _SosComposerSheet extends StatefulWidget {
   const _SosComposerSheet({
     required this.locationText,
+    required this.trustedRecipients,
     required this.onUpdateLocation,
     required this.onSend,
   });
 
   final String locationText;
+  final List<TrustedDevice> trustedRecipients;
   final Future<void> Function() onUpdateLocation;
-  final Future<void> Function(String body, messaging.Category category) onSend;
+  final Future<void> Function(
+    String body,
+    messaging.Category category,
+    TrustedDevice? recipient,
+  )
+  onSend;
 
   @override
   State<_SosComposerSheet> createState() => _SosComposerSheetState();
@@ -3078,6 +3135,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
 
   late final TextEditingController _messageController;
   int _selectedCategory = 0;
+  TrustedDevice? _selectedRecipient;
   bool _updatingLocation = false;
   bool _sending = false;
 
@@ -3278,6 +3336,111 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                 },
               ),
               const SizedBox(height: 10),
+              const Text(
+                'Receiver',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF222222),
+                ),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedRecipient?.deviceId ?? 'broadcast',
+                isExpanded: true,
+                iconEnabledColor: const Color(0xFFE83C3D),
+                dropdownColor: Colors.white,
+                style: const TextStyle(
+                  color: Color(0xFF222222),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: const Color(0xFFFFF8F8),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFFE83C3D)),
+                  ),
+                  prefixIcon: const Icon(
+                    Icons.verified_user_rounded,
+                    color: Color(0xFFE83C3D),
+                  ),
+                ),
+                items: [
+                  DropdownMenuItem(
+                    value: 'broadcast',
+                    child: _ReceiverDropdownOption(
+                      title: 'Broadcast to all nearby peers',
+                      subtitle: 'Visible to every receiving phone',
+                      roleLabel: 'All',
+                      icon: Icons.campaign_rounded,
+                    ),
+                  ),
+                  ...widget.trustedRecipients.map(
+                    (device) => DropdownMenuItem(
+                      value: device.deviceId,
+                      child: _ReceiverDropdownOption(
+                        title: device.ownerName,
+                        subtitle:
+                            '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
+                        roleLabel: _roleLabelForTrustedDevice(device),
+                        icon: _iconForTrustedDevice(device),
+                      ),
+                    ),
+                  ),
+                ],
+                selectedItemBuilder: (context) {
+                  return [
+                    const _ReceiverDropdownOption(
+                      title: 'Broadcast',
+                      subtitle: 'All nearby peers',
+                      roleLabel: 'All',
+                      icon: Icons.campaign_rounded,
+                      compact: true,
+                    ),
+                    ...widget.trustedRecipients.map(
+                      (device) => _ReceiverDropdownOption(
+                        title: device.ownerName,
+                        subtitle:
+                            '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
+                        roleLabel: _roleLabelForTrustedDevice(device),
+                        icon: _iconForTrustedDevice(device),
+                        compact: true,
+                      ),
+                    ),
+                  ];
+                },
+                onChanged: (value) {
+                  setState(() {
+                    _selectedRecipient = value == null || value == 'broadcast'
+                        ? null
+                        : widget.trustedRecipients.firstWhere(
+                            (device) => device.deviceId == value,
+                          );
+                  });
+                },
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _selectedRecipient == null
+                    ? 'Broadcast SOS is visible to every phone that receives it.'
+                    : 'Targeted SOS is encrypted. Other phones can relay it, but only ${_selectedRecipient!.ownerName} can view it.',
+                style: const TextStyle(color: Color(0xFF777777), fontSize: 12),
+              ),
+              const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
@@ -3390,6 +3553,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 await widget.onSend(
                                   body,
                                   _categories[_selectedCategory].category,
+                                  _selectedRecipient,
                                 );
                                 if (mounted) {
                                   navigator.pop(true);
@@ -3431,6 +3595,170 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
       ),
     );
   }
+}
+
+class _ReceiverDropdownOption extends StatelessWidget {
+  const _ReceiverDropdownOption({
+    required this.title,
+    required this.subtitle,
+    required this.roleLabel,
+    required this.icon,
+    this.compact = false,
+  });
+
+  final String title;
+  final String subtitle;
+  final String roleLabel;
+  final IconData icon;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    if (compact) {
+      return Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: const Color(0xFFE83C3D), size: 15),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF222222),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              roleLabel.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF8B1618),
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        Container(
+          width: compact ? 30 : 34,
+          height: compact ? 30 : 34,
+          decoration: BoxDecoration(
+            color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: const Color(0xFFE83C3D), size: 18),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: const Color(0xFF222222),
+                        fontSize: compact ? 13 : 14,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      roleLabel.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF8B1618),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 1),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF777777),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _roleLabelForTrustedDevice(TrustedDevice device) {
+  return switch (device.role.toLowerCase()) {
+    'responder' => 'Rescuer',
+    'civilian' => 'Civilian',
+    'relay' => 'Relay',
+    'admin' => 'Admin',
+    _ => device.role.isEmpty ? 'Unknown' : device.role,
+  };
+}
+
+IconData _iconForTrustedDevice(TrustedDevice device) {
+  return switch (device.role.toLowerCase()) {
+    'responder' => Icons.health_and_safety_rounded,
+    'civilian' => Icons.person_rounded,
+    'relay' => Icons.hub_rounded,
+    'admin' => Icons.admin_panel_settings_rounded,
+    _ => Icons.devices_other_rounded,
+  };
+}
+
+String _shortDeviceId(String deviceId) {
+  if (deviceId.length <= 14) {
+    return deviceId;
+  }
+  return '${deviceId.substring(0, 6)}...${deviceId.substring(deviceId.length - 5)}';
 }
 
 class _TaskCompletionPopup extends StatelessWidget {

@@ -115,6 +115,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                           text: message.body,
                           outgoing: outgoing,
                           status: message.status,
+                          createdAt: message.createdAt,
                         );
                       },
                     ),
@@ -223,14 +224,17 @@ class _ChatBubble extends StatelessWidget {
     required this.text,
     required this.outgoing,
     required this.status,
+    required this.createdAt,
   });
 
   final String text;
   final bool outgoing;
   final MessageStatus status;
+  final DateTime createdAt;
 
   @override
   Widget build(BuildContext context) {
+    final timeStr = _formatTime(createdAt);
     return Align(
       alignment: outgoing ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -241,30 +245,57 @@ class _ChatBubble extends StatelessWidget {
           color: outgoing ? const Color(0xFFE83C3D) : Colors.white,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              text,
-              style: TextStyle(
-                fontSize: 14,
-                color: outgoing ? Colors.white : const Color(0xFF202020),
-              ),
-            ),
-            if (outgoing) ...[
-              const SizedBox(height: 4),
+        child: IntrinsicWidth(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
               Text(
-                _statusText(status),
+                text,
                 style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.white.withValues(alpha: 0.86),
+                  fontSize: 14,
+                  color: outgoing ? Colors.white : const Color(0xFF202020),
                 ),
               ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    timeStr,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: outgoing
+                          ? Colors.white.withValues(alpha: 0.86)
+                          : const Color(0xFF717173),
+                    ),
+                  ),
+                  if (outgoing) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '• ${_statusText(status)}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withValues(alpha: 0.86),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
             ],
-          ],
+          ),
         ),
       ),
     );
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final localTime = dateTime.toLocal();
+    final hour = localTime.hour;
+    final minute = localTime.minute.toString().padLeft(2, '0');
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    return '$displayHour:$minute $period';
   }
 
   static String _statusText(MessageStatus status) => switch (status) {

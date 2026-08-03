@@ -33,6 +33,24 @@ class SosMessageModel {
       gpsAccuracyMeters: map['gps_accuracy_meters'] as double?,
       hopCount: (map['hop_count'] as num?)?.toInt() ?? 0,
       ttl: Duration(seconds: (map['ttl_seconds'] as num?)?.toInt() ?? 86400),
+      recipient: map['recipient_peer_id'] == null
+          ? null
+          : Peer(
+              id: map['recipient_peer_id']! as String,
+              name:
+                  (map['recipient_display_name'] as String?) ??
+                  map['recipient_peer_id']! as String,
+              type: PeerType.values.byName(
+                (map['recipient_peer_type'] as String?) ??
+                    PeerType.unknown.name,
+              ),
+              isConnected: (map['recipient_is_connected'] as int? ?? 0) == 1,
+              signalStrength: map['recipient_signal_strength'] as int?,
+              lastSeenAt: _dateTimeFromMap(map['recipient_last_seen_at']),
+              latitude: map['recipient_latitude'] as double?,
+              longitude: map['recipient_longitude'] as double?,
+            ),
+      isEncrypted: (map['is_encrypted'] as int? ?? 0) == 1,
       moderationStatus: MessageModerationStatus.values.byName(
         (map['moderation_status'] as String?) ??
             MessageModerationStatus.normal.name,
@@ -56,6 +74,8 @@ class SosMessageModel {
       'gps_accuracy_meters': message.gpsAccuracyMeters,
       'hop_count': message.hopCount,
       'ttl_seconds': message.ttl.inSeconds,
+      'recipient_peer_id': message.recipient?.id,
+      'is_encrypted': message.isEncrypted ? 1 : 0,
       'moderation_status': message.moderationStatus.name,
       'moderation_reason': message.moderationReason,
       'moderation_score': message.moderationScore,

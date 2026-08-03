@@ -1,91 +1,102 @@
 SHADOW NETWORK - IMPLEMENTED SQLITE ERD (PURE TEXT)
-=====================================================
+====================================================
 
 Verified against:
 - lib/features/messaging/data/datasources/local_messaging_database.dart
 - lib/features/messaging/domain/entities/category.dart
 - lib/features/messaging/domain/entities/peer_type.dart
 - lib/features/messaging/domain/entities/message_status.dart
-- lib/features/messaging/domain/entities/scf_peer_status.dart
+- lib/features/messaging/domain/entities/message_moderation_status.dart
 
 Database file: shadownetwork.db
-Schema version: 4
+Schema version: 5
 Application tables persisted: 8
 
-Legend
-------
-PK     = primary key
-FK     = SQLite-enforced foreign key
-UQ     = unique constraint
-NN     = NOT NULL
-NULL   = nullable
-DEF    = default value
-CHECK  = SQLite-enforced check constraint
-APP    = association used by application logic but not enforced as a foreign key
+Legend:
+- PK   = primary key
+- FK   = SQLite-enforced foreign key
+- UQ   = unique constraint
+- NN   = NOT NULL
+- NULL = nullable
+- DEF  = default value
+- CHECK = SQLite-enforced check constraint
+- APP  = application-level association only, not a SQLite FK
 
 
 RELATIONSHIP OVERVIEW - SQL ENFORCED
 ------------------------------------
 
-PEER_TYPES (1) -----------< (0..N) PEERS
-  peer_types.code       FK: peers.peer_type_code
+PEER_TYPES (1) ||----------------o{ (0..N) PEERS
+  peer_types.code
+    -> peers.peer_type_code
+    ON UPDATE CASCADE
 
-PEERS (1) ----------------< (0..N) SOS_MESSAGES
-  peers.id              FK: sos_messages.sender_peer_id
-                       ON UPDATE CASCADE, ON DELETE CASCADE
+PEERS (1) ||---------------------o{ (0..N) SOS_MESSAGES
+  peers.id
+    -> sos_messages.sender_peer_id
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
 
-CATEGORIES (1) -----------< (0..N) SOS_MESSAGES
-  categories.code       FK: sos_messages.category_code
-                       ON UPDATE CASCADE
+CATEGORIES (1) ||----------------o{ (0..N) SOS_MESSAGES
+  categories.code
+    -> sos_messages.category_code
+    ON UPDATE CASCADE
 
-SCF_MESSAGES (1) ---------< (0..N) SCF_PEER_STATUSES
+SCF_MESSAGES (1) ||--------------o{ (0..N) SCF_PEER_STATUSES
   scf_messages.message_hash
-                       FK: scf_peer_statuses.message_hash
-                       ON UPDATE CASCADE, ON DELETE CASCADE
+    -> scf_peer_statuses.message_hash
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
 
-PEERS (1) ----------------< (0..N) CONVERSATIONS [local participant]
-  peers.id              FK: conversations.local_peer_id
-                       ON UPDATE CASCADE
+PEERS (1) ||---------------------o{ (0..N) CONVERSATIONS [local peer]
+  peers.id
+    -> conversations.local_peer_id
+    ON UPDATE CASCADE
 
-PEERS (1) ----------------< (0..N) CONVERSATIONS [remote participant]
-  peers.id              FK: conversations.remote_peer_id
-                       ON UPDATE CASCADE
+PEERS (1) ||---------------------o{ (0..N) CONVERSATIONS [remote peer]
+  peers.id
+    -> conversations.remote_peer_id
+    ON UPDATE CASCADE
 
-CONVERSATIONS (1) --------< (0..N) CHAT_MESSAGES
-  conversations.id      FK: chat_messages.conversation_id
-                       ON UPDATE CASCADE, ON DELETE CASCADE
+CONVERSATIONS (1) ||-------------o{ (0..N) CHAT_MESSAGES
+  conversations.id
+    -> chat_messages.conversation_id
+    ON UPDATE CASCADE
+    ON DELETE CASCADE
 
-PEERS (1) ----------------< (0..N) CHAT_MESSAGES [sender]
-  peers.id              FK: chat_messages.sender_peer_id
-                       ON UPDATE CASCADE
+PEERS (1) ||---------------------o{ (0..N) CHAT_MESSAGES [sender]
+  peers.id
+    -> chat_messages.sender_peer_id
+    ON UPDATE CASCADE
 
-PEERS (1) ----------------< (0..N) CHAT_MESSAGES [recipient]
-  peers.id              FK: chat_messages.recipient_peer_id
-                       ON UPDATE CASCADE
+PEERS (1) ||---------------------o{ (0..N) CHAT_MESSAGES [recipient]
+  peers.id
+    -> chat_messages.recipient_peer_id
+    ON UPDATE CASCADE
 
 
 RELATIONSHIP OVERVIEW - APPLICATION ASSOCIATIONS ONLY
-------------------------------------------------------
+-----------------------------------------------------
 
-SOS_MESSAGES (0..1) ......... SCF_MESSAGES (0..1)
+SOS_MESSAGES (0..1) ............... SCF_MESSAGES (0..1)
   sos_messages.message_hash APP-matches scf_messages.message_hash when an SOS
-  payload is queued/relayed. No SQLite FK or UNIQUE constraint exists on
+  payload is queued or relayed. No SQLite FK or UNIQUE constraint exists on
   sos_messages.message_hash.
 
-CHAT_MESSAGES (0..1) ........ SCF_MESSAGES (0..1)
+CHAT_MESSAGES (0..1) .............. SCF_MESSAGES (0..1)
   chat_messages.message_hash APP-matches scf_messages.message_hash for relay
-  envelopes. chat_messages.message_hash is UNIQUE, but it is not a SQLite FK.
+  envelopes. chat_messages.message_hash is UNIQUE, but is not a SQLite FK.
 
-SOS_MESSAGES (0..1) ......... CONVERSATIONS (0..N)
+SOS_MESSAGES (0..1) ............... CONVERSATIONS (0..N)
   conversations.related_sos_message_hash may retain the originating SOS hash.
   No SQLite FK enforces this link.
 
-SOS_MESSAGES (0..1) ......... CHAT_MESSAGES (0..N)
+SOS_MESSAGES (0..1) ............... CHAT_MESSAGES (0..N)
   chat_messages.related_sos_message_hash may retain the originating SOS hash.
   No SQLite FK enforces this link.
 
-PEERS (0..1) ................ SCF_PEER_STATUSES (0..N)
-  scf_peer_statuses.peer_id identifies a delivery target peer in app logic.
+PEERS (0..1) ...................... SCF_PEER_STATUSES (0..N)
+  scf_peer_statuses.peer_id identifies the delivery target peer in app logic.
   It is not declared as a SQLite FK to peers.id.
 
 
@@ -119,7 +130,7 @@ Seeded rows:
 
 TABLE: peer_types
 -----------------
-Purpose: Seeded lookup table describing the role/type of a peer device.
+Purpose: Seeded lookup table describing peer/device roles.
 
 +------------+---------+-----------------------------------------------+
 | Column     | Type    | Constraints                                   |
@@ -144,22 +155,22 @@ Seeded rows:
 
 TABLE: peers
 ------------
-Purpose: Locally known devices/users discovered or used in messaging.
+Purpose: Locally known devices/users discovered or used by the relay system.
 
-+------------------+---------+-----------------------------------------------+
-| Column           | Type    | Constraints                                   |
-+------------------+---------+-----------------------------------------------+
-| id               | TEXT    | PK                                            |
-| display_name     | TEXT    | NN                                            |
-| peer_type_code   | TEXT    | NN, FK -> peer_types.code                     |
-| is_connected     | INTEGER | NN, DEF 0, CHECK value IN (0, 1)             |
-| signal_strength  | INTEGER | NULL, CHECK NULL or value BETWEEN 0 AND 100  |
-| last_seen_at     | TEXT    | NULL                                          |
-| latitude         | REAL    | NULL                                          |
-| longitude        | REAL    | NULL                                          |
-| created_at       | TEXT    | NN                                            |
-| updated_at       | TEXT    | NULL                                          |
-+------------------+---------+-----------------------------------------------+
++-----------------+---------+-----------------------------------------------+
+| Column          | Type    | Constraints                                   |
++-----------------+---------+-----------------------------------------------+
+| id              | TEXT    | PK                                            |
+| display_name    | TEXT    | NN                                            |
+| peer_type_code  | TEXT    | NN, FK -> peer_types.code                     |
+| is_connected    | INTEGER | NN, DEF 0, CHECK value IN (0, 1)             |
+| signal_strength | INTEGER | NULL, CHECK NULL or value BETWEEN 0 AND 100  |
+| last_seen_at    | TEXT    | NULL                                          |
+| latitude        | REAL    | NULL                                          |
+| longitude       | REAL    | NULL                                          |
+| created_at      | TEXT    | NN                                            |
+| updated_at      | TEXT    | NULL                                          |
++-----------------+---------+-----------------------------------------------+
 
 Indexes:
 - idx_peers_peer_type (peer_type_code)
@@ -167,7 +178,7 @@ Indexes:
 
 TABLE: sos_messages
 -------------------
-Purpose: Persisted emergency/SOS records displayed and relayed by the app.
+Purpose: Persisted emergency/SOS records displayed, moderated, mapped, and relayed by the app.
 
 +---------------------+---------+-----------------------------------------------+
 | Column              | Type    | Constraints                                   |
@@ -175,35 +186,36 @@ Purpose: Persisted emergency/SOS records displayed and relayed by the app.
 | id                  | TEXT    | PK                                            |
 | sender_peer_id      | TEXT    | NN, FK -> peers.id                            |
 | body                | TEXT    | NN                                            |
-| category_code       | TEXT    | NN, FK -> categories.code                    |
+| category_code       | TEXT    | NN, FK -> categories.code                     |
 | status              | TEXT    | NN                                            |
 | latitude            | REAL    | NULL                                          |
 | longitude           | REAL    | NULL                                          |
 | created_at          | TEXT    | NN                                            |
 | updated_at          | TEXT    | NULL                                          |
-| message_hash        | TEXT    | NULL, APP association to relay envelope      |
+| message_hash        | TEXT    | NULL                                          |
 | gps_accuracy_meters | REAL    | NULL                                          |
 | hop_count           | INTEGER | NN, DEF 0, CHECK value >= 0                  |
 | ttl_seconds         | INTEGER | NN, DEF 86400, CHECK value > 0               |
+| moderation_status   | TEXT    | NN, DEF normal, CHECK IN (normal, spam)      |
+| moderation_reason   | TEXT    | NULL                                          |
+| moderation_score    | REAL    | NULL                                          |
 +---------------------+---------+-----------------------------------------------+
-
-Application status values mapped by MessageStatus:
-draft, queued, sending, sent, delivered, received, relayed, failed
-
-Important enforcement note:
-- The status values are parsed by application code; SQLite has no CHECK on status.
-- message_hash is indexed but is not declared UNIQUE and is not an FK.
 
 Indexes:
 - idx_sos_messages_category (category_code)
 - idx_sos_messages_status (status)
 - idx_sos_messages_created_at (created_at)
 - idx_sos_messages_message_hash (message_hash)
+- idx_sos_messages_moderation_status (moderation_status)
+
+Notes:
+- moderation_status is local-only anti-spam state. It does not change category_code.
+- Spam SOS messages remain stored but are hidden from All Messages and map markers.
 
 
 TABLE: scf_messages
 -------------------
-Purpose: Store-Carry-Forward relay envelopes saved for deduplication and relay.
+Purpose: Store-Carry-Forward relay queue, keyed by deterministic payload hash.
 
 +--------------+---------+-----------------------------------------------+
 | Column       | Type    | Constraints                                   |
@@ -213,11 +225,8 @@ Purpose: Store-Carry-Forward relay envelopes saved for deduplication and relay.
 | hop_count    | INTEGER | NN, DEF 0, CHECK value >= 0                  |
 | received_at  | TEXT    | NN                                            |
 | expires_at   | TEXT    | NN                                            |
-| payload_type | TEXT    | NN, DEF 'sos_message'                        |
+| payload_type | TEXT    | NN, DEF sos_message                           |
 +--------------+---------+-----------------------------------------------+
-
-Application payload_type values currently used:
-sos_message, chat_message
 
 Indexes:
 - idx_scf_messages_expires_at (expires_at)
@@ -225,28 +234,21 @@ Indexes:
 
 TABLE: scf_peer_statuses
 ------------------------
-Purpose: Relay/delivery attempt state for one envelope and one target peer.
+Purpose: Tracks per-peer relay delivery attempts and statuses for queued payloads.
 
 +---------------+---------+-----------------------------------------------+
 | Column        | Type    | Constraints                                   |
 +---------------+---------+-----------------------------------------------+
-| message_hash  | TEXT    | PK part 1, NN, FK -> scf_messages.message_hash|
-| peer_id       | TEXT    | PK part 2, NN, APP association to peers.id    |
+| message_hash  | TEXT    | PK, FK -> scf_messages.message_hash           |
+| peer_id       | TEXT    | PK, APP -> peers.id                           |
 | status        | TEXT    | NN                                            |
 | attempt_count | INTEGER | NN, DEF 0, CHECK value >= 0                  |
 | updated_at    | TEXT    | NN                                            |
 | last_error    | TEXT    | NULL                                          |
 +---------------+---------+-----------------------------------------------+
 
-Primary key:
+Composite primary key:
 - (message_hash, peer_id)
-
-Application status values mapped by ScfPeerStatus:
-pending, offered, sent, delivered, failed
-
-Important enforcement note:
-- The status values are parsed by application code; SQLite has no CHECK on status.
-- peer_id is stored for per-peer state but has no database FK to peers.id.
 
 Indexes:
 - idx_scf_peer_status_peer (peer_id, status)
@@ -254,28 +256,23 @@ Indexes:
 
 TABLE: conversations
 --------------------
-Purpose: Private peer-to-peer chat threads, optionally opened from an SOS.
+Purpose: Local private chat thread between the local peer and a remote peer.
 
 +--------------------------+---------+-----------------------------------------------+
 | Column                   | Type    | Constraints                                   |
 +--------------------------+---------+-----------------------------------------------+
 | id                       | TEXT    | PK                                            |
-| local_peer_id            | TEXT    | NN, FK -> peers.id                            |
-| remote_peer_id           | TEXT    | NN, FK -> peers.id                            |
-| related_sos_message_hash | TEXT    | NULL, APP association to SOS hash             |
+| local_peer_id            | TEXT    | NN, FK -> peers.id, UQ*                       |
+| remote_peer_id           | TEXT    | NN, FK -> peers.id, UQ*                       |
+| related_sos_message_hash | TEXT    | NULL, APP -> sos_messages.message_hash        |
 | last_message_at          | TEXT    | NULL                                          |
 | unread_count             | INTEGER | NN, DEF 0, CHECK value >= 0                  |
 | created_at               | TEXT    | NN                                            |
 | updated_at               | TEXT    | NN                                            |
 +--------------------------+---------+-----------------------------------------------+
 
-Unique constraint:
-- (local_peer_id, remote_peer_id)
-
-Important enforcement note:
-- There is no CHECK preventing local_peer_id and remote_peer_id from being the
-  same peer.
-- related_sos_message_hash is not an FK.
+Unique constraints:
+- UNIQUE (local_peer_id, remote_peer_id)
 
 Indexes:
 - idx_conversations_timeline (local_peer_id, last_message_at DESC)
@@ -283,60 +280,114 @@ Indexes:
 
 TABLE: chat_messages
 --------------------
-Purpose: Persisted direct/private messages inside conversations.
+Purpose: Persisted private chat messages, including relayed/offline messages.
 
 +--------------------------+---------+-----------------------------------------------+
 | Column                   | Type    | Constraints                                   |
 +--------------------------+---------+-----------------------------------------------+
 | id                       | TEXT    | PK                                            |
-| message_hash             | TEXT    | NN, UQ, APP association to relay envelope    |
-| conversation_id          | TEXT    | NN, FK -> conversations.id                   |
+| message_hash             | TEXT    | NN, UQ                                        |
+| conversation_id          | TEXT    | NN, FK -> conversations.id                    |
 | sender_peer_id           | TEXT    | NN, FK -> peers.id                            |
 | recipient_peer_id        | TEXT    | NN, FK -> peers.id                            |
 | body                     | TEXT    | NN                                            |
 | status                   | TEXT    | NN                                            |
-| related_sos_message_hash | TEXT    | NULL, APP association to SOS hash             |
+| related_sos_message_hash | TEXT    | NULL, APP -> sos_messages.message_hash        |
 | hop_count                | INTEGER | NN, DEF 0, CHECK value >= 0                  |
 | ttl_seconds              | INTEGER | NN, DEF 86400, CHECK value > 0               |
 | created_at               | TEXT    | NN                                            |
 | updated_at               | TEXT    | NULL                                          |
+| moderation_status        | TEXT    | NN, DEF normal, CHECK IN (normal, spam)      |
+| moderation_reason        | TEXT    | NULL                                          |
+| moderation_score         | REAL    | NULL                                          |
 +--------------------------+---------+-----------------------------------------------+
-
-Application status values mapped by MessageStatus:
-draft, queued, sending, sent, delivered, received, relayed, failed
-
-Important enforcement note:
-- status is application validated only; SQLite has no CHECK on status.
-- message_hash is UNIQUE locally, but is not declared as an FK to scf_messages.
-- related_sos_message_hash is not an FK.
 
 Indexes:
 - idx_chat_messages_timeline (conversation_id, created_at ASC)
 - idx_chat_messages_hash (message_hash)
+- idx_chat_messages_moderation_status (moderation_status)
+
+Notes:
+- moderation_status is local-only anti-spam state.
+- Chat spam is stored but excluded from All Messages and shown only under Spam.
 
 
-CASCADE / DELETE BEHAVIOR SUMMARY
----------------------------------
+ENUM / DOMAIN VALUES USED BY THE TABLES
+---------------------------------------
 
-+--------------------------+---------------------------+------------------------+
-| Child table.column       | Parent table.column       | Delete behavior        |
-+--------------------------+---------------------------+------------------------+
-| peers.peer_type_code     | peer_types.code           | NO ACTION (default)    |
-| sos_messages.sender_peer_id| peers.id                | CASCADE                |
-| sos_messages.category_code| categories.code          | NO ACTION (default)    |
-| scf_peer_statuses.message_hash| scf_messages.message_hash | CASCADE            |
-| conversations.local_peer_id| peers.id                | NO ACTION (default)    |
-| conversations.remote_peer_id| peers.id               | NO ACTION (default)    |
-| chat_messages.conversation_id| conversations.id      | CASCADE                |
-| chat_messages.sender_peer_id| peers.id               | NO ACTION (default)    |
-| chat_messages.recipient_peer_id| peers.id            | NO ACTION (default)    |
-+--------------------------+---------------------------+------------------------+
+Category codes:
+- rescue
+- food
+- water
+- medical
+- shelter
+- transport
+- information
+- other
+
+Peer type codes:
+- civilian
+- responder
+- relay
+- authority
+- unknown
+
+Message statuses:
+- draft
+- queued
+- sending
+- sent
+- delivered
+- received
+- relayed
+- failed
+
+Moderation statuses:
+- normal
+- spam
 
 
-NOT IMPLEMENTED AS DATABASE TABLES
-----------------------------------
+HIGH-LEVEL TEXT ERD
+-------------------
 
-- transport_sessions is not present in schema version 4.
-- Firebase authentication accounts are not persisted as relational SQLite
-  tables in LocalMessagingDatabase.
+PEER_TYPES
+  || classifies
+PEERS
+  o{ sends SOS
+SOS_MESSAGES
+  }o categorized by ||
+CATEGORIES
 
+PEERS
+  || local peer / remote peer
+CONVERSATIONS
+  || contains
+CHAT_MESSAGES
+
+PEERS
+  || sends chat
+CHAT_MESSAGES
+
+PEERS
+  || receives chat
+CHAT_MESSAGES
+
+SCF_MESSAGES
+  || tracks
+SCF_PEER_STATUSES
+
+SOS_MESSAGES
+  .. APP message_hash ..
+SCF_MESSAGES
+
+CHAT_MESSAGES
+  .. APP message_hash ..
+SCF_MESSAGES
+
+SOS_MESSAGES
+  .. APP related_sos_message_hash ..
+CONVERSATIONS
+
+SOS_MESSAGES
+  .. APP related_sos_message_hash ..
+CHAT_MESSAGES

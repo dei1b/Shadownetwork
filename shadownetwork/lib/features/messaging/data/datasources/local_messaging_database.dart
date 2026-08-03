@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 5;
+  static const databaseVersion = 6;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -27,6 +27,7 @@ class LocalMessagingDatabase {
     3: _addSosRoutingMetadata,
     4: _createChatSchema,
     5: _addModerationMetadata,
+    6: _addTargetedSosMetadata,
   };
 
   static Future<Database> open({
@@ -294,6 +295,21 @@ class LocalMessagingDatabase {
         'ON $table (moderation_status)',
       );
     }
+  }
+
+  static Future<void> _addTargetedSosMetadata(Database database) async {
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable ADD COLUMN recipient_peer_id TEXT',
+    );
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable '
+      'ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0 '
+      'CHECK (is_encrypted IN (0, 1))',
+    );
+    await database.execute(
+      'CREATE INDEX idx_sos_messages_recipient_peer '
+      'ON $sosMessagesTable (recipient_peer_id)',
+    );
   }
 
   static Future<void> seedLookupTables(Database database) async {

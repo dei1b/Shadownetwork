@@ -1,0 +1,916 @@
+{
+  "$schema": "https://shadow-network.local/schemas/erd.v1.json",
+  "name": "Shadow Network SQLite ERD",
+  "database": {
+    "engine": "SQLite",
+    "file": "shadownetwork.db",
+    "schemaVersion": 5,
+    "tableCount": 8
+  },
+  "notation": "crow-foot",
+  "style": {
+    "colorMode": "black-and-white",
+    "showTitle": false,
+    "showLegend": false,
+    "solidLineMeaning": "SQLite-enforced foreign key",
+    "dashedLineMeaning": "Application-level reference only"
+  },
+  "tables": [
+    {
+      "name": "peer_types",
+      "displayName": "PEER_TYPES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "TEXT",
+          "key": "UQ",
+          "nullable": false
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "sort_order",
+          "type": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "uniqueConstraints": [
+        [
+          "code"
+        ]
+      ],
+      "seededRows": [
+        {
+          "id": 1,
+          "code": "civilian",
+          "label": "Civilian",
+          "sort_order": 0
+        },
+        {
+          "id": 2,
+          "code": "responder",
+          "label": "Responder",
+          "sort_order": 1
+        },
+        {
+          "id": 3,
+          "code": "relay",
+          "label": "Relay",
+          "sort_order": 2
+        },
+        {
+          "id": 4,
+          "code": "authority",
+          "label": "Authority",
+          "sort_order": 3
+        },
+        {
+          "id": 5,
+          "code": "unknown",
+          "label": "Unknown",
+          "sort_order": 4
+        }
+      ]
+    },
+    {
+      "name": "peers",
+      "displayName": "PEERS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "display_name",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "peer_type_code",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "is_connected",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "is_connected IN (0, 1)"
+        },
+        {
+          "name": "signal_strength",
+          "type": "INTEGER",
+          "nullable": true,
+          "check": "signal_strength IS NULL OR signal_strength BETWEEN 0 AND 100"
+        },
+        {
+          "name": "last_seen_at",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "latitude",
+          "type": "REAL",
+          "nullable": true
+        },
+        {
+          "name": "longitude",
+          "type": "REAL",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_peers_peer_type",
+          "columns": [
+            "peer_type_code"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "categories",
+      "displayName": "CATEGORIES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "code",
+          "type": "TEXT",
+          "key": "UQ",
+          "nullable": false
+        },
+        {
+          "name": "label",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "sort_order",
+          "type": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "uniqueConstraints": [
+        [
+          "code"
+        ]
+      ],
+      "seededRows": [
+        {
+          "id": 1,
+          "code": "rescue",
+          "label": "Rescue",
+          "sort_order": 0
+        },
+        {
+          "id": 2,
+          "code": "food",
+          "label": "Food",
+          "sort_order": 1
+        },
+        {
+          "id": 3,
+          "code": "water",
+          "label": "Water",
+          "sort_order": 2
+        },
+        {
+          "id": 4,
+          "code": "medical",
+          "label": "Medical",
+          "sort_order": 3
+        },
+        {
+          "id": 5,
+          "code": "shelter",
+          "label": "Shelter",
+          "sort_order": 4
+        },
+        {
+          "id": 6,
+          "code": "transport",
+          "label": "Transport",
+          "sort_order": 5
+        },
+        {
+          "id": 7,
+          "code": "information",
+          "label": "Information",
+          "sort_order": 6
+        },
+        {
+          "id": 8,
+          "code": "other",
+          "label": "Other",
+          "sort_order": 7
+        }
+      ]
+    },
+    {
+      "name": "sos_messages",
+      "displayName": "SOS_MESSAGES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "sender_peer_id",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "category_code",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "latitude",
+          "type": "REAL",
+          "nullable": true
+        },
+        {
+          "name": "longitude",
+          "type": "REAL",
+          "nullable": true
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "message_hash",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "gps_accuracy_meters",
+          "type": "REAL",
+          "nullable": true
+        },
+        {
+          "name": "hop_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "hop_count >= 0"
+        },
+        {
+          "name": "ttl_seconds",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 86400,
+          "check": "ttl_seconds > 0"
+        },
+        {
+          "name": "moderation_status",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "normal",
+          "check": "moderation_status IN ('normal', 'spam')"
+        },
+        {
+          "name": "moderation_reason",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "moderation_score",
+          "type": "REAL",
+          "nullable": true
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_sos_messages_category",
+          "columns": [
+            "category_code"
+          ]
+        },
+        {
+          "name": "idx_sos_messages_status",
+          "columns": [
+            "status"
+          ]
+        },
+        {
+          "name": "idx_sos_messages_created_at",
+          "columns": [
+            "created_at"
+          ]
+        },
+        {
+          "name": "idx_sos_messages_message_hash",
+          "columns": [
+            "message_hash"
+          ]
+        },
+        {
+          "name": "idx_sos_messages_moderation_status",
+          "columns": [
+            "moderation_status"
+          ]
+        }
+      ],
+      "notes": [
+        "moderation_status is local-only anti-spam state and is not a category.",
+        "Spam SOS messages remain stored but are hidden from All Messages and map markers."
+      ]
+    },
+    {
+      "name": "scf_messages",
+      "displayName": "SCF_MESSAGES",
+      "columns": [
+        {
+          "name": "message_hash",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "hop_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "hop_count >= 0"
+        },
+        {
+          "name": "received_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "expires_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "payload_type",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "sos_message"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_scf_messages_expires_at",
+          "columns": [
+            "expires_at"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "scf_peer_statuses",
+      "displayName": "SCF_PEER_STATUSES",
+      "columns": [
+        {
+          "name": "message_hash",
+          "type": "TEXT",
+          "key": "PK, FK",
+          "nullable": false
+        },
+        {
+          "name": "peer_id",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "attempt_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "attempt_count >= 0"
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "last_error",
+          "type": "TEXT",
+          "nullable": true
+        }
+      ],
+      "primaryKey": [
+        "message_hash",
+        "peer_id"
+      ],
+      "indexes": [
+        {
+          "name": "idx_scf_peer_status_peer",
+          "columns": [
+            "peer_id",
+            "status"
+          ]
+        }
+      ],
+      "notes": [
+        "peer_id is not a SQLite foreign key; it is an application-level delivery target reference to peers.id."
+      ]
+    },
+    {
+      "name": "conversations",
+      "displayName": "CONVERSATIONS",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "local_peer_id",
+          "type": "TEXT",
+          "key": "FK, UQ*",
+          "nullable": false
+        },
+        {
+          "name": "remote_peer_id",
+          "type": "TEXT",
+          "key": "FK, UQ*",
+          "nullable": false
+        },
+        {
+          "name": "related_sos_message_hash",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "last_message_at",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "unread_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "unread_count >= 0"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": false
+        }
+      ],
+      "uniqueConstraints": [
+        [
+          "local_peer_id",
+          "remote_peer_id"
+        ]
+      ],
+      "indexes": [
+        {
+          "name": "idx_conversations_timeline",
+          "columns": [
+            "local_peer_id",
+            "last_message_at DESC"
+          ]
+        }
+      ],
+      "notes": [
+        "Do not add a note column. The composite UNIQUE pair is a table constraint only."
+      ]
+    },
+    {
+      "name": "chat_messages",
+      "displayName": "CHAT_MESSAGES",
+      "columns": [
+        {
+          "name": "id",
+          "type": "TEXT",
+          "key": "PK",
+          "nullable": false
+        },
+        {
+          "name": "message_hash",
+          "type": "TEXT",
+          "key": "UQ",
+          "nullable": false
+        },
+        {
+          "name": "conversation_id",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "sender_peer_id",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "recipient_peer_id",
+          "type": "TEXT",
+          "key": "FK",
+          "nullable": false
+        },
+        {
+          "name": "body",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "related_sos_message_hash",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "hop_count",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 0,
+          "check": "hop_count >= 0"
+        },
+        {
+          "name": "ttl_seconds",
+          "type": "INTEGER",
+          "nullable": false,
+          "default": 86400,
+          "check": "ttl_seconds > 0"
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "moderation_status",
+          "type": "TEXT",
+          "nullable": false,
+          "default": "normal",
+          "check": "moderation_status IN ('normal', 'spam')"
+        },
+        {
+          "name": "moderation_reason",
+          "type": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "moderation_score",
+          "type": "REAL",
+          "nullable": true
+        }
+      ],
+      "uniqueConstraints": [
+        [
+          "message_hash"
+        ]
+      ],
+      "indexes": [
+        {
+          "name": "idx_chat_messages_timeline",
+          "columns": [
+            "conversation_id",
+            "created_at ASC"
+          ]
+        },
+        {
+          "name": "idx_chat_messages_hash",
+          "columns": [
+            "message_hash"
+          ]
+        },
+        {
+          "name": "idx_chat_messages_moderation_status",
+          "columns": [
+            "moderation_status"
+          ]
+        }
+      ],
+      "notes": [
+        "Attribute must be id, not id PK. PK belongs in the key column.",
+        "moderation_status is local-only anti-spam state."
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "id": "peer_types_classifies_peers",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "classifies",
+      "from": {
+        "table": "peer_types",
+        "column": "code",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "peers",
+        "column": "peer_type_code",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    },
+    {
+      "id": "peers_sends_sos_messages",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "sends SOS",
+      "from": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "sos_messages",
+        "column": "sender_peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE",
+      "onDelete": "CASCADE"
+    },
+    {
+      "id": "categories_categorizes_sos_messages",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "categorizes",
+      "from": {
+        "table": "categories",
+        "column": "code",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "sos_messages",
+        "column": "category_code",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    },
+    {
+      "id": "scf_messages_tracks_scf_peer_statuses",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "tracks",
+      "from": {
+        "table": "scf_messages",
+        "column": "message_hash",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "scf_peer_statuses",
+        "column": "message_hash",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE",
+      "onDelete": "CASCADE"
+    },
+    {
+      "id": "peers_local_conversations",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "local peer",
+      "from": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "conversations",
+        "column": "local_peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    },
+    {
+      "id": "peers_remote_conversations",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "remote peer",
+      "from": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "conversations",
+        "column": "remote_peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    },
+    {
+      "id": "conversations_contains_chat_messages",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "contains",
+      "from": {
+        "table": "conversations",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "chat_messages",
+        "column": "conversation_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE",
+      "onDelete": "CASCADE"
+    },
+    {
+      "id": "peers_send_chat_messages",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "sends chat",
+      "from": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "chat_messages",
+        "column": "sender_peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    },
+    {
+      "id": "peers_receive_chat_messages",
+      "kind": "foreign_key",
+      "lineStyle": "solid",
+      "label": "receives chat",
+      "from": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "one_and_only_one"
+      },
+      "to": {
+        "table": "chat_messages",
+        "column": "recipient_peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "onUpdate": "CASCADE"
+    }
+  ],
+  "applicationReferences": [
+    {
+      "id": "sos_messages_queued_payload",
+      "kind": "application_reference",
+      "lineStyle": "dashed",
+      "label": "queued/relayed payload",
+      "from": {
+        "table": "sos_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      },
+      "to": {
+        "table": "scf_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      },
+      "layoutHint": "Route as a short dashed path around the outside; do not connect SOS_MESSAGES directly to CHAT_MESSAGES."
+    },
+    {
+      "id": "chat_messages_queued_payload",
+      "kind": "application_reference",
+      "lineStyle": "dashed",
+      "label": "queued/relayed payload",
+      "from": {
+        "table": "chat_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      },
+      "to": {
+        "table": "scf_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      },
+      "layoutHint": "Route as a short dashed path around the outside; do not connect CHAT_MESSAGES directly to SOS_MESSAGES."
+    },
+    {
+      "id": "conversations_related_sos",
+      "kind": "application_reference",
+      "lineStyle": "dashed",
+      "label": "related SOS",
+      "from": {
+        "table": "conversations",
+        "column": "related_sos_message_hash",
+        "cardinality": "zero_or_many"
+      },
+      "to": {
+        "table": "sos_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      }
+    },
+    {
+      "id": "chat_messages_related_sos",
+      "kind": "application_reference",
+      "lineStyle": "dashed",
+      "label": "related SOS",
+      "from": {
+        "table": "chat_messages",
+        "column": "related_sos_message_hash",
+        "cardinality": "zero_or_many"
+      },
+      "to": {
+        "table": "sos_messages",
+        "column": "message_hash",
+        "cardinality": "zero_or_one"
+      }
+    },
+    {
+      "id": "scf_peer_statuses_delivery_target",
+      "kind": "application_reference",
+      "lineStyle": "dashed",
+      "label": "delivery target",
+      "from": {
+        "table": "scf_peer_statuses",
+        "column": "peer_id",
+        "cardinality": "zero_or_many"
+      },
+      "to": {
+        "table": "peers",
+        "column": "id",
+        "cardinality": "zero_or_one"
+      },
+      "note": "This is not a SQLite FK."
+    }
+  ],
+  "layout": {
+    "peer_types": "top-left",
+    "peers": "top-center",
+    "categories": "top-right",
+    "sos_messages": "right-middle",
+    "scf_messages": "left-middle",
+    "scf_peer_statuses": "center-middle",
+    "conversations": "bottom-center",
+    "chat_messages": "bottom-right"
+  }
+}

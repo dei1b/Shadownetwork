@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="4200" height="1750" viewBox="0 0 4200 1750">
+<rect width="100%" height="100%" fill="white"/>
+<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="black"/></marker></defs>
+<style>
+.t{font-family:Arial, sans-serif;font-weight:700;font-size:44px;}
+.ct{font-family:Arial, sans-serif;font-weight:700;font-size:36px;}
+.h{font-family:Arial, sans-serif;font-weight:700;font-size:27px;}
+.ch{font-family:Arial, sans-serif;font-weight:700;font-size:24px;}
+.b{font-family:Arial, sans-serif;font-size:27px;}
+.cb{font-family:Arial, sans-serif;font-size:24px;}
+.n{font-family:Arial, sans-serif;font-size:24px;}
+</style>
+<rect x="1340" y="95" width="1520" height="666" rx="14" ry="14" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="1340,177 2860,177" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1340,239 2860,239" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1650,177 1650,761" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="2150,177 2150,761" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="2100.0" y="136.0" text-anchor="middle" dominant-baseline="middle" class="t">SHADOWNETWORK_SOS_PAYLOAD_V2</text>
+<text x="1358" y="190.5" class="h">Type</text>
+<text x="1668" y="190.5" class="h">Property</text>
+<text x="2168" y="190.5" class="h">Rule</text>
+<text x="1358" y="257" class="b">integer</text>
+<text x="1668" y="257" class="b">schema_version</text>
+<text x="2168" y="257" class="b">REQUIRED, const 2</text>
+<text x="1358" y="315" class="b">string</text>
+<text x="1668" y="315" class="b">message_hash</text>
+<text x="2168" y="315" class="b">REQUIRED, SHA-256</text>
+<text x="1358" y="373" class="b">string</text>
+<text x="1668" y="373" class="b">message_id</text>
+<text x="2168" y="373" class="b">REQUIRED</text>
+<text x="1358" y="431" class="b">string</text>
+<text x="1668" y="431" class="b">payload_text</text>
+<text x="2168" y="431" class="b">REQUIRED, trimmed</text>
+<text x="1358" y="489" class="b">string</text>
+<text x="1668" y="489" class="b">category</text>
+<text x="2168" y="489" class="b">REQUIRED, enum</text>
+<text x="1358" y="547" class="b">object</text>
+<text x="1668" y="547" class="b">location</text>
+<text x="2168" y="547" class="b">REQUIRED</text>
+<text x="1358" y="605" class="b">object</text>
+<text x="1668" y="605" class="b">routing</text>
+<text x="2168" y="605" class="b">REQUIRED</text>
+<text x="1358" y="663" class="b">object</text>
+<text x="1668" y="663" class="b">timestamp</text>
+<text x="2168" y="663" class="b">REQUIRED</text>
+<text x="1358" y="721" class="b">object</text>
+<text x="1668" y="721" class="b">sender</text>
+<text x="2168" y="721" class="b">REQUIRED</text>
+<rect x="70" y="930" width="600" height="452" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="70,1004 670,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="70,1068 670,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="205,1004 205,1382" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="430,1004 430,1382" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="370.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">CATEGORY</text>
+<text x="88" y="1020.0" class="ch">Type</text>
+<text x="223" y="1020.0" class="ch">Property</text>
+<text x="448" y="1020.0" class="ch">Rule</text>
+<text x="88" y="1086" class="cb">string</text>
+<text x="223" y="1086" class="cb">category</text>
+<text x="448" y="1086" class="cb">REQUIRED</text>
+<text x="88" y="1160" class="cb">enum</text>
+<text x="223" y="1160" class="cb">values</text>
+<text x="448" y="1160" class="cb">rescue, food,</text>
+<text x="448" y="1192" class="cb">water, medical,</text>
+<text x="448" y="1224" class="cb">shelter, transport,</text>
+<text x="448" y="1256" class="cb">information, other</text>
+<rect x="735" y="930" width="610" height="570" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="735,1004 1345,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="735,1068 1345,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="870,1004 870,1500" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1115,1004 1115,1500" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="1040.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">SENDER</text>
+<text x="753" y="1020.0" class="ch">Type</text>
+<text x="888" y="1020.0" class="ch">Property</text>
+<text x="1133" y="1020.0" class="ch">Rule</text>
+<text x="753" y="1086" class="cb">string</text>
+<text x="888" y="1086" class="cb">peer_id</text>
+<text x="1133" y="1086" class="cb">REQUIRED</text>
+<text x="753" y="1160" class="cb">string</text>
+<text x="888" y="1160" class="cb">peer_name</text>
+<text x="1133" y="1160" class="cb">REQUIRED</text>
+<text x="753" y="1234" class="cb">string</text>
+<text x="888" y="1234" class="cb">peer_type</text>
+<text x="1133" y="1234" class="cb">REQUIRED</text>
+<text x="753" y="1308" class="cb">enum</text>
+<text x="888" y="1308" class="cb">values</text>
+<text x="1133" y="1308" class="cb">civilian,</text>
+<text x="1133" y="1340" class="cb">responder, relay,</text>
+<text x="1133" y="1372" class="cb">authority,</text>
+<text x="1133" y="1404" class="cb">unknown</text>
+<rect x="1410" y="930" width="660" height="414" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="1410,1004 2070,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="1410,1068 2070,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1610,1004 1610,1344" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="1880,1004 1880,1344" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="1740.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">LOCATION</text>
+<text x="1428" y="1020.0" class="ch">Type</text>
+<text x="1628" y="1020.0" class="ch">Property</text>
+<text x="1898" y="1020.0" class="ch">Rule</text>
+<text x="1428" y="1086" class="cb">number or null</text>
+<text x="1628" y="1086" class="cb">latitude</text>
+<text x="1898" y="1086" class="cb">REQUIRED,</text>
+<text x="1898" y="1118" class="cb">nullable</text>
+<text x="1428" y="1178" class="cb">number or null</text>
+<text x="1628" y="1178" class="cb">longitude</text>
+<text x="1898" y="1178" class="cb">REQUIRED,</text>
+<text x="1898" y="1210" class="cb">nullable</text>
+<text x="1428" y="1270" class="cb">number or null</text>
+<text x="1628" y="1270" class="cb">accuracy_meters</text>
+<text x="1898" y="1270" class="cb">REQUIRED,</text>
+<text x="1898" y="1302" class="cb">nullable</text>
+<rect x="2135" y="930" width="590" height="424" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="2135,1004 2725,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="2135,1068 2725,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="2270,1004 2270,1354" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="2540,1004 2540,1354" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="2430.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">PAYLOAD_TEXT</text>
+<text x="2153" y="1020.0" class="ch">Type</text>
+<text x="2288" y="1020.0" class="ch">Property</text>
+<text x="2558" y="1020.0" class="ch">Rule</text>
+<text x="2153" y="1086" class="cb">string</text>
+<text x="2288" y="1086" class="cb">payload_text</text>
+<text x="2558" y="1086" class="cb">REQUIRED</text>
+<text x="2153" y="1164" class="cb">rule</text>
+<text x="2288" y="1164" class="cb">source</text>
+<text x="2558" y="1164" class="cb">SOS</text>
+<text x="2558" y="1196" class="cb">message</text>
+<text x="2558" y="1228" class="cb">body</text>
+<text x="2153" y="1294" class="cb">integer</text>
+<text x="2288" y="1294" class="cb">ui_max_length</text>
+<text x="2558" y="1294" class="cb">250</text>
+<rect x="2790" y="930" width="650" height="521" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="2790,1004 3440,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="2790,1068 3440,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="2945,1004 2945,1451" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="3165,1004 3165,1451" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="3115.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">ROUTING</text>
+<text x="2808" y="1020.0" class="ch">Type</text>
+<text x="2963" y="1020.0" class="ch">Property</text>
+<text x="3183" y="1020.0" class="ch">Rule</text>
+<text x="2808" y="1086" class="cb">integer</text>
+<text x="2963" y="1086" class="cb">hop_count</text>
+<text x="3183" y="1086" class="cb">REQUIRED</text>
+<text x="2808" y="1164" class="cb">integer</text>
+<text x="2963" y="1164" class="cb">ttl</text>
+<text x="3183" y="1164" class="cb">REQUIRED, seconds</text>
+<text x="2808" y="1274" class="cb">rule</text>
+<text x="2963" y="1274" class="cb">hashing</text>
+<text x="3183" y="1274" class="cb">hop_count normalized</text>
+<text x="3183" y="1306" class="cb">to 0 for message hash</text>
+<rect x="3505" y="930" width="610" height="374" rx="18" ry="18" fill="white" stroke="black" stroke-width="3"/>
+<polyline points="3505,1004 4115,1004" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="3505,1068 4115,1068" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="3640,1004 3640,1304" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<polyline points="3885,1004 3885,1304" fill="none" stroke="black" stroke-width="2" stroke-linejoin="round"/>
+<text x="3810.0" y="967.0" text-anchor="middle" dominant-baseline="middle" class="ct">TIMESTAMP</text>
+<text x="3523" y="1020.0" class="ch">Type</text>
+<text x="3658" y="1020.0" class="ch">Property</text>
+<text x="3903" y="1020.0" class="ch">Rule</text>
+<text x="3523" y="1086" class="cb">string</text>
+<text x="3658" y="1086" class="cb">created_at</text>
+<text x="3903" y="1086" class="cb">REQUIRED</text>
+<text x="3523" y="1172" class="cb">format</text>
+<text x="3658" y="1172" class="cb">created_at</text>
+<text x="3903" y="1172" class="cb">UTC ISO-8601</text>
+<text x="3903" y="1204" class="cb">date-time</text>
+<polyline points="2100.0,761 2100.0,830" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="370.0,830 3810.0,830" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round"/>
+<polyline points="370.0,830 370.0,908 370.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="1040.0,830 1040.0,908 1040.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="1740.0,830 1740.0,908 1740.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="2430.0,830 2430.0,908 2430.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="3115.0,830 3115.0,908 3115.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<polyline points="3810.0,830 3810.0,908 3810.0,930" fill="none" stroke="black" stroke-width="3" stroke-linejoin="round" marker-end="url(#arrow)"/>
+<text x="2100.0" y="1665" text-anchor="middle" dominant-baseline="middle" class="n">Hash note: message_hash is SHA-256 of canonical JSON; mutable relay/local state such as status, moderation, and delivery state is not part of the payload.</text>
+</svg>

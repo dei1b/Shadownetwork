@@ -30,6 +30,12 @@ void main() {
       isConnected: true,
       signalStrength: 88,
     );
+    const recipient = Peer(
+      id: 'rescuer-1',
+      name: 'Rescuer Endpoint',
+      type: PeerType.responder,
+      isConnected: false,
+    );
 
     await peerRepository.upsertPeer(peer);
     await messageRepository.saveMessage(
@@ -45,14 +51,16 @@ void main() {
         gpsAccuracyMeters: 8.2,
         hopCount: 2,
         ttl: const Duration(hours: 4),
+        recipient: recipient,
+        isEncrypted: true,
       ),
     );
 
     final peers = await peerRepository.getNearbyPeers();
     final messages = await messageRepository.getMessages();
 
-    expect(peers, hasLength(1));
-    expect(peers.single.name, 'Responder 1');
+    expect(peers, hasLength(2));
+    expect(peers.map((peer) => peer.id), containsAll(['peer-1', 'rescuer-1']));
     expect(messages, hasLength(1));
     expect(messages.single.sender.id, 'peer-1');
     expect(messages.single.category, Category.medical);
@@ -61,6 +69,8 @@ void main() {
     expect(messages.single.gpsAccuracyMeters, 8.2);
     expect(messages.single.hopCount, 2);
     expect(messages.single.ttl, const Duration(hours: 4));
+    expect(messages.single.recipient?.id, recipient.id);
+    expect(messages.single.isEncrypted, isTrue);
     expect(messages.single.moderationStatus, MessageModerationStatus.normal);
 
     await messageRepository.saveMessage(
@@ -88,6 +98,6 @@ void main() {
     final filteredPeers = await peerRepository.getNearbyPeers(
       excludingPeerId: peer.id,
     );
-    expect(filteredPeers, isEmpty);
+    expect(filteredPeers.map((peer) => peer.id), ['rescuer-1']);
   });
 }

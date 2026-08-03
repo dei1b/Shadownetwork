@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1500" viewBox="0 0 1800 1500">
+  <rect width="1800" height="1500" fill="white"/>
+
+  <defs>
+    <marker id="open-arrow" viewBox="0 0 12 10" refX="11" refY="5" markerWidth="12" markerHeight="10" orient="auto">
+      <path d="M 0 0 L 11 5 L 0 10" fill="none" stroke="#000" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title { font-family: Arial, Helvetica, sans-serif; font-size: 34px; font-weight: 700; fill: #000; }
+    .actor-label { font-family: Arial, Helvetica, sans-serif; font-size: 27px; font-weight: 700; fill: #000; }
+    .use-case-label { font-family: Arial, Helvetica, sans-serif; font-size: 24px; fill: #000; }
+    .line { fill: none; stroke: #000; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .boundary { fill: white; stroke: #000; stroke-width: 3; }
+    .use-case { fill: white; stroke: #000; stroke-width: 3; }
+    .include-line { fill: none; stroke: #000; stroke-width: 2.5; stroke-dasharray: 10 8; marker-end: url(#open-arrow); }
+    .relationship-label { font-family: Arial, Helvetica, sans-serif; font-size: 18px; fill: #000; }
+  </style>
+
+  <!-- System boundary -->
+  <rect class="boundary" x="320" y="40" width="1160" height="1415"/>
+  <text class="title" x="900" y="88" text-anchor="middle">
+    <tspan x="900">SHADOW NETWORK:</tspan>
+    <tspan x="900" dy="42">Mobile App Based PEER-TO-PEER Disaster Messaging System</tspan>
+  </text>
+
+  <!-- Resident/User associations. Every line begins at the right hand (240,445). -->
+  <polyline class="line" points="240,445 400,200 510,200"/>
+  <polyline class="line" points="240,445 420,325 590,325"/>
+  <polyline class="line" points="240,445 590,450"/>
+  <polyline class="line" points="240,445 430,575 590,575"/>
+  <polyline class="line" points="240,445 410,700 590,700"/>
+  <polyline class="line" points="240,445 390,825 590,825"/>
+  <polyline class="line" points="240,445 370,950 590,950"/>
+
+  <!-- Responder/Rescuer associations. Every line begins at the left hand (1560,1070). -->
+  <polyline class="line" points="1560,1070 1395,450 1210,450"/>
+  <polyline class="line" points="1560,1070 1375,575 1210,575"/>
+  <polyline class="line" points="1560,1070 1355,700 1210,700"/>
+  <polyline class="line" points="1560,1070 1335,825 1210,825"/>
+  <polyline class="line" points="1560,1070 1315,950 1210,950"/>
+  <polyline class="line" points="1560,1070 1210,1075"/>
+  <polyline class="line" points="1560,1070 1335,1200 1210,1200"/>
+  <polyline class="line" points="1560,1070 1355,1325 1210,1325"/>
+
+  <!-- The diagram intentionally contains one use case relationship. -->
+  <line class="include-line" x1="930" y1="200" x2="1050" y2="200"/>
+  <text class="relationship-label" x="990" y="180" text-anchor="middle">&lt;&lt;include&gt;&gt;</text>
+
+  <!-- Resident/User actor -->
+  <circle class="boundary" cx="160" cy="365" r="30"/>
+  <line class="line" x1="160" y1="395" x2="160" y2="510"/>
+  <line class="line" x1="80" y1="445" x2="240" y2="445"/>
+  <line class="line" x1="160" y1="510" x2="90" y2="600"/>
+  <line class="line" x1="160" y1="510" x2="230" y2="600"/>
+  <text class="actor-label" x="160" y="645" text-anchor="middle">
+    <tspan x="160">Resident /</tspan>
+    <tspan x="160" dy="34">User</tspan>
+  </text>
+
+  <!-- Responder/Rescuer actor -->
+  <circle class="boundary" cx="1640" cy="990" r="30"/>
+  <line class="line" x1="1640" y1="1020" x2="1640" y2="1135"/>
+  <line class="line" x1="1560" y1="1070" x2="1720" y2="1070"/>
+  <line class="line" x1="1640" y1="1135" x2="1570" y2="1225"/>
+  <line class="line" x1="1640" y1="1135" x2="1710" y2="1225"/>
+  <text class="actor-label" x="1640" y="1270" text-anchor="middle">
+    <tspan x="1640">Responder /</tspan>
+    <tspan x="1640" dy="34">Rescuer</tspan>
+  </text>
+
+  <!-- Vertically stacked use cases -->
+  <ellipse class="use-case" cx="720" cy="200" rx="210" ry="48"/>
+  <text class="use-case-label" x="720" y="208" text-anchor="middle">Broadcast SOS</text>
+
+  <ellipse class="use-case" cx="1260" cy="200" rx="210" ry="48"/>
+  <text class="use-case-label" x="1260" y="208" text-anchor="middle">Capture GPS Location</text>
+
+  <ellipse class="use-case" cx="900" cy="325" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="333" text-anchor="middle">View SOS Delivery Status</text>
+
+  <ellipse class="use-case" cx="900" cy="450" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="458" text-anchor="middle">Send Chat Message</text>
+
+  <ellipse class="use-case" cx="900" cy="575" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="583" text-anchor="middle">View Incoming Messages</text>
+
+  <ellipse class="use-case" cx="900" cy="700" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="708" text-anchor="middle">View Spam Messages</text>
+
+  <ellipse class="use-case" cx="900" cy="825" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="833" text-anchor="middle">View SOS Map</text>
+
+  <ellipse class="use-case" cx="900" cy="950" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="958" text-anchor="middle">Relay Encrypted Messages Offline</text>
+
+  <ellipse class="use-case" cx="900" cy="1075" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="1083" text-anchor="middle">Receive SOS Alert</text>
+
+  <ellipse class="use-case" cx="900" cy="1200" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="1208" text-anchor="middle">Update SOS Status</text>
+
+  <ellipse class="use-case" cx="900" cy="1325" rx="310" ry="48"/>
+  <text class="use-case-label" x="900" y="1333" text-anchor="middle">Monitor Connection Diagnostics</text>
+</svg>

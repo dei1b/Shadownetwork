@@ -68,6 +68,8 @@ void main() {
     expect(columnNames, contains('moderation_status'));
     expect(columnNames, contains('moderation_reason'));
     expect(columnNames, contains('moderation_score'));
+    expect(columnNames, contains('recipient_peer_id'));
+    expect(columnNames, contains('is_encrypted'));
     expect(
       sosColumns.singleWhere(
         (row) => row['name'] == 'moderation_status',
