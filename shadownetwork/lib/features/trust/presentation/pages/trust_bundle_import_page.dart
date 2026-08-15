@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../messaging/domain/entities/peer.dart';
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
+import '../../../security/domain/entities/device_crypto_identity.dart';
+import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../data/services/trust_bundle_store.dart';
 import '../../domain/entities/trust_bundle.dart';
+import '../providers/device_access_provider.dart';
 
 const _trustRed = Color(0xFFE83C3D);
 const _trustRedDark = Color(0xFF861A1A);
@@ -93,6 +97,26 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     _showSnackBar('Device ID copied.');
   }
 
+  Future<void> _copyPublicKey(String publicKey) async {
+    await Clipboard.setData(ClipboardData(text: publicKey));
+    _showSnackBar('X25519 public key copied.');
+  }
+
+  Future<void> _showDeviceRegistrationQr(
+    Peer peer,
+    DeviceCryptoIdentity identity,
+  ) async {
+    final registration = DeviceRegistrationQr.fromIdentity(
+      deviceId: peer.id,
+      identity: identity,
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (context) =>
+          _DeviceRegistrationQrDialog(registration: registration),
+    );
+  }
+
   Future<void> _importBundle(String source) async {
     if (_isImporting) {
       return;
@@ -103,7 +127,19 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     });
 
     try {
+      final candidate = TrustBundle.fromJsonString(source.trim());
+      if (!await _store.hasPinnedIssuer()) {
+        if (!mounted) {
+          return;
+        }
+        final trusted = await _confirmFirstAdmin(candidate);
+        if (trusted != true) {
+          return;
+        }
+      }
       final bundle = await _store.importBundleJson(source.trim());
+      final repository = await ref.read(trustRepositoryProvider.future);
+      await repository.replaceFromBundle(bundle);
       if (!mounted) {
         return;
       }
@@ -111,8 +147,9 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         _bundle = bundle;
         _jsonController.clear();
       });
+      ref.invalidate(deviceAccessProfileProvider);
       _showSnackBar(
-        'Imported ${bundle.approvedCount} approved and ${bundle.revokedCount} revoked devices.',
+        'Verified signed bundle v${bundle.bundleVersion}: ${bundle.approvedCount} approved and ${bundle.revokedCount} revoked devices.',
       );
     } on FormatException catch (error) {
       if (!mounted) {
@@ -133,12 +170,39 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     }
   }
 
+  Future<bool?> _confirmFirstAdmin(TrustBundle bundle) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Trust this PC administrator?'),
+          content: Text(
+            'This is the first signed trust bundle on this phone. Confirm that the QR is displayed by your authorized Shadow Network administrator.\n\nSigning key: ${bundle.issuer?.signingKeyId ?? 'missing'}\n\nThis administrator key will be pinned for future updates.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Trust administrator'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Future<void> _clearBundle() async {
     await _store.clearBundle();
+    final repository = await ref.read(trustRepositoryProvider.future);
+    await repository.clear();
     if (!mounted) {
       return;
     }
     setState(() => _bundle = null);
+    ref.invalidate(deviceAccessProfileProvider);
     _showSnackBar('Trust bundle removed from this phone.');
   }
 
@@ -151,6 +215,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
   @override
   Widget build(BuildContext context) {
     final localPeer = ref.watch(localPeerProvider);
+    final cryptoIdentity = ref.watch(deviceCryptoIdentityProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -172,7 +237,10 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                     const SizedBox(height: 18),
                     _DeviceIdentityCard(
                       localPeer: localPeer,
+                      cryptoIdentity: cryptoIdentity,
                       onCopyDeviceId: _copyDeviceId,
+                      onCopyPublicKey: _copyPublicKey,
+                      onShowRegistrationQr: _showDeviceRegistrationQr,
                     ),
                     const SizedBox(height: 18),
                     _ImportActions(
@@ -315,6 +383,63 @@ class _TrustHeader extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
+          if (bundle != null) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _HeaderBadge(
+                  icon: Icons.verified_rounded,
+                  label: bundle!.isSignatureVerified
+                      ? 'SIGNATURE VERIFIED'
+                      : 'LEGACY UNSIGNED',
+                ),
+                _HeaderBadge(
+                  icon: Icons.layers_rounded,
+                  label: 'VERSION ${bundle!.bundleVersion}',
+                ),
+                if (bundle!.isExpiredAt(DateTime.now()))
+                  const _HeaderBadge(
+                    icon: Icons.warning_amber_rounded,
+                    label: 'EXPIRED',
+                  ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HeaderBadge extends StatelessWidget {
+  const _HeaderBadge({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
         ],
       ),
     );
@@ -324,11 +449,17 @@ class _TrustHeader extends StatelessWidget {
 class _DeviceIdentityCard extends StatelessWidget {
   const _DeviceIdentityCard({
     required this.localPeer,
+    required this.cryptoIdentity,
     required this.onCopyDeviceId,
+    required this.onCopyPublicKey,
+    required this.onShowRegistrationQr,
   });
 
   final AsyncValue<Peer> localPeer;
+  final AsyncValue<DeviceCryptoIdentity> cryptoIdentity;
   final ValueChanged<String> onCopyDeviceId;
+  final ValueChanged<String> onCopyPublicKey;
+  final void Function(Peer, DeviceCryptoIdentity) onShowRegistrationQr;
 
   @override
   Widget build(BuildContext context) {
@@ -373,6 +504,69 @@ class _DeviceIdentityCard extends StatelessWidget {
                 ),
               ],
             ),
+            const Divider(height: 24),
+            const Text(
+              'Encryption public key',
+              style: TextStyle(
+                color: _trustRedDark,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            cryptoIdentity.when(
+              data: (identity) => Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    identity.encodedPublicKey,
+                    style: const TextStyle(
+                      color: _trustMuted,
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Key ID: ${identity.keyId} (v${identity.keyVersion})',
+                          style: const TextStyle(
+                            color: _trustMuted,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () =>
+                            onCopyPublicKey(identity.encodedPublicKey),
+                        icon: const Icon(Icons.key_rounded),
+                        label: const Text('Copy key'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () => onShowRegistrationQr(peer, identity),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _trustRed,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      icon: const Icon(Icons.qr_code_2_rounded),
+                      label: const Text('Show PC Registration QR'),
+                    ),
+                  ),
+                ],
+              ),
+              loading: () => const LinearProgressIndicator(color: _trustRed),
+              error: (error, _) => Text(
+                'Unable to load encryption key: $error',
+                style: const TextStyle(color: Color(0xFF9A5A00)),
+              ),
+            ),
           ],
         ),
         loading: () => const Row(
@@ -397,6 +591,87 @@ class _DeviceIdentityCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DeviceRegistrationQrDialog extends StatelessWidget {
+  const _DeviceRegistrationQrDialog({required this.registration});
+
+  final DeviceRegistrationQr registration;
+
+  @override
+  Widget build(BuildContext context) {
+    final payload = registration.toJsonString();
+    return AlertDialog(
+      backgroundColor: Colors.white,
+      title: const Text(
+        'Device Registration QR',
+        style: TextStyle(fontWeight: FontWeight.w900),
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              color: Colors.white,
+              child: SizedBox.square(
+                dimension: 232,
+                child: CustomPaint(
+                  painter: QrPainter(
+                    data: payload,
+                    version: QrVersions.auto,
+                    eyeStyle: const QrEyeStyle(
+                      eyeShape: QrEyeShape.square,
+                      color: Colors.black,
+                    ),
+                    dataModuleStyle: const QrDataModuleStyle(
+                      dataModuleShape: QrDataModuleShape.square,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              registration.deviceId,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: _trustRedDark,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'On the PC admin dashboard, select Scan Phone QR and point the PC camera at this code.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _trustMuted, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: payload));
+            if (context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Registration JSON copied.')),
+              );
+            }
+          },
+          icon: const Icon(Icons.copy_rounded),
+          label: const Text('Copy JSON'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          style: FilledButton.styleFrom(backgroundColor: _trustRed),
+          child: const Text('Close'),
+        ),
+      ],
     );
   }
 }
@@ -503,8 +778,7 @@ class _BundleSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrustPanel(
       title: 'Current Phone Trust State',
-      subtitle:
-          'Used later to label verified, unverified, and revoked senders.',
+      subtitle: 'Signed administrator policy used by messaging and relay.',
       child: bundle == null
           ? const Text(
               'No bundle imported. SOS messages from unknown devices should still be shown but labeled unverified.',
@@ -513,8 +787,32 @@ class _BundleSummaryCard extends StatelessWidget {
           : Column(
               children: [
                 _SummaryRow(
-                  label: 'Generated at',
-                  value: bundle!.generatedAt.toLocal().toString(),
+                  label: 'Bundle version',
+                  value: '${bundle!.bundleVersion}',
+                ),
+                _SummaryRow(
+                  label: 'Signature',
+                  value: bundle!.isSignatureVerified
+                      ? 'Verified Ed25519'
+                      : 'Not verified',
+                ),
+                _SummaryRow(
+                  label: 'Issued at',
+                  value: (bundle!.issuedAt ?? bundle!.generatedAt)
+                      .toLocal()
+                      .toString(),
+                ),
+                _SummaryRow(
+                  label: 'Expires at',
+                  value: bundle!.expiresAt?.toLocal().toString() ?? 'Unknown',
+                ),
+                _SummaryRow(
+                  label: 'Imported at',
+                  value: bundle!.importedAt?.toLocal().toString() ?? 'Legacy',
+                ),
+                _SummaryRow(
+                  label: 'Administrator key',
+                  value: bundle!.issuer?.signingKeyId ?? 'Not pinned',
                 ),
                 _SummaryRow(
                   label: 'Approved devices',

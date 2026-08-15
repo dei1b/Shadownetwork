@@ -2,6 +2,10 @@ import '../../domain/entities/peer.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/scf_peer_status.dart';
 import '../../domain/services/scf_transport.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
+import '../../../validation/domain/entities/validation_event.dart';
+import '../../../validation/domain/repositories/validation_metrics_repository.dart';
+import '../models/relay_payload_codec.dart';
 import 'scf_service.dart';
 
 class ScfRelayResult {
@@ -24,11 +28,16 @@ class ScfRelayService {
   const ScfRelayService({
     required ScfService scfService,
     required ScfTransport transport,
+    this.originTrustResolver,
+    this.metricsRecorder,
   }) : _scfService = scfService,
        _transport = transport;
 
   final ScfService _scfService;
   final ScfTransport _transport;
+  final Future<DeviceTrustStatus> Function(String payloadJson)?
+  originTrustResolver;
+  final ValidationMetricsRepository? metricsRecorder;
 
   Future<List<Peer>> discoverPeers() {
     return _transport.discoverPeers();
@@ -44,9 +53,50 @@ class ScfRelayService {
     final storedEnvelopes = <ScfEnvelope>[];
 
     for (final envelope in envelopes) {
+      final messageCreatedAt = RelayPayloadCodec.createdAt(
+        envelope.payloadJson,
+      );
+      await metricsRecorder?.captureEvent(
+        type: ValidationEventType.envelopeReceived,
+        occurredAt: now,
+        messageHash: envelope.messageHash,
+        payloadType: envelope.payloadType,
+        hopCount: envelope.hopCount,
+        metadata: {
+          if (messageCreatedAt != null)
+            'message_created_at': messageCreatedAt.toIso8601String(),
+        },
+      );
       final stored = await _scfService.storeEnvelope(envelope, now: now);
       if (stored) {
+        final resolver = originTrustResolver;
+        if (resolver != null) {
+          final trustStatus = await resolver(envelope.payloadJson);
+          await _scfService.updateOriginTrustStatus(
+            messageHash: envelope.messageHash,
+            status: trustStatus,
+          );
+          if (trustStatus == DeviceTrustStatus.revoked) {
+            await metricsRecorder?.captureEvent(
+              type: ValidationEventType.envelopeRejected,
+              occurredAt: now,
+              messageHash: envelope.messageHash,
+              payloadType: envelope.payloadType,
+              hopCount: envelope.hopCount,
+              error: 'Origin device is revoked; retained in quarantine.',
+            );
+          }
+        }
         storedEnvelopes.add(envelope);
+      } else {
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeRejected,
+          occurredAt: now,
+          messageHash: envelope.messageHash,
+          payloadType: envelope.payloadType,
+          hopCount: envelope.hopCount,
+          error: 'Duplicate or expired SCF envelope.',
+        );
       }
     }
 
@@ -70,8 +120,22 @@ class ScfRelayService {
     final sentMessageHashes = <String>[];
 
     for (final envelope in outbound) {
+      await metricsRecorder?.captureEvent(
+        type: ValidationEventType.envelopeOffered,
+        occurredAt: now,
+        messageHash: envelope.messageHash,
+        payloadType: envelope.payloadType,
+        peerId: peer.id,
+        transport: peer.transport,
+        hopCount: envelope.hopCount,
+      );
+      final stopwatch = Stopwatch()..start();
       try {
-        await _transport.sendEnvelope(peer: peer, envelope: envelope);
+        final transfer = await _transport.sendEnvelope(
+          peer: peer,
+          envelope: envelope,
+        );
+        stopwatch.stop();
         await _scfService.updatePeerStatus(
           messageHash: envelope.messageHash,
           peerId: peer.id,
@@ -80,7 +144,43 @@ class ScfRelayService {
         );
         sentCount++;
         sentMessageHashes.add(envelope.messageHash);
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeSent,
+          occurredAt: now,
+          messageHash: envelope.messageHash,
+          payloadType: envelope.payloadType,
+          peerId: peer.id,
+          transport: transfer.transport,
+          hopCount: envelope.hopCount,
+          fallbackUsed: transfer.fallbackUsed,
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        if (RelayPayloadCodec.senderPeerId(envelope.payloadJson) !=
+            _transport.localPeerId) {
+          await metricsRecorder?.captureEvent(
+            type: ValidationEventType.envelopeRelayed,
+            occurredAt: now,
+            messageHash: envelope.messageHash,
+            payloadType: envelope.payloadType,
+            peerId: peer.id,
+            transport: transfer.transport,
+            hopCount: envelope.hopCount,
+            fallbackUsed: transfer.fallbackUsed,
+          );
+        }
+        if (transfer.fallbackUsed) {
+          await metricsRecorder?.captureEvent(
+            type: ValidationEventType.transportFallback,
+            occurredAt: now,
+            messageHash: envelope.messageHash,
+            payloadType: envelope.payloadType,
+            peerId: peer.id,
+            transport: transfer.transport,
+            hopCount: envelope.hopCount,
+          );
+        }
       } catch (error) {
+        stopwatch.stop();
         lastError = error.toString();
         failedCount++;
         await _scfService.updatePeerStatus(
@@ -89,6 +189,18 @@ class ScfRelayService {
           status: ScfPeerStatus.failed,
           updatedAt: now,
           lastError: lastError,
+        );
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeRejected,
+          occurredAt: now,
+          messageHash: envelope.messageHash,
+          payloadType: envelope.payloadType,
+          peerId: peer.id,
+          transport: peer.transport,
+          hopCount: envelope.hopCount,
+          latencyMs: stopwatch.elapsedMilliseconds,
+          error: lastError,
+          metadata: const {'phase': 'send'},
         );
       }
     }

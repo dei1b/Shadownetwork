@@ -3,6 +3,7 @@ import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 
 class ConversationModel {
   const ConversationModel._();
@@ -10,6 +11,7 @@ class ConversationModel {
   static Conversation fromMap(Map<String, Object?> map) {
     final latestStatus = map['latest_status'] as String?;
     final latestModerationStatus = map['latest_moderation_status'] as String?;
+    final latestTrustStatus = map['latest_trust_status'] as String?;
     return Conversation(
       id: map['id']! as String,
       localPeerId: map['local_peer_id']! as String,
@@ -35,6 +37,9 @@ class ConversationModel {
       latestModerationStatus: latestModerationStatus == null
           ? null
           : MessageModerationStatus.values.byName(latestModerationStatus),
+      latestTrustStatus: latestTrustStatus == null
+          ? null
+          : DeviceTrustStatus.values.byName(latestTrustStatus),
     );
   }
 

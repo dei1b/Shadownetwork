@@ -1,6 +1,7 @@
 import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 
 class ChatMessage {
   const ChatMessage({
@@ -19,6 +20,9 @@ class ChatMessage {
     this.moderationStatus = MessageModerationStatus.normal,
     this.moderationReason,
     this.moderationScore,
+    this.trustStatus = DeviceTrustStatus.unknown,
+    this.trustRole,
+    this.trustOwnerName,
   });
 
   final String id;
@@ -36,6 +40,9 @@ class ChatMessage {
   final MessageModerationStatus moderationStatus;
   final String? moderationReason;
   final double? moderationScore;
+  final DeviceTrustStatus trustStatus;
+  final String? trustRole;
+  final String? trustOwnerName;
 
   ChatMessage copyWith({
     String? id,
@@ -53,6 +60,9 @@ class ChatMessage {
     MessageModerationStatus? moderationStatus,
     String? moderationReason,
     double? moderationScore,
+    DeviceTrustStatus? trustStatus,
+    String? trustRole,
+    String? trustOwnerName,
   }) {
     return ChatMessage(
       id: id ?? this.id,
@@ -71,6 +81,9 @@ class ChatMessage {
       moderationStatus: moderationStatus ?? this.moderationStatus,
       moderationReason: moderationReason ?? this.moderationReason,
       moderationScore: moderationScore ?? this.moderationScore,
+      trustStatus: trustStatus ?? this.trustStatus,
+      trustRole: trustRole ?? this.trustRole,
+      trustOwnerName: trustOwnerName ?? this.trustOwnerName,
     );
   }
 }

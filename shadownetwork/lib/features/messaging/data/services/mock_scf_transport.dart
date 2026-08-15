@@ -3,6 +3,7 @@ import 'dart:async';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/transport_status.dart';
+import '../../domain/entities/envelope_transfer_result.dart';
 import '../../domain/services/scf_transport.dart';
 
 class MockScfTransportNetwork {
@@ -114,7 +115,7 @@ class MockScfTransportEndpoint implements ScfTransport {
   }
 
   @override
-  Future<void> sendEnvelope({
+  Future<EnvelopeTransferResult> sendEnvelope({
     required Peer peer,
     required ScfEnvelope envelope,
   }) async {
@@ -123,6 +124,7 @@ class MockScfTransportEndpoint implements ScfTransport {
       toPeerId: peer.id,
       envelope: envelope,
     );
+    return const EnvelopeTransferResult(transport: 'mock');
   }
 
   @override

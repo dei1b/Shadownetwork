@@ -37,6 +37,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import android.os.Build
+import android.os.BatteryManager
 import android.os.ParcelUuid
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
@@ -108,6 +109,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             "ensurePermissions" -> result.success(ensurePermissions())
             "getLocalPeer" -> result.success(localPeerMap())
             "getTransportStatus" -> result.success(transportStatusMap())
+            "getBatteryStatus" -> result.success(batteryStatusMap())
             "start" -> {
                 localPeerId = resolveLocalPeerId(call.argument<String>("localPeerId"))
                 localPeerName = resolveLocalPeerName(call.argument<String>("localPeerName"))
@@ -164,8 +166,8 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
                 Thread {
                     try {
-                        sendEnvelopeInternal(peerId, envelope)
-                        postResult(result) { success(null) }
+                        val transferResult = sendEnvelopeInternal(peerId, envelope)
+                        postResult(result) { success(transferResult) }
                     } catch (throwable: Throwable) {
                         postResult(result) {
                             this.error(
@@ -240,6 +242,31 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             "isRunning" to running.get(),
             "discoveredPeerCount" to peers.size,
             "connectedPeerCount" to connectedPeerCount,
+        )
+    }
+
+    private fun batteryStatusMap(): Map<String, Any?> {
+        val batteryIntent = context.registerReceiver(
+            null,
+            IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+        )
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val status = batteryIntent?.getIntExtra(
+            BatteryManager.EXTRA_STATUS,
+            BatteryManager.BATTERY_STATUS_UNKNOWN,
+        ) ?: BatteryManager.BATTERY_STATUS_UNKNOWN
+        val percent: Double? = if (level >= 0 && scale > 0) {
+            level * 100.0 / scale
+        } else {
+            null
+        }
+        return mapOf(
+            "percent" to percent,
+            "isCharging" to (
+                status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+                ),
         )
     }
 
@@ -1039,7 +1066,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         return connected
     }
 
-    private fun sendEnvelopeInternal(peerId: String, envelope: Map<*, *>) {
+    private fun sendEnvelopeInternal(
+        peerId: String,
+        envelope: Map<*, *>,
+    ): Map<String, Any?> {
         val peer = findPeer(peerId)
             ?: throw IOException("Peer $peerId is not available for transport.")
         val messageHash = envelope["messageHash"] as? String
@@ -1062,26 +1092,32 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             put("expiresAt", expiresAt)
         }
 
-        val sent = when (peer.transport) {
+        val transfer = when (peer.transport) {
             TransportKind.WIFI_DIRECT -> runCatching {
                 ensureWifiConnection(peer).sendFrame(envelopeJson)
-                true
+                mapOf(
+                    "transport" to TransportKind.WIFI_DIRECT,
+                    "fallbackUsed" to false,
+                )
             }.getOrElse {
                 if (peer.bluetoothAddress.isNullOrBlank()) {
                     throw it
                 }
                 sendBleEnvelope(peer.copy(transport = TransportKind.BLUETOOTH), envelopeJson)
-                true
+                mapOf(
+                    "transport" to TransportKind.BLUETOOTH,
+                    "fallbackUsed" to true,
+                )
             }
             else -> {
                 sendBleEnvelope(peer, envelopeJson)
-                true
+                mapOf(
+                    "transport" to TransportKind.BLUETOOTH,
+                    "fallbackUsed" to false,
+                )
             }
         }
-
-        if (!sent) {
-            throw IOException("Transport failed to deliver envelope to $peerId.")
-        }
+        return transfer
     }
 
     @SuppressLint("MissingPermission")

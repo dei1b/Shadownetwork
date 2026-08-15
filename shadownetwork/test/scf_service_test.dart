@@ -12,6 +12,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/scf_peer_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/sos_message.dart';
+import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -206,6 +207,30 @@ void main() {
       );
     },
   );
+
+  test('does not relay payloads originating from a revoked device', () async {
+    await openService();
+    final message = _message();
+    final now = DateTime.utc(2026, 5, 2, 5);
+    final hash = SosMessagePayload.messageHash(message);
+
+    await service.storeMessage(message, receivedAt: now);
+    await service.updateOriginTrustStatus(
+      messageHash: hash,
+      status: DeviceTrustStatus.revoked,
+    );
+
+    final outbound = await service.prepareOutboundForPeer(
+      'peer-2',
+      now: now.add(const Duration(minutes: 1)),
+    );
+    final retained = await service.getStoredEnvelopes(
+      now: now.add(const Duration(minutes: 1)),
+    );
+
+    expect(outbound, isEmpty);
+    expect(retained, hasLength(1));
+  });
 }
 
 SosMessage _message() {

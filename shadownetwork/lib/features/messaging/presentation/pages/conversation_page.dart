@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/conversation.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/sos_message.dart';
+import '../../../security/data/services/message_encryption_service.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 import '../providers/local_messaging_providers.dart';
 import '../providers/relay_runtime_provider.dart';
 
@@ -50,6 +52,12 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       _composer.clear();
       await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
       ref.invalidate(chatMessagesProvider(widget.conversation.id));
+    } on MessageEncryptionException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
     } finally {
       if (mounted) {
         setState(() => _isSending = false);
@@ -61,6 +69,8 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
   Widget build(BuildContext context) {
     final messages = ref.watch(chatMessagesProvider(widget.conversation.id));
     final remote = widget.conversation.remotePeer;
+    final isRevoked =
+        widget.conversation.latestTrustStatus == DeviceTrustStatus.revoked;
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F7),
       appBar: AppBar(
@@ -76,9 +86,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             Text(
-              remote.isConnected
-                  ? 'Connected nearby'
-                  : 'Offline relay available',
+              '${(widget.conversation.latestTrustStatus ?? DeviceTrustStatus.unknown).displayLabel} - ${remote.isConnected ? 'Connected nearby' : 'Offline relay available'}',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
@@ -92,6 +100,20 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       ),
       body: Column(
         children: [
+          if (isRevoked)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFF7D1A1A),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: const Text(
+                'QUARANTINED: This sender is revoked. Reply and automatic relay are disabled.',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
           if (widget.linkedSosMessage != null)
             _LinkedSosBanner(message: widget.linkedSosMessage!),
           Expanded(
@@ -116,6 +138,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                           outgoing: outgoing,
                           status: message.status,
                           createdAt: message.createdAt,
+                          trustStatus: message.trustStatus,
                         );
                       },
                     ),
@@ -137,10 +160,13 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                 Expanded(
                   child: TextField(
                     controller: _composer,
+                    enabled: !isRevoked,
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _send(),
                     decoration: InputDecoration(
-                      hintText: 'Message ${remote.name}',
+                      hintText: isRevoked
+                          ? 'Replies disabled for revoked sender'
+                          : 'Message ${remote.name}',
                       filled: true,
                       fillColor: const Color(0xFFF3F3F3),
                       contentPadding: const EdgeInsets.symmetric(
@@ -157,7 +183,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
                 const SizedBox(width: 8),
                 IconButton.filled(
                   tooltip: 'Send message',
-                  onPressed: _isSending ? null : _send,
+                  onPressed: _isSending || isRevoked ? null : _send,
                   style: IconButton.styleFrom(
                     backgroundColor: const Color(0xFFE83C3D),
                     minimumSize: const Size(48, 48),
@@ -205,6 +231,14 @@ class _LinkedSosBanner extends StatelessWidget {
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                 ),
                 Text(
+                  '${message.trustStatus.displayLabel} ${message.trustRole ?? 'sender'}',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: _trustColor(message.trustStatus),
+                  ),
+                ),
+                Text(
                   message.body,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -225,12 +259,14 @@ class _ChatBubble extends StatelessWidget {
     required this.outgoing,
     required this.status,
     required this.createdAt,
+    required this.trustStatus,
   });
 
   final String text;
   final bool outgoing;
   final MessageStatus status;
   final DateTime createdAt;
+  final DeviceTrustStatus trustStatus;
 
   @override
   Widget build(BuildContext context) {
@@ -257,6 +293,21 @@ class _ChatBubble extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 6),
+              if (!outgoing) ...[
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    trustStatus.displayLabel.toUpperCase(),
+                    style: TextStyle(
+                      color: _trustColor(trustStatus),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+              ],
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
@@ -307,3 +358,9 @@ class _ChatBubble extends StatelessWidget {
     _ => status.name,
   };
 }
+
+Color _trustColor(DeviceTrustStatus status) => switch (status) {
+  DeviceTrustStatus.approved => const Color(0xFF1E6B3B),
+  DeviceTrustStatus.unknown => const Color(0xFF8A6200),
+  DeviceTrustStatus.revoked => const Color(0xFF861A1A),
+};

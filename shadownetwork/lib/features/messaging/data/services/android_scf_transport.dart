@@ -6,6 +6,7 @@ import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/transport_status.dart';
+import '../../domain/entities/envelope_transfer_result.dart';
 import '../../domain/services/scf_transport.dart';
 import '../models/relay_payload_codec.dart';
 
@@ -102,14 +103,18 @@ class AndroidScfTransport implements ScfTransport {
   }
 
   @override
-  Future<void> sendEnvelope({
+  Future<EnvelopeTransferResult> sendEnvelope({
     required Peer peer,
     required ScfEnvelope envelope,
   }) async {
-    await _channel.invokeMethod<void>('sendEnvelope', {
-      'peerId': peer.id,
-      'envelope': _envelopeToPlatformMap(envelope),
-    });
+    final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+      'sendEnvelope',
+      {'peerId': peer.id, 'envelope': _envelopeToPlatformMap(envelope)},
+    );
+    return EnvelopeTransferResult(
+      transport: result?['transport'] as String? ?? peer.transport ?? 'unknown',
+      fallbackUsed: result?['fallbackUsed'] as bool? ?? false,
+    );
   }
 
   @override
@@ -143,6 +148,7 @@ class AndroidScfTransport implements ScfTransport {
       type: _peerTypeFromName(map['type'] as String?),
       isConnected: map['isConnected'] as bool? ?? false,
       signalStrength: map['signalStrength'] as int?,
+      transport: map['transport'] as String?,
     );
   }
 

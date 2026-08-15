@@ -2,6 +2,7 @@ import 'category.dart';
 import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 
 class SosMessage {
   const SosMessage({
@@ -23,6 +24,9 @@ class SosMessage {
     this.moderationStatus = MessageModerationStatus.normal,
     this.moderationReason,
     this.moderationScore,
+    this.trustStatus = DeviceTrustStatus.unknown,
+    this.trustRole,
+    this.trustOwnerName,
   });
 
   final String id;
@@ -43,6 +47,9 @@ class SosMessage {
   final MessageModerationStatus moderationStatus;
   final String? moderationReason;
   final double? moderationScore;
+  final DeviceTrustStatus trustStatus;
+  final String? trustRole;
+  final String? trustOwnerName;
 
   SosMessage copyWith({
     String? id,
@@ -63,6 +70,9 @@ class SosMessage {
     MessageModerationStatus? moderationStatus,
     String? moderationReason,
     double? moderationScore,
+    DeviceTrustStatus? trustStatus,
+    String? trustRole,
+    String? trustOwnerName,
   }) {
     return SosMessage(
       id: id ?? this.id,
@@ -85,6 +95,9 @@ class SosMessage {
       moderationStatus: moderationStatus ?? this.moderationStatus,
       moderationReason: moderationReason ?? this.moderationReason,
       moderationScore: moderationScore ?? this.moderationScore,
+      trustStatus: trustStatus ?? this.trustStatus,
+      trustRole: trustRole ?? this.trustRole,
+      trustOwnerName: trustOwnerName ?? this.trustOwnerName,
     );
   }
 }

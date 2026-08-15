@@ -1,7 +1,1 @@
-enum PeerType {
-  civilian,
-  responder,
-  relay,
-  authority,
-  unknown,
-}
+enum PeerType { civilian, responder, relay, authority, unknown }

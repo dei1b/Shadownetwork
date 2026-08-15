@@ -77,6 +77,7 @@ class SqliteChatRepository implements ChatRepository {
         latest.body AS latest_body,
         latest.status AS latest_status,
         latest.moderation_status AS latest_moderation_status
+        , latest.trust_status AS latest_trust_status
       FROM ${LocalMessagingDatabase.conversationsTable} AS conversations
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = conversations.remote_peer_id

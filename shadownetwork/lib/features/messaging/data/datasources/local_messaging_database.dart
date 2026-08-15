@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 6;
+  static const databaseVersion = 8;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -20,6 +20,13 @@ class LocalMessagingDatabase {
   static const scfPeerStatusesTable = 'scf_peer_statuses';
   static const conversationsTable = 'conversations';
   static const chatMessagesTable = 'chat_messages';
+  static const trustedDevicesTable = 'trusted_devices';
+  static const trustBundleMetadataTable = 'trust_bundle_metadata';
+  static const validationSessionsTable = 'validation_sessions';
+  static const messageEventsTable = 'message_events';
+  static const discoveryAttemptsTable = 'discovery_attempts';
+  static const batterySamplesTable = 'battery_samples';
+  static const metricSyncBatchesTable = 'metric_sync_batches';
 
   static final Map<int, DatabaseMigration> _migrations = {
     1: _createInitialSchema,
@@ -28,6 +35,8 @@ class LocalMessagingDatabase {
     4: _createChatSchema,
     5: _addModerationMetadata,
     6: _addTargetedSosMetadata,
+    7: _addTrustEnforcementSchema,
+    8: _addValidationMetricsSchema,
   };
 
   static Future<Database> open({
@@ -309,6 +318,186 @@ class LocalMessagingDatabase {
     await database.execute(
       'CREATE INDEX idx_sos_messages_recipient_peer '
       'ON $sosMessagesTable (recipient_peer_id)',
+    );
+  }
+
+  static Future<void> _addTrustEnforcementSchema(Database database) async {
+    await database.execute('''
+      CREATE TABLE $trustedDevicesTable (
+        device_id TEXT PRIMARY KEY,
+        owner_name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        status TEXT NOT NULL
+          CHECK (status IN ('approved', 'revoked', 'unknown')),
+        public_key TEXT,
+        key_version INTEGER NOT NULL DEFAULT 1 CHECK (key_version > 0),
+        bundle_version INTEGER NOT NULL CHECK (bundle_version > 0),
+        bundle_hash TEXT NOT NULL,
+        admin_updated_at TEXT NOT NULL,
+        imported_at TEXT NOT NULL
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_trusted_devices_status '
+      'ON $trustedDevicesTable (status, role)',
+    );
+    await database.execute('''
+      CREATE TABLE $trustBundleMetadataTable (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        bundle_version INTEGER NOT NULL CHECK (bundle_version > 0),
+        bundle_hash TEXT NOT NULL,
+        issuer_id TEXT NOT NULL,
+        signing_key_id TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        imported_at TEXT NOT NULL,
+        signature_verified INTEGER NOT NULL DEFAULT 1
+          CHECK (signature_verified IN (0, 1))
+      )
+    ''');
+
+    for (final table in [sosMessagesTable, chatMessagesTable]) {
+      await database.execute(
+        'ALTER TABLE $table '
+        "ADD COLUMN trust_status TEXT NOT NULL DEFAULT 'unknown' "
+        "CHECK (trust_status IN ('approved', 'unknown', 'revoked'))",
+      );
+      await database.execute('ALTER TABLE $table ADD COLUMN trust_role TEXT');
+      await database.execute(
+        'ALTER TABLE $table ADD COLUMN trust_owner_name TEXT',
+      );
+      await database.execute(
+        'CREATE INDEX idx_${table}_trust_status '
+        'ON $table (trust_status)',
+      );
+    }
+
+    await database.execute(
+      'ALTER TABLE $scfMessagesTable '
+      "ADD COLUMN origin_trust_status TEXT NOT NULL DEFAULT 'unknown' "
+      "CHECK (origin_trust_status IN ('approved', 'unknown', 'revoked'))",
+    );
+    await database.execute(
+      'CREATE INDEX idx_scf_messages_origin_trust '
+      'ON $scfMessagesTable (origin_trust_status, expires_at)',
+    );
+  }
+
+  static Future<void> _addValidationMetricsSchema(Database database) async {
+    await database.execute('''
+      CREATE TABLE $validationSessionsTable (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        environment TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        device_role TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT,
+        status TEXT NOT NULL
+          CHECK (status IN ('active', 'completed')),
+        notes TEXT
+      )
+    ''');
+    await database.execute(
+      'CREATE UNIQUE INDEX idx_validation_sessions_one_active '
+      'ON $validationSessionsTable (status) WHERE status = \'active\'',
+    );
+    await database.execute(
+      'CREATE INDEX idx_validation_sessions_started '
+      'ON $validationSessionsTable (started_at DESC)',
+    );
+
+    await database.execute('''
+      CREATE TABLE $messageEventsTable (
+        event_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        message_hash TEXT,
+        payload_type TEXT,
+        event_type TEXT NOT NULL,
+        peer_id TEXT,
+        transport TEXT,
+        hop_count INTEGER CHECK (hop_count IS NULL OR hop_count >= 0),
+        occurred_at TEXT NOT NULL,
+        error TEXT,
+        fallback_used INTEGER NOT NULL DEFAULT 0
+          CHECK (fallback_used IN (0, 1)),
+        latency_ms INTEGER CHECK (latency_ms IS NULL OR latency_ms >= 0),
+        metadata_json TEXT,
+        FOREIGN KEY (session_id)
+          REFERENCES $validationSessionsTable (id)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_message_events_session_time '
+      'ON $messageEventsTable (session_id, occurred_at)',
+    );
+    await database.execute(
+      'CREATE INDEX idx_message_events_hash_type '
+      'ON $messageEventsTable (message_hash, event_type)',
+    );
+
+    await database.execute('''
+      CREATE TABLE $discoveryAttemptsTable (
+        attempt_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        transport TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT NOT NULL,
+        discovered_count INTEGER NOT NULL DEFAULT 0
+          CHECK (discovered_count >= 0),
+        success INTEGER NOT NULL DEFAULT 0 CHECK (success IN (0, 1)),
+        error TEXT,
+        FOREIGN KEY (session_id)
+          REFERENCES $validationSessionsTable (id)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_discovery_attempts_session '
+      'ON $discoveryAttemptsTable (session_id, started_at)',
+    );
+
+    await database.execute('''
+      CREATE TABLE $batterySamplesTable (
+        sample_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        battery_percent REAL NOT NULL
+          CHECK (battery_percent BETWEEN 0 AND 100),
+        is_charging INTEGER NOT NULL DEFAULT 0 CHECK (is_charging IN (0, 1)),
+        sampled_at TEXT NOT NULL,
+        runtime_mode TEXT NOT NULL,
+        FOREIGN KEY (session_id)
+          REFERENCES $validationSessionsTable (id)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_battery_samples_session '
+      'ON $batterySamplesTable (session_id, sampled_at)',
+    );
+
+    await database.execute('''
+      CREATE TABLE $metricSyncBatchesTable (
+        batch_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        destination TEXT NOT NULL,
+        result TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+        payload_hash TEXT NOT NULL,
+        FOREIGN KEY (session_id)
+          REFERENCES $validationSessionsTable (id)
+          ON UPDATE CASCADE
+          ON DELETE CASCADE
+      )
+    ''');
+    await database.execute(
+      'CREATE INDEX idx_metric_sync_batches_session '
+      'ON $metricSyncBatchesTable (session_id, created_at)',
     );
   }
 

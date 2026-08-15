@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shadownetwork/features/auth/presentation/widgets/auth_background.dart';
 
 import '../../data/services/admin_device_registry_store.dart';
 import '../../domain/entities/registered_device.dart';
+import '../../../security/domain/entities/device_registration_qr.dart';
+import '../../../trust/domain/entities/trust_bundle.dart';
 
 const _mobileRed = Color(0xFFE83C3D);
 const _mobileRedDark = Color(0xFF861A1A);
@@ -23,9 +28,11 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   final AdminDeviceRegistryStore _registryStore = AdminDeviceRegistryStore();
   final TextEditingController _deviceIdController = TextEditingController();
   final TextEditingController _ownerController = TextEditingController();
+  final TextEditingController _publicKeyController = TextEditingController();
 
   List<RegisteredDevice> _devices = const [];
   RegisteredDeviceRole _selectedRole = RegisteredDeviceRole.civilian;
+  int _registrationKeyVersion = 1;
   bool _isLoadingRegistry = true;
   String? _registryError;
 
@@ -39,6 +46,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   void dispose() {
     _deviceIdController.dispose();
     _ownerController.dispose();
+    _publicKeyController.dispose();
     super.dispose();
   }
 
@@ -73,10 +81,15 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   }
 
   Future<void> _registerDevice() async {
-    final deviceId = _deviceIdController.text.trim().toUpperCase();
+    final deviceId = _deviceIdController.text.trim();
     final owner = _ownerController.text.trim();
-    if (deviceId.isEmpty || owner.isEmpty) {
-      _showSnackBar('Device ID and owner are required.');
+    final publicKey = _publicKeyController.text.trim();
+    if (deviceId.isEmpty || owner.isEmpty || publicKey.isEmpty) {
+      _showSnackBar('Device ID, owner, and public key are required.');
+      return;
+    }
+    if (!_isValidX25519PublicKey(publicKey)) {
+      _showSnackBar('Public key must be a 32-byte X25519 base64url key.');
       return;
     }
 
@@ -98,6 +111,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         registeredAt: now,
         updatedAt: now,
         lastSeenLabel: 'New registration',
+        publicKey: publicKey,
+        keyVersion: _registrationKeyVersion,
       ),
       ..._devices,
     ];
@@ -105,8 +120,41 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     await _saveDevices(nextDevices);
     _deviceIdController.clear();
     _ownerController.clear();
-    setState(() => _selectedRole = RegisteredDeviceRole.civilian);
+    _publicKeyController.clear();
+    setState(() {
+      _selectedRole = RegisteredDeviceRole.civilian;
+      _registrationKeyVersion = 1;
+    });
     _showSnackBar('$deviceId saved as pending approval.');
+  }
+
+  Future<void> _scanDeviceRegistrationQr() async {
+    final source = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const _DeviceRegistrationScannerPage()),
+    );
+    if (source == null || source.trim().isEmpty || !mounted) {
+      return;
+    }
+
+    try {
+      final registration = DeviceRegistrationQr.fromJsonString(source);
+      setState(() {
+        _deviceIdController.text = registration.deviceId;
+        _publicKeyController.text = registration.publicKey;
+        _registrationKeyVersion = registration.keyVersion;
+      });
+      _showSnackBar('Device ID and encryption key filled from the phone QR.');
+    } on FormatException catch (error) {
+      _showSnackBar(error.message);
+    }
+  }
+
+  bool _isValidX25519PublicKey(String value) {
+    try {
+      return base64Url.decode(value).length == 32;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _changeStatus(
@@ -134,19 +182,212 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     _showSnackBar('${device.deviceId} marked ${status.label.toLowerCase()}.');
   }
 
+  Future<void> _editDevice(RegisteredDevice device) async {
+    final ownerController = TextEditingController(text: device.ownerName);
+    final formKey = GlobalKey<FormState>();
+    var selectedRole = device.role;
+
+    final result = await showDialog<_DeviceEditResult>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Edit registered device'),
+              content: SizedBox(
+                width: 440,
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'DEVICE ID',
+                        style: TextStyle(
+                          color: _mobileMuted,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      SelectableText(
+                        device.deviceId,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 18),
+                      TextFormField(
+                        controller: ownerController,
+                        decoration: const InputDecoration(
+                          labelText: 'Device name / username',
+                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        ),
+                        validator: (value) =>
+                            value == null || value.trim().isEmpty
+                            ? 'Device name or username is required.'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField<RegisteredDeviceRole>(
+                        initialValue: selectedRole,
+                        decoration: const InputDecoration(
+                          labelText: 'Device role',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                        ),
+                        items: RegisteredDeviceRole.values
+                            .map(
+                              (role) => DropdownMenuItem(
+                                value: role,
+                                child: Text(role.label),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setDialogState(() => selectedRole = value);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'The device ID and encryption key cannot be edited. Delete and register the phone again to replace its identity.',
+                        style: TextStyle(
+                          color: _mobileMuted,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _mobileRed,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () {
+                    if (formKey.currentState?.validate() != true) {
+                      return;
+                    }
+                    Navigator.of(context).pop(
+                      _DeviceEditResult(
+                        ownerName: ownerController.text.trim(),
+                        role: selectedRole,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.save_outlined, size: 18),
+                  label: const Text('Save changes'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    ownerController.dispose();
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    final now = DateTime.now().toUtc();
+    final nextDevices = _devices
+        .map(
+          (item) => item.deviceId == device.deviceId
+              ? item.copyWith(
+                  ownerName: result.ownerName,
+                  role: result.role,
+                  updatedAt: now,
+                  lastSeenLabel: 'Edited by admin',
+                )
+              : item,
+        )
+        .toList(growable: false);
+    await _saveDevices(nextDevices);
+    _showSnackBar('${device.deviceId} updated. Export a new trust bundle.');
+  }
+
+  Future<void> _deleteDevice(RegisteredDevice device) async {
+    final removesSecurityRecord =
+        device.status != RegisteredDeviceStatus.pending;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Delete registered device?'),
+          content: Text(
+            removesSecurityRecord
+                ? 'This permanently removes ${device.deviceId} from the admin registry, including its ${device.status.label.toLowerCase()} security record. Export and import a new trust bundle after deletion.'
+                : 'This permanently removes the pending registration for ${device.deviceId}.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _mobileRedDark,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: const Text('Delete permanently'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    final nextDevices = _devices
+        .where((item) => item.deviceId != device.deviceId)
+        .toList(growable: false);
+    await _saveDevices(nextDevices);
+    _showSnackBar('${device.deviceId} deleted from the registry.');
+  }
+
   Future<void> _copyTrustBundle() async {
-    final bundle = _registryStore.buildTrustBundleJson(_devices);
-    await Clipboard.setData(ClipboardData(text: bundle));
-    _showSnackBar('Offline trust bundle copied to clipboard.');
+    try {
+      final bundle = await _registryStore.buildTrustBundleJson(_devices);
+      final parsed = TrustBundle.fromJsonString(bundle);
+      await Clipboard.setData(ClipboardData(text: bundle));
+      _showSnackBar(
+        'Signed trust bundle v${parsed.bundleVersion} copied to clipboard.',
+      );
+    } on FormatException catch (error) {
+      _showSnackBar(error.message);
+    }
   }
 
   Future<void> _showTrustBundleQr() async {
-    final bundle = _registryStore.buildTrustBundleJson(_devices);
+    late final String bundle;
+    try {
+      bundle = await _registryStore.buildTrustBundleJson(_devices);
+    } on FormatException catch (error) {
+      _showSnackBar(error.message);
+      return;
+    }
+    final parsed = TrustBundle.fromJsonString(bundle);
+    if (!mounted) {
+      return;
+    }
     await showDialog<void>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Scan Trust Bundle'),
+          title: Text('Scan Signed Trust Bundle v${parsed.bundleVersion}'),
           content: SizedBox(
             width: 340,
             child: Column(
@@ -222,12 +463,16 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
             selectedRole: _selectedRole,
             deviceIdController: _deviceIdController,
             ownerController: _ownerController,
+            publicKeyController: _publicKeyController,
             onRoleChanged: (value) => setState(() => _selectedRole = value),
             onRegister: _registerDevice,
+            onScanRegistrationQr: _scanDeviceRegistrationQr,
             onApprove: (device) =>
                 _changeStatus(device, RegisteredDeviceStatus.approved),
             onRevoke: (device) =>
                 _changeStatus(device, RegisteredDeviceStatus.revoked),
+            onEdit: _editDevice,
+            onDelete: _deleteDevice,
             onCopyTrustBundle: _copyTrustBundle,
             onShowTrustBundleQr: _showTrustBundleQr,
           );
@@ -245,10 +490,14 @@ class _AdminDashboardBody extends StatelessWidget {
     required this.selectedRole,
     required this.deviceIdController,
     required this.ownerController,
+    required this.publicKeyController,
     required this.onRoleChanged,
     required this.onRegister,
+    required this.onScanRegistrationQr,
     required this.onApprove,
     required this.onRevoke,
+    required this.onEdit,
+    required this.onDelete,
     required this.onCopyTrustBundle,
     required this.onShowTrustBundleQr,
   });
@@ -257,10 +506,14 @@ class _AdminDashboardBody extends StatelessWidget {
   final RegisteredDeviceRole selectedRole;
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
+  final TextEditingController publicKeyController;
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
+  final VoidCallback onScanRegistrationQr;
   final ValueChanged<RegisteredDevice> onApprove;
   final ValueChanged<RegisteredDevice> onRevoke;
+  final ValueChanged<RegisteredDevice> onEdit;
+  final ValueChanged<RegisteredDevice> onDelete;
   final VoidCallback onCopyTrustBundle;
   final VoidCallback onShowTrustBundleQr;
 
@@ -284,9 +537,11 @@ class _AdminDashboardBody extends StatelessWidget {
                       left: _RegisterDeviceCard(
                         deviceIdController: deviceIdController,
                         ownerController: ownerController,
+                        publicKeyController: publicKeyController,
                         selectedRole: selectedRole,
                         onRoleChanged: onRoleChanged,
                         onRegister: onRegister,
+                        onScanRegistrationQr: onScanRegistrationQr,
                       ),
                       right: _SecurityModelCard(
                         onCopyTrustBundle: onCopyTrustBundle,
@@ -299,6 +554,8 @@ class _AdminDashboardBody extends StatelessWidget {
                         devices: devices,
                         onApprove: onApprove,
                         onRevoke: onRevoke,
+                        onEdit: onEdit,
+                        onDelete: onDelete,
                       ),
                       right: const _ValidationMetricsCard(),
                     ),
@@ -519,16 +776,20 @@ class _RegisterDeviceCard extends StatelessWidget {
   const _RegisterDeviceCard({
     required this.deviceIdController,
     required this.ownerController,
+    required this.publicKeyController,
     required this.selectedRole,
     required this.onRoleChanged,
     required this.onRegister,
+    required this.onScanRegistrationQr,
   });
 
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
+  final TextEditingController publicKeyController;
   final RegisteredDeviceRole selectedRole;
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
+  final VoidCallback onScanRegistrationQr;
 
   @override
   Widget build(BuildContext context) {
@@ -538,6 +799,23 @@ class _RegisterDeviceCard extends StatelessWidget {
           'PC admins can approve phones before disaster mode and export the trusted list.',
       child: Column(
         children: [
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onScanRegistrationQr,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _mobileRed,
+                minimumSize: const Size(double.infinity, 52),
+                side: const BorderSide(color: _mobileRed),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              ),
+              icon: const Icon(Icons.qr_code_scanner_rounded),
+              label: const Text('Scan Phone QR with PC Camera'),
+            ),
+          ),
+          const SizedBox(height: 14),
           TextField(
             controller: deviceIdController,
             textCapitalization: TextCapitalization.characters,
@@ -555,6 +833,17 @@ class _RegisterDeviceCard extends StatelessWidget {
               labelText: 'Owner / Unit name',
               hintText: 'Example: Barangay Health Responder',
               prefixIcon: Icon(Icons.badge_rounded),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: publicKeyController,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'X25519 public key',
+              hintText: 'Paste from the phone Trust Bundle screen',
+              prefixIcon: Icon(Icons.key_rounded),
               border: OutlineInputBorder(),
             ),
           ),
@@ -599,6 +888,82 @@ class _RegisterDeviceCard extends StatelessWidget {
           const Text(
             'Saved locally in this browser. During testing, run with the same web port so registrations remain available.',
             style: TextStyle(color: _mobileMuted, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DeviceRegistrationScannerPage extends StatefulWidget {
+  const _DeviceRegistrationScannerPage();
+
+  @override
+  State<_DeviceRegistrationScannerPage> createState() =>
+      _DeviceRegistrationScannerPageState();
+}
+
+class _DeviceRegistrationScannerPageState
+    extends State<_DeviceRegistrationScannerPage> {
+  bool _handledCode = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF101010),
+      appBar: AppBar(
+        title: const Text('Scan Phone Registration QR'),
+        backgroundColor: const Color(0xFF101010),
+        foregroundColor: Colors.white,
+      ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          MobileScanner(
+            onDetect: (capture) {
+              if (_handledCode) {
+                return;
+              }
+              final rawValue = capture.barcodes
+                  .map((barcode) => barcode.rawValue)
+                  .whereType<String>()
+                  .firstOrNull;
+              if (rawValue == null || rawValue.trim().isEmpty) {
+                return;
+              }
+              _handledCode = true;
+              Navigator.of(context).pop(rawValue);
+            },
+          ),
+          Center(
+            child: Container(
+              width: 320,
+              height: 320,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 4),
+                borderRadius: BorderRadius.circular(24),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 30,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Allow camera access, then point the PC camera at the registration QR displayed on the phone.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -692,11 +1057,15 @@ class _DeviceTableCard extends StatelessWidget {
     required this.devices,
     required this.onApprove,
     required this.onRevoke,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final List<RegisteredDevice> devices;
   final ValueChanged<RegisteredDevice> onApprove;
   final ValueChanged<RegisteredDevice> onRevoke;
+  final ValueChanged<RegisteredDevice> onEdit;
+  final ValueChanged<RegisteredDevice> onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -712,6 +1081,8 @@ class _DeviceTableCard extends StatelessWidget {
                       device: device,
                       onApprove: onApprove,
                       onRevoke: onRevoke,
+                      onEdit: onEdit,
+                      onDelete: onDelete,
                     ),
                   )
                   .toList(growable: false),
@@ -758,11 +1129,15 @@ class _DeviceRegistryTile extends StatelessWidget {
     required this.device,
     required this.onApprove,
     required this.onRevoke,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final RegisteredDevice device;
   final ValueChanged<RegisteredDevice> onApprove;
   final ValueChanged<RegisteredDevice> onRevoke;
+  final ValueChanged<RegisteredDevice> onEdit;
+  final ValueChanged<RegisteredDevice> onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -828,6 +1203,21 @@ class _DeviceRegistryTile extends StatelessWidget {
                   icon: const Icon(Icons.block_rounded, size: 18),
                   label: const Text('Revoke'),
                 ),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF333333),
+                  side: const BorderSide(color: Color(0xFFBDBDBD)),
+                ),
+                onPressed: () => onEdit(device),
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                label: const Text('Edit'),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: _mobileRedDark),
+                onPressed: () => onDelete(device),
+                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                label: const Text('Delete'),
+              ),
             ],
           ),
         ],
@@ -866,6 +1256,13 @@ class _DeviceRegistryTile extends StatelessWidget {
       onRevoke(device);
     }
   }
+}
+
+class _DeviceEditResult {
+  const _DeviceEditResult({required this.ownerName, required this.role});
+
+  final String ownerName;
+  final RegisteredDeviceRole role;
 }
 
 class _ValidationMetricsCard extends StatelessWidget {

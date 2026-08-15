@@ -7,6 +7,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/sos_message.dart';
 import 'package:shadownetwork/features/messaging/presentation/utils/message_feed_filter.dart';
+import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
 
 void main() {
   const sender = Peer(
@@ -20,6 +21,7 @@ void main() {
   SosMessage sosMessage({
     required String id,
     MessageModerationStatus moderationStatus = MessageModerationStatus.normal,
+    DeviceTrustStatus trustStatus = DeviceTrustStatus.unknown,
   }) {
     return SosMessage(
       id: id,
@@ -29,11 +31,13 @@ void main() {
       status: MessageStatus.received,
       createdAt: now,
       moderationStatus: moderationStatus,
+      trustStatus: trustStatus,
     );
   }
 
   Conversation conversation({
     required MessageModerationStatus latestModerationStatus,
+    DeviceTrustStatus latestTrustStatus = DeviceTrustStatus.unknown,
   }) {
     return Conversation(
       id: 'conversation-a',
@@ -43,6 +47,7 @@ void main() {
       updatedAt: now,
       unreadCount: 0,
       latestModerationStatus: latestModerationStatus,
+      latestTrustStatus: latestTrustStatus,
     );
   }
 
@@ -134,6 +139,10 @@ void main() {
       moderationStatus: MessageModerationStatus.spam,
     ).copyWith(latitude: 7.3026, longitude: 125.6888);
     final noLocation = sosMessage(id: 'no-location');
+    final revoked = sosMessage(
+      id: 'revoked',
+      trustStatus: DeviceTrustStatus.revoked,
+    ).copyWith(latitude: 7.3026, longitude: 125.6888);
 
     expect(
       shouldShowSosMessageOnMap(
@@ -158,10 +167,81 @@ void main() {
     );
     expect(
       shouldShowSosMessageOnMap(
+        message: revoked,
+        visibleCategories: {Category.water},
+      ),
+      isFalse,
+    );
+    expect(
+      shouldShowSosMessageOnMap(
         message: normal,
         visibleCategories: {Category.medical},
       ),
       isFalse,
+    );
+  });
+
+  test('unknown messages remain visible as unverified', () {
+    final unknown = sosMessage(
+      id: 'unknown',
+    ).copyWith(latitude: 7.3026, longitude: 125.6888);
+
+    expect(
+      shouldShowSosMessageForFilter(
+        message: unknown,
+        messageType: 'REQUEST',
+        activeFilter: 'ALL',
+      ),
+      isTrue,
+    );
+    expect(
+      shouldShowSosMessageOnMap(
+        message: unknown,
+        visibleCategories: {Category.water},
+      ),
+      isTrue,
+    );
+  });
+
+  test('revoked messages are shown only in quarantine', () {
+    final revokedSos = sosMessage(
+      id: 'revoked',
+      trustStatus: DeviceTrustStatus.revoked,
+    );
+    final revokedConversation = conversation(
+      latestModerationStatus: MessageModerationStatus.normal,
+      latestTrustStatus: DeviceTrustStatus.revoked,
+    );
+
+    expect(
+      shouldShowSosMessageForFilter(
+        message: revokedSos,
+        messageType: 'REQUEST',
+        activeFilter: 'ALL',
+      ),
+      isFalse,
+    );
+    expect(
+      shouldShowSosMessageForFilter(
+        message: revokedSos,
+        messageType: 'REQUEST',
+        activeFilter: 'QUARANTINE',
+      ),
+      isTrue,
+    );
+    expect(
+      shouldShowConversationForFilter(
+        conversation: revokedConversation,
+        activeFilter: 'ALL',
+      ),
+      isFalse,
+    );
+    expect(
+      shouldShowConversationForFilter(
+        conversation: revokedConversation,
+        activeFilter: 'QUARANTINE',
+      ),
+      isTrue,
     );
   });
 }

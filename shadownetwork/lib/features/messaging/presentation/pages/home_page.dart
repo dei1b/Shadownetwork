@@ -11,7 +11,10 @@ import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
 import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
+import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
+import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
+import 'package:shadownetwork/features/security/data/services/message_encryption_service.dart';
 
 import '../../domain/entities/category.dart' as messaging;
 import '../../domain/entities/message_moderation_status.dart' as messaging;
@@ -28,7 +31,9 @@ import '../utils/message_feed_filter.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
 class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, required this.accessProfile});
+
+  final DeviceAccessProfile accessProfile;
 
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
@@ -44,6 +49,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _showMapPeers = true;
   bool _showMapLocation = true;
   bool _isCheckingAppUpdate = false;
+
+  bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
 
   static const String _mapFilterAllMarkers = 'all-markers';
   static const String _mapFilterPeers = 'peers';
@@ -393,9 +400,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (!mounted) {
       return;
     }
-    final trustedRecipients = (trustBundle?.approvedDevices ?? const [])
-        .where((device) => device.deviceId != localPeer.id)
-        .toList(growable: false);
+    final hasCurrentVerifiedBundle =
+        trustBundle?.isSignatureVerified == true &&
+        !trustBundle!.isExpiredAt(DateTime.now());
+    final trustedRecipients =
+        (hasCurrentVerifiedBundle
+                ? trustBundle.approvedDevices
+                : const <TrustedDevice>[])
+            .where((device) => device.deviceId != localPeer.id)
+            .toList(growable: false);
     final created = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -564,15 +577,201 @@ class _HomePageState extends ConsumerState<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 12),
-        _buildSosButton(),
+        _buildDeviceAccessBanner(),
+        const SizedBox(height: 14),
+        if (_isResponder)
+          _buildResponderAlertButton(messages)
+        else
+          _buildSosButton(),
         const SizedBox(height: 14),
         _buildMapCard(peers, messages, tileCacheStore),
         const SizedBox(height: 14),
-        _buildActionButtons(),
+        if (_isResponder)
+          _buildResponderActionButtons()
+        else
+          _buildActionButtons(),
         const SizedBox(height: 20),
         _buildPeersSection(peers),
         const SizedBox(height: 16),
       ],
+    );
+  }
+
+  Widget _buildDeviceAccessBanner() {
+    final profile = widget.accessProfile;
+    final (
+      icon,
+      title,
+      detail,
+      background,
+      foreground,
+    ) = switch (profile.level) {
+      DeviceAccessLevel.responder => (
+        Icons.verified_user_rounded,
+        'VERIFIED RESPONDER',
+        '${profile.ownerName ?? 'Approved device'} - responder tools enabled',
+        const Color(0xFFE83C3D),
+        Colors.white,
+      ),
+      DeviceAccessLevel.revoked => (
+        Icons.block_rounded,
+        'DEVICE REVOKED',
+        'Responder access is disabled. Contact the administrator.',
+        const Color(0xFF7D1A1A),
+        Colors.white,
+      ),
+      DeviceAccessLevel.keyMismatch => (
+        Icons.key_off_rounded,
+        'DEVICE KEY MISMATCH',
+        'Register this phone key again before responder access can be restored.',
+        const Color(0xFFFFE4E1),
+        const Color(0xFF8B1E1E),
+      ),
+      DeviceAccessLevel.unregistered => (
+        Icons.app_registration_rounded,
+        'DEVICE NOT APPROVED',
+        'Show the registration QR to an admin, then import the approved bundle.',
+        const Color(0xFFFFF1D6),
+        const Color(0xFF7A4B00),
+      ),
+      DeviceAccessLevel.outdatedBundle => (
+        Icons.update_rounded,
+        'TRUST BUNDLE EXPIRED',
+        'Import a newly signed bundle from the PC admin. Emergency broadcast remains available.',
+        const Color(0xFFFFF1D6),
+        const Color(0xFF7A4B00),
+      ),
+      _ => (
+        Icons.verified_rounded,
+        'VERIFIED ${profile.roleLabel.toUpperCase()}',
+        '${profile.ownerName ?? 'Approved device'} - identity key matched',
+        const Color(0xFFEAF6EF),
+        const Color(0xFF23613D),
+      ),
+    };
+
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: foreground, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      detail,
+                      style: TextStyle(
+                        color: foreground.withValues(alpha: 0.85),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, color: foreground, size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildResponderAlertButton(
+    AsyncValue<List<messaging.SosMessage>> messages,
+  ) {
+    final alertCount = messages.maybeWhen(
+      data: (items) => items
+          .where(
+            (message) =>
+                message.moderationStatus !=
+                messaging.MessageModerationStatus.spam,
+          )
+          .length,
+      orElse: () => 0,
+    );
+
+    return Material(
+      color: const Color(0xFFE83C3D),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: () => setState(() {
+          _selectedMessageFilter = 1;
+          _selectedTab = 1;
+        }),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.notification_important_rounded,
+                  color: Colors.white,
+                  size: 27,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'OPEN SOS ALERTS',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '$alertCount legitimate alert${alertCount == 1 ? '' : 's'} stored locally',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_rounded,
+                color: Colors.white,
+                size: 23,
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -594,9 +793,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 12),
-                  const Text(
-                    'MAP',
-                    style: TextStyle(
+                  Text(
+                    _isResponder ? 'RESPONDER SOS MAP' : 'MAP',
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF1F1F1F),
@@ -604,9 +803,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  const Text(
-                    'View SOS alerts and peers',
-                    style: TextStyle(
+                  Text(
+                    _isResponder
+                        ? 'Triage legitimate emergency markers'
+                        : 'View SOS alerts and peers',
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: Color(0xFF717173),
@@ -651,6 +852,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       ('Requests', Icons.pan_tool_outlined, 'REQUEST'),
       ('Updates', Icons.campaign_outlined, 'UPDATE'),
       ('Spam', Icons.report_gmailerrorred_rounded, 'SPAM'),
+      ('Quarantine', Icons.gpp_bad_rounded, 'QUARANTINE'),
     ];
 
     final String activeType = filters[_selectedMessageFilter].$3;
@@ -662,23 +864,25 @@ class _HomePageState extends ConsumerState<HomePage> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'MESSAGES',
-                    style: TextStyle(
+                    _isResponder ? 'SOS ALERTS & MESSAGES' : 'MESSAGES',
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF1F1F1F),
                       letterSpacing: 0.2,
                     ),
                   ),
-                  SizedBox(height: 3),
+                  const SizedBox(height: 3),
                   Text(
-                    'All messages from your peers',
-                    style: TextStyle(
+                    _isResponder
+                        ? 'Incoming emergency traffic and responder chats'
+                        : 'All messages from your peers',
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: Color(0xFF717173),
@@ -798,7 +1002,9 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
-        if (activeType == 'ALL' || activeType == 'SPAM')
+        if (activeType == 'ALL' ||
+            activeType == 'SPAM' ||
+            activeType == 'QUARANTINE')
           conversations.when(
             data: (items) {
               final visibleConversations = items
@@ -820,6 +1026,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                             isSpam:
                                 conversation.latestModerationStatus ==
                                 messaging.MessageModerationStatus.spam,
+                            isRevoked:
+                                conversation.latestTrustStatus ==
+                                DeviceTrustStatus.revoked,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -924,23 +1133,25 @@ class _HomePageState extends ConsumerState<HomePage> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'PEERS',
-                    style: TextStyle(
+                    _isResponder ? 'CONNECTION DIAGNOSTICS' : 'PEERS',
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF1F1F1F),
                       letterSpacing: 0.2,
                     ),
                   ),
-                  SizedBox(height: 3),
+                  const SizedBox(height: 3),
                   Text(
-                    'Nearby devices available for message relay',
-                    style: TextStyle(
+                    _isResponder
+                        ? 'Monitor nearby nodes, links, and relay readiness'
+                        : 'Nearby devices available for message relay',
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                       color: Color(0xFF717173),
@@ -1028,8 +1239,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     required VoidCallback onTap,
   }) {
     final isSpam = item.isSpam;
-    final cardColor = isSpam ? const Color(0xFFFFFAF0) : Colors.white;
-    final titleColor = isSpam
+    final isRevoked = item.trustStatus == DeviceTrustStatus.revoked;
+    final cardColor = isRevoked
+        ? const Color(0xFFF1F1F1)
+        : isSpam
+        ? const Color(0xFFFFFAF0)
+        : Colors.white;
+    final titleColor = isRevoked
+        ? const Color(0xFF5B2020)
+        : isSpam
         ? const Color(0xFF6F5315)
         : item.type == 'SOS'
         ? const Color(0xFFE83C3D)
@@ -1046,7 +1264,11 @@ class _HomePageState extends ConsumerState<HomePage> {
           decoration: BoxDecoration(
             color: cardColor,
             borderRadius: BorderRadius.circular(8),
-            border: isSpam ? Border.all(color: const Color(0xFFE5C56C)) : null,
+            border: isRevoked
+                ? Border.all(color: const Color(0xFF8D5B5B))
+                : isSpam
+                ? Border.all(color: const Color(0xFFE5C56C))
+                : null,
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.06),
@@ -1124,6 +1346,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                           ),
                         ),
                         const Spacer(),
+                        _TrustStatusBadge(status: item.trustStatus),
+                        const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -1157,10 +1381,15 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget _buildConversationCard(
     messaging.Conversation conversation, {
     bool isSpam = false,
+    bool isRevoked = false,
   }) {
     final peer = conversation.remotePeer;
     final status = isSpam ? 'spam' : conversation.latestStatus?.name ?? 'ready';
-    final cardColor = isSpam ? const Color(0xFFFFFAF0) : Colors.white;
+    final cardColor = isRevoked
+        ? const Color(0xFFF1F1F1)
+        : isSpam
+        ? const Color(0xFFFFFAF0)
+        : Colors.white;
     return Material(
       color: cardColor,
       borderRadius: BorderRadius.circular(8),
@@ -1173,7 +1402,11 @@ class _HomePageState extends ConsumerState<HomePage> {
           decoration: BoxDecoration(
             color: cardColor,
             borderRadius: BorderRadius.circular(8),
-            border: isSpam ? Border.all(color: const Color(0xFFE5C56C)) : null,
+            border: isRevoked
+                ? Border.all(color: const Color(0xFF8D5B5B))
+                : isSpam
+                ? Border.all(color: const Color(0xFFE5C56C))
+                : null,
           ),
           child: Row(
             children: [
@@ -1221,15 +1454,25 @@ class _HomePageState extends ConsumerState<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Text(
-                      status.toUpperCase(),
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: isSpam
-                            ? const Color(0xFF8A6A1F)
-                            : const Color(0xFFE83C3D),
-                      ),
+                    Row(
+                      children: [
+                        _TrustStatusBadge(
+                          status:
+                              conversation.latestTrustStatus ??
+                              DeviceTrustStatus.unknown,
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          status.toUpperCase(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isSpam
+                                ? const Color(0xFF8A6A1F)
+                                : const Color(0xFFE83C3D),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1274,7 +1517,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     return _MessageFeedItem(
       message: message,
       title:
-          '${_labelForCategory(message.category)} from ${message.sender.name}',
+          '${_labelForCategory(message.category)} from ${message.trustOwnerName ?? message.sender.name}',
       description: message.body,
       distance: _distanceTextForMessage(message),
       time: _relativeTime(message.createdAt),
@@ -1286,6 +1529,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       iconColor: accentColor,
       badgeColor: accentColor,
       isSpam: isSpam,
+      trustStatus: message.trustStatus,
     );
   }
 
@@ -1535,12 +1779,25 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Widget _buildBottomBar() {
-    const items = [
-      _NavItem(icon: Icons.home_rounded, label: 'Home'),
-      _NavItem(icon: Icons.chat_bubble_outline_rounded, label: 'Messages'),
-      _NavItem(icon: Icons.map_outlined, label: 'Maps'),
-      _NavItem(icon: Icons.people_outline_rounded, label: 'Peers'),
-    ];
+    final items = _isResponder
+        ? const [
+            _NavItem(icon: Icons.dashboard_rounded, label: 'Dashboard'),
+            _NavItem(
+              icon: Icons.notification_important_outlined,
+              label: 'Alerts',
+            ),
+            _NavItem(icon: Icons.map_outlined, label: 'SOS Map'),
+            _NavItem(icon: Icons.monitor_heart_outlined, label: 'Network'),
+          ]
+        : const [
+            _NavItem(icon: Icons.home_rounded, label: 'Home'),
+            _NavItem(
+              icon: Icons.chat_bubble_outline_rounded,
+              label: 'Messages',
+            ),
+            _NavItem(icon: Icons.map_outlined, label: 'Maps'),
+            _NavItem(icon: Icons.people_outline_rounded, label: 'Peers'),
+          ];
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -2321,6 +2578,105 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
+  Widget _buildResponderActionButtons() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                icon: const Icon(
+                  Icons.map_rounded,
+                  color: Color(0xFFE83C3D),
+                  size: 34,
+                ),
+                label: 'SOS MAP',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: 'View verified markers',
+                onTap: () => setState(() => _selectedTab = 2),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _ActionCard(
+                icon: const _MessageIcon(),
+                label: 'CHAT FEED',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: 'Coordinate responses',
+                onTap: () => setState(() {
+                  _selectedMessageFilter = 0;
+                  _selectedTab = 1;
+                }),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionCard(
+                icon: const Icon(
+                  Icons.monitor_heart_outlined,
+                  color: Color(0xFFE83C3D),
+                  size: 34,
+                ),
+                label: 'DIAGNOSTICS',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: 'Peers and relay health',
+                onTap: () => setState(() => _selectedTab = 3),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: _ActionCard(
+                icon: const Icon(
+                  Icons.gps_fixed_rounded,
+                  color: Color(0xFFE83C3D),
+                  size: 34,
+                ),
+                label: 'MY LOCATION',
+                labelColor: const Color(0xFFE83C3D),
+                subtitle: _isLocating ? 'Locating...' : 'Update GPS position',
+                onTap: () => _startFollowing(),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: _ActionCard(
+            icon: const Icon(
+              Icons.science_outlined,
+              color: Color(0xFFE83C3D),
+              size: 34,
+            ),
+            label: 'VALIDATION TEST',
+            labelColor: const Color(0xFFE83C3D),
+            subtitle: 'Record real field metrics',
+            onTap: () => Navigator.of(context).pushNamed('/validation'),
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: _ActionCard(
+            icon: const Icon(
+              Icons.admin_panel_settings_outlined,
+              color: Color(0xFFE83C3D),
+              size: 34,
+            ),
+            label: 'DEVICE TRUST',
+            labelColor: const Color(0xFFE83C3D),
+            subtitle: 'View responder approval and device ID',
+            onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPeersSection(AsyncValue<List<messaging.Peer>> peers) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2455,6 +2811,7 @@ class _MessageFeedItem {
   final Color iconColor;
   final Color badgeColor;
   final bool isSpam;
+  final DeviceTrustStatus trustStatus;
 
   const _MessageFeedItem({
     required this.message,
@@ -2468,7 +2825,48 @@ class _MessageFeedItem {
     required this.iconColor,
     required this.badgeColor,
     this.isSpam = false,
+    required this.trustStatus,
   });
+}
+
+class _TrustStatusBadge extends StatelessWidget {
+  const _TrustStatusBadge({required this.status});
+
+  final DeviceTrustStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (background, foreground) = switch (status) {
+      DeviceTrustStatus.approved => (
+        const Color(0xFFE4F4EA),
+        const Color(0xFF1E6B3B),
+      ),
+      DeviceTrustStatus.unknown => (
+        const Color(0xFFFFEBC2),
+        const Color(0xFF765000),
+      ),
+      DeviceTrustStatus.revoked => (
+        const Color(0xFFE5D6D6),
+        const Color(0xFF7D1A1A),
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Text(
+        status.displayLabel.toUpperCase(),
+        style: TextStyle(
+          color: foreground,
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.25,
+        ),
+      ),
+    );
+  }
 }
 
 class _NavItem {
@@ -3396,7 +3794,8 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         title: device.ownerName,
                         subtitle:
                             '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
-                        roleLabel: _roleLabelForTrustedDevice(device),
+                        roleLabel:
+                            '${_roleLabelForTrustedDevice(device)} - Verified',
                         icon: _iconForTrustedDevice(device),
                       ),
                     ),
@@ -3416,7 +3815,8 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         title: device.ownerName,
                         subtitle:
                             '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
-                        roleLabel: _roleLabelForTrustedDevice(device),
+                        roleLabel:
+                            '${_roleLabelForTrustedDevice(device)} - Verified',
                         icon: _iconForTrustedDevice(device),
                         compact: true,
                       ),
@@ -3558,12 +3958,16 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 if (mounted) {
                                   navigator.pop(true);
                                 }
-                              } catch (_) {
+                              } catch (error) {
                                 if (mounted) {
                                   setState(() => _sending = false);
                                   messenger.showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Unable to queue SOS.'),
+                                    SnackBar(
+                                      content: Text(
+                                        error is MessageEncryptionException
+                                            ? error.message
+                                            : 'Unable to queue SOS.',
+                                      ),
                                     ),
                                   );
                                 }

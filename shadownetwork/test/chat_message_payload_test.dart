@@ -36,6 +36,52 @@ void main() {
     expect(decoded.hopCount, 3);
     expect(decoded.messageHash, ChatMessagePayload.messageHash(message));
   });
+
+  test('keeps chat schema version 1 readable with stable hash', () {
+    final payload = <String, Object?>{
+      'schema_version': 1,
+      'payload_type': 'chat_message',
+      'message_id': 'legacy-chat-v1',
+      'conversation_id': 'conversation-legacy-peer-responder-1',
+      'body': 'Legacy chat body',
+      'related_sos_message_hash': null,
+      'routing': {'hop_count': 0, 'ttl': 7200},
+      'timestamp': {'created_at': '2026-06-01T02:03:04.000Z'},
+      'sender': {
+        'peer_id': 'legacy-peer',
+        'peer_name': 'Legacy Peer',
+        'peer_type': 'civilian',
+      },
+      'recipient': {
+        'peer_id': 'responder-1',
+        'peer_name': 'Responder 1',
+        'peer_type': 'responder',
+      },
+    };
+    const expectedHash =
+        'b48f3b4d31be5ccd101275bfb6600028c454e4fb7cd2a6dbb7f9eea355e58ed8';
+    expect(ChatMessagePayload.hashPayload(jsonEncode(payload)), expectedHash);
+    payload['message_hash'] = expectedHash;
+
+    final decoded = ChatMessagePayload.fromPayload(payload);
+
+    expect(decoded.id, 'legacy-chat-v1');
+    expect(decoded.body, 'Legacy chat body');
+    expect(decoded.sender.id, 'legacy-peer');
+    expect(decoded.recipient.id, 'responder-1');
+    expect(decoded.messageHash, expectedHash);
+    expect(decoded.ttl, const Duration(hours: 2));
+  });
+
+  test('rejects unsupported future chat schema versions', () {
+    expect(
+      () => ChatMessagePayload.fromPayload(const {
+        'schema_version': 2,
+        'payload_type': 'chat_message',
+      }),
+      throwsFormatException,
+    );
+  });
 }
 
 ChatMessage _message() {

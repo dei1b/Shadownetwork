@@ -4,6 +4,7 @@ import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/peer_type.dart';
 import 'chat_message_payload.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 
 class ChatMessageModel {
   const ChatMessageModel._();
@@ -30,6 +31,11 @@ class ChatMessageModel {
       ),
       moderationReason: map['moderation_reason'] as String?,
       moderationScore: (map['moderation_score'] as num?)?.toDouble(),
+      trustStatus: DeviceTrustStatus.values.byName(
+        (map['trust_status'] as String?) ?? DeviceTrustStatus.unknown.name,
+      ),
+      trustRole: map['trust_role'] as String?,
+      trustOwnerName: map['trust_owner_name'] as String?,
     );
   }
 
@@ -48,6 +54,9 @@ class ChatMessageModel {
     'moderation_status': message.moderationStatus.name,
     'moderation_reason': message.moderationReason,
     'moderation_score': message.moderationScore,
+    'trust_status': message.trustStatus.name,
+    'trust_role': message.trustRole,
+    'trust_owner_name': message.trustOwnerName,
     'created_at': message.createdAt.toUtc().toIso8601String(),
     'updated_at': message.updatedAt?.toUtc().toIso8601String(),
   };

@@ -1,6 +1,7 @@
 import '../entities/peer.dart';
 import '../entities/scf_envelope.dart';
 import '../entities/transport_status.dart';
+import '../entities/envelope_transfer_result.dart';
 
 abstract class ScfTransport {
   String get localPeerId;
@@ -15,7 +16,7 @@ abstract class ScfTransport {
 
   Future<Peer> connectPeer(Peer peer);
 
-  Future<void> sendEnvelope({
+  Future<EnvelopeTransferResult> sendEnvelope({
     required Peer peer,
     required ScfEnvelope envelope,
   });

@@ -10,6 +10,7 @@ class Peer {
     this.lastSeenAt,
     this.latitude,
     this.longitude,
+    this.transport,
   });
 
   final String id;
@@ -20,6 +21,7 @@ class Peer {
   final DateTime? lastSeenAt;
   final double? latitude;
   final double? longitude;
+  final String? transport;
 
   Peer copyWith({
     String? id,
@@ -30,6 +32,7 @@ class Peer {
     DateTime? lastSeenAt,
     double? latitude,
     double? longitude,
+    String? transport,
   }) {
     return Peer(
       id: id ?? this.id,
@@ -40,6 +43,7 @@ class Peer {
       lastSeenAt: lastSeenAt ?? this.lastSeenAt,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      transport: transport ?? this.transport,
     );
   }
 }

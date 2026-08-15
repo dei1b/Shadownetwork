@@ -1,6 +1,7 @@
 import 'message_moderation_status.dart';
 import 'message_status.dart';
 import 'peer.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 
 class Conversation {
   const Conversation({
@@ -15,6 +16,7 @@ class Conversation {
     this.latestBody,
     this.latestStatus,
     this.latestModerationStatus,
+    this.latestTrustStatus,
   });
 
   final String id;
@@ -28,4 +30,5 @@ class Conversation {
   final String? latestBody;
   final MessageStatus? latestStatus;
   final MessageModerationStatus? latestModerationStatus;
+  final DeviceTrustStatus? latestTrustStatus;
 }

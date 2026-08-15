@@ -98,6 +98,73 @@ void main() {
     expect(decoded.ttl, const Duration(hours: 2));
   });
 
+  test('keeps legacy SOS schema version 1 readable', () {
+    final decoded = SosMessagePayload.fromPayload({
+      'schema_version': 1,
+      'id': 'legacy-sos-v1',
+      'sender': {
+        'id': 'legacy-peer',
+        'name': 'Legacy Peer',
+        'type': 'civilian',
+        'latitude': 7.3,
+        'longitude': 125.68,
+      },
+      'body': 'Legacy v1 SOS',
+      'category': 'rescue',
+      'created_at': '2026-06-01T01:02:03.000Z',
+      'latitude': 7.3,
+      'longitude': 125.68,
+    });
+
+    expect(decoded.id, 'legacy-sos-v1');
+    expect(decoded.sender.id, 'legacy-peer');
+    expect(decoded.body, 'Legacy v1 SOS');
+    expect(decoded.category, Category.rescue);
+    expect(decoded.ttl, SosMessagePayload.defaultTtl);
+  });
+
+  test('keeps legacy SOS schema version 2 readable with stable hash', () {
+    final payload = <String, Object?>{
+      'schema_version': 2,
+      'message_id': 'legacy-sos-v2',
+      'payload_text': 'Legacy v2 SOS',
+      'category': 'rescue',
+      'location': {
+        'latitude': 7.3,
+        'longitude': 125.68,
+        'accuracy_meters': 12.0,
+      },
+      'routing': {'hop_count': 0, 'ttl': 3600},
+      'timestamp': {'created_at': '2026-06-01T01:02:03.000Z'},
+      'sender': {
+        'peer_id': 'legacy-peer',
+        'peer_name': 'Legacy Peer',
+        'peer_type': 'civilian',
+      },
+    };
+    const expectedHash =
+        '4d41f058bb589979df589deff0fd85fe41ba0ac920d5bdf703081f3def2d99b0';
+    expect(SosMessagePayload.hashPayload(jsonEncode(payload)), expectedHash);
+    payload['message_hash'] = expectedHash;
+
+    final decoded = SosMessagePayload.fromPayload(payload);
+
+    expect(decoded.id, 'legacy-sos-v2');
+    expect(decoded.body, 'Legacy v2 SOS');
+    expect(decoded.messageHash, expectedHash);
+    expect(decoded.gpsAccuracyMeters, 12.0);
+    expect(decoded.ttl, const Duration(hours: 1));
+    expect(decoded.recipient, isNull);
+    expect(decoded.isEncrypted, isFalse);
+  });
+
+  test('rejects unsupported future SOS schema versions', () {
+    expect(
+      () => SosMessagePayload.fromPayload(const {'schema_version': 99}),
+      throwsFormatException,
+    );
+  });
+
   test('rewrites routing metadata for relay without changing message hash', () {
     final relayedJson = SosMessagePayload.payloadJsonForRelay(
       SosMessagePayload.canonicalJson(message),

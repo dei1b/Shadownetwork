@@ -59,6 +59,7 @@ class RegisteredDevice {
     required this.updatedAt,
     required this.lastSeenLabel,
     this.publicKey,
+    this.keyVersion = 1,
     this.notes,
   });
 
@@ -70,6 +71,7 @@ class RegisteredDevice {
   final DateTime updatedAt;
   final String lastSeenLabel;
   final String? publicKey;
+  final int keyVersion;
   final String? notes;
 
   RegisteredDevice copyWith({
@@ -81,6 +83,7 @@ class RegisteredDevice {
     DateTime? updatedAt,
     String? lastSeenLabel,
     String? publicKey,
+    int? keyVersion,
     String? notes,
   }) {
     return RegisteredDevice(
@@ -92,6 +95,7 @@ class RegisteredDevice {
       updatedAt: updatedAt ?? this.updatedAt,
       lastSeenLabel: lastSeenLabel ?? this.lastSeenLabel,
       publicKey: publicKey ?? this.publicKey,
+      keyVersion: keyVersion ?? this.keyVersion,
       notes: notes ?? this.notes,
     );
   }
@@ -106,6 +110,7 @@ class RegisteredDevice {
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'last_seen_label': lastSeenLabel,
       'public_key': publicKey,
+      'key_version': keyVersion,
       'notes': notes,
     };
   }
@@ -120,6 +125,7 @@ class RegisteredDevice {
       updatedAt: _parseDate(json['updated_at'] as String?),
       lastSeenLabel: json['last_seen_label'] as String? ?? 'Not synced',
       publicKey: json['public_key'] as String?,
+      keyVersion: (json['key_version'] as num?)?.toInt() ?? 1,
       notes: json['notes'] as String?,
     );
   }

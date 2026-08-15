@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/scf_peer_delivery.dart';
 import '../../domain/entities/scf_peer_status.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/sos_message.dart';
 import '../datasources/local_messaging_database.dart';
@@ -97,13 +98,28 @@ class ScfService {
     });
   }
 
-  Future<int> pruneExpired({DateTime? now}) {
+  Future<int> pruneExpired({DateTime? now}) async {
+    return (await pruneExpiredHashes(now: now)).length;
+  }
+
+  Future<List<String>> pruneExpiredHashes({DateTime? now}) async {
     final cutoff = (now ?? DateTime.now()).toUtc().toIso8601String();
-    return _database.delete(
-      LocalMessagingDatabase.scfMessagesTable,
-      where: 'expires_at <= ?',
-      whereArgs: [cutoff],
-    );
+    return _database.transaction((transaction) async {
+      final rows = await transaction.query(
+        LocalMessagingDatabase.scfMessagesTable,
+        columns: ['message_hash'],
+        where: 'expires_at <= ?',
+        whereArgs: [cutoff],
+      );
+      await transaction.delete(
+        LocalMessagingDatabase.scfMessagesTable,
+        where: 'expires_at <= ?',
+        whereArgs: [cutoff],
+      );
+      return rows
+          .map((row) => row['message_hash']! as String)
+          .toList(growable: false);
+    });
   }
 
   Future<void> consumeDeliveredPayload(String messageHash) {
@@ -135,6 +151,7 @@ class ScfService {
           ON statuses.message_hash = messages.message_hash
           AND statuses.peer_id = ?
         WHERE messages.expires_at > ?
+          AND messages.origin_trust_status != ?
           AND (
             statuses.status IS NULL
             OR statuses.status IN (?, ?)
@@ -145,6 +162,7 @@ class ScfService {
         [
           peerId,
           timestamp.toIso8601String(),
+          DeviceTrustStatus.revoked.name,
           ScfPeerStatus.pending.name,
           ScfPeerStatus.failed.name,
           limit,
@@ -198,6 +216,18 @@ class ScfService {
         lastError: lastError,
       );
     });
+  }
+
+  Future<void> updateOriginTrustStatus({
+    required String messageHash,
+    required DeviceTrustStatus status,
+  }) {
+    return _database.update(
+      LocalMessagingDatabase.scfMessagesTable,
+      {'origin_trust_status': status.name},
+      where: 'message_hash = ?',
+      whereArgs: [messageHash],
+    );
   }
 
   Future<ScfPeerDelivery?> getPeerStatus({
