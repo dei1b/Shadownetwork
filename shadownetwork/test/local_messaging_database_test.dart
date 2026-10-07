@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
+import 'package:shadownetwork/features/messaging/data/repositories/sqlite_sos_message_repository.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'support/database_migration_test_harness.dart';
@@ -32,6 +34,9 @@ void main() {
       'transport',
       'information',
       'other',
+      'fireElectrical',
+      'safetyThreat',
+      'publicHazard',
     ]);
     expect(peerTypes.map((row) => row['code']), [
       'civilian',
@@ -164,7 +169,81 @@ void main() {
     ]);
   });
 
-  test('migrates populated version 5 data to version 8', () async {
+  test(
+    'version 8 upgrade preserves SOS records and accepts new categories',
+    () async {
+      final harness = await DatabaseMigrationTestHarness.create();
+      addTearDown(harness.dispose);
+      final original = await harness.openCurrentDatabase();
+
+      // Versions 8 and 9 share a schema; reconstruct the eight original lookup rows.
+      await original.delete(
+        LocalMessagingDatabase.categoriesTable,
+        where: 'id > ?',
+        whereArgs: [8],
+      );
+      await original.setVersion(8);
+      await original.insert(LocalMessagingDatabase.peersTable, {
+        'id': 'existing-resident',
+        'display_name': 'Resident',
+        'peer_type_code': 'civilian',
+        'created_at': '2026-10-01T08:00:00.000Z',
+      });
+      for (final category in Category.values.take(8)) {
+        await original.insert(LocalMessagingDatabase.sosMessagesTable, {
+          'id': 'existing-${category.name}',
+          'sender_peer_id': 'existing-resident',
+          'body': 'Saved ${category.name} request',
+          'category_code': category.name,
+          'message_hash': 'hash-${category.name}',
+          'status': 'queued',
+          'created_at': '2026-10-01T08:00:00.000Z',
+          'hop_count': 2,
+        });
+      }
+      final before = await original.query(
+        LocalMessagingDatabase.sosMessagesTable,
+        orderBy: 'id',
+      );
+      await original.close();
+
+      final upgraded = await harness.openCurrentDatabase();
+      addTearDown(upgraded.close);
+      expect(await upgraded.getVersion(), 9);
+      expect(
+        await upgraded.query(
+          LocalMessagingDatabase.sosMessagesTable,
+          orderBy: 'id',
+        ),
+        before,
+      );
+      expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+      final repository = SqliteSosMessageRepository(database: upgraded);
+      final messages = await repository.getMessages();
+      expect(
+        messages.map((message) => message.category),
+        unorderedEquals(Category.values.take(8)),
+      );
+      for (final category in Category.sosCategories) {
+        await repository.saveMessage(
+          messages.first.copyWith(
+            id: 'new-${category.name}',
+            messageHash: 'new-hash-${category.name}',
+            category: category,
+          ),
+        );
+      }
+      final newMessages = (await repository.getMessages()).where(
+        (message) => message.id.startsWith('new-'),
+      );
+      expect(
+        newMessages.map((message) => message.category),
+        unorderedEquals(Category.sosCategories),
+      );
+    },
+  );
+
+  test('migrates populated version 5 data to version 9', () async {
     final harness = await DatabaseMigrationTestHarness.create();
     addTearDown(harness.dispose);
 
@@ -211,7 +290,7 @@ void main() {
     final migratedDatabase = await harness.openCurrentDatabase();
     addTearDown(migratedDatabase.close);
 
-    expect(await migratedDatabase.getVersion(), 8);
+    expect(await migratedDatabase.getVersion(), 9);
     final rows = await migratedDatabase.query(
       LocalMessagingDatabase.sosMessagesTable,
       where: 'id = ?',

@@ -28,6 +28,42 @@ void main() {
     isConnected: false,
   );
 
+  for (final category in Category.sosCategories) {
+    test('${category.name} survives broadcast, encryption and relay', () async {
+      final identity = await _newIdentity();
+      final service = MessageEncryptionService();
+      final message = SosMessage(
+        id: 'category-${category.name}',
+        sender: sender,
+        body: 'Assistance needed near the barangay hall.',
+        category: category,
+        status: MessageStatus.queued,
+        createdAt: DateTime.utc(2026, 10, 6),
+      );
+      for (final target in <Peer?>[null, recipient]) {
+        final prepared = await SecureSosMessagePayload.prepare(
+          message.copyWith(recipient: target),
+          encryptionService: service,
+          recipientPublicKey: target == null ? null : identity.encodedPublicKey,
+        );
+        final relayed = RelayPayloadCodec.payloadJsonForRelay(
+          prepared.payloadJson,
+          hopCount: 2,
+        );
+        expect(RelayPayloadCodec.hashPayload(relayed), prepared.hash);
+        final decoded = await SecureSosMessagePayload.decode(
+          jsonDecode(relayed) as Map<String, Object?>,
+          localPeerId: recipient.id,
+          encryptionService: service,
+          localIdentity: identity,
+        );
+        expect(decoded.category, category);
+        expect(decoded.body, message.body);
+        expect(decoded.hopCount, 2);
+      }
+    });
+  }
+
   test('SOS v4 hides plaintext and decrypts only for its recipient', () async {
     final identity = await _newIdentity();
     final service = MessageEncryptionService();

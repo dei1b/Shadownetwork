@@ -1,8 +1,8 @@
 # Shadow Network Protocol Compatibility Policy
 
-Status: Updated through Phase 1 secure-payload rollout
+Status: Updated for barangay SOS categories
 
-Updated: 2026-08-03
+Updated: 2026-10-06
 
 ## Purpose
 
@@ -22,7 +22,7 @@ This policy defines how Shadow Network devices handle database versions, transpo
 
 | Layer | Current writer | Supported readers | Unknown future version |
 |---|---:|---|---|
-| SQLite database | 6 | Sequential migrations 1 through 6 | App must not open without a defined migration |
+| SQLite database | 9 | Sequential migrations 1 through 9 | App must not open without a defined migration |
 | Android transport handshake | 1 | Exact protocol version 1 | Reject as incompatible peer |
 | SOS payload | 4 | 1, 2, 3, 4 | Reject visible parsing; do not guess fields |
 | Chat payload | 2 | 1, 2 | Reject visible parsing; do not guess fields |
@@ -31,6 +31,14 @@ This policy defines how Shadow Network devices handle database versions, transpo
 | Legacy targeted SOS security | `sn-sha256-stream-v1` | SOS v3 read compatibility only | Never use for new outgoing messages |
 
 ## Current Mixed-Version Behavior
+
+### Barangay SOS categories
+
+- The composer and map filters offer only Medical Assistance (`medical`), Fire & Electrical Danger (`fireElectrical`), Safety Threat (`safetyThreat`), Flood & Rescue (`rescue`), Immediate Public Hazard (`publicHazard`), and Other Urgent Assistance (`other`).
+- Database version 9 seeds the new lookup codes without renaming or deleting existing SOS records, hashes, or queued envelopes. Upgrade in place without clearing app data.
+- Retired `food`, `water`, `shelter`, `transport`, and `information` codes remain readable for historical data and incoming legacy messages. They are not selectable for new SOS messages; their map records are included under Other Urgent Assistance.
+- The SOS JSON shape and schema version remain unchanged. Older apps cannot display the three new category codes. Update all sender, responder, and relay phones before testing these categories together; matching schema numbers alone do not guarantee category compatibility.
+- Delivery and relay statuses are unchanged. This update adds no responder acknowledgment or resolution workflow.
 
 ### SOS
 

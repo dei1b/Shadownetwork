@@ -181,6 +181,33 @@ void main() {
     );
   });
 
+  test('retired categories remain visible under the Other map filter', () {
+    final legacy = sosMessage(
+      id: 'legacy-water',
+    ).copyWith(latitude: 7.3026, longitude: 125.6888);
+    expect(
+      shouldShowSosMessageOnMap(
+        message: legacy,
+        visibleCategories: {Category.other},
+      ),
+      isTrue,
+    );
+    for (final category in Category.sosCategories) {
+      final message = legacy.copyWith(category: category);
+      expect(
+        shouldShowSosMessageOnMap(
+          message: message,
+          visibleCategories: {category},
+        ),
+        isTrue,
+      );
+      expect(
+        shouldShowSosMessageOnMap(message: message, visibleCategories: {}),
+        isFalse,
+      );
+    }
+  });
+
   test('unknown messages remain visible as unverified', () {
     final unknown = sosMessage(
       id: 'unknown',

@@ -43,3 +43,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Match maplibre_gl 0.26.0's renderer for the native connectivity override.
+    implementation("org.maplibre.gl:android-sdk-opengl:13.0.2")
+}
