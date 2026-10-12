@@ -51,6 +51,35 @@ void main() {
     expect(profile.level, DeviceAccessLevel.keyMismatch);
   });
 
+  test('device id matching is case-insensitive and trims local whitespace', () {
+    final profile = resolver.resolve(
+      deviceId: '  LOCAL-DEVICE-001  ',
+      publicKey: localPublicKey,
+      keyVersion: 1,
+      bundle: _bundle(approved: [_device(role: 'responder')]),
+      now: now,
+    );
+
+    expect(profile.deviceId, 'LOCAL-DEVICE-001');
+    expect(profile.level, DeviceAccessLevel.responder);
+    expect(profile.canAccessResponderInterface, isTrue);
+  });
+
+  test('matching keys remain valid when only base64 padding differs', () {
+    final profile = resolver.resolve(
+      deviceId: localDeviceId,
+      publicKey: localPublicKey,
+      keyVersion: 1,
+      bundle: _bundle(
+        approved: [_device(role: 'responder', publicKey: '$localPublicKey==')],
+      ),
+      now: now,
+    );
+
+    expect(profile.level, DeviceAccessLevel.responder);
+    expect(profile.canAccessResponderInterface, isTrue);
+  });
+
   test('revocation takes priority over an approved responder entry', () {
     final profile = resolver.resolve(
       deviceId: localDeviceId,
@@ -105,6 +134,19 @@ void main() {
     expect(profile.level, DeviceAccessLevel.outdatedBundle);
     expect(profile.canAccessResponderInterface, isFalse);
   });
+
+  test('missing trust bundle returns an unregistered profile', () {
+    final profile = resolver.resolve(
+      deviceId: localDeviceId,
+      publicKey: localPublicKey,
+      keyVersion: 1,
+      bundle: null,
+      now: now,
+    );
+
+    expect(profile.level, DeviceAccessLevel.unregistered);
+    expect(profile.canAccessResponderInterface, isFalse);
+  });
 }
 
 TrustBundle _bundle({
@@ -130,13 +172,18 @@ TrustBundle _bundle({
   );
 }
 
-TrustedDevice _device({required String role, String status = 'approved'}) {
+TrustedDevice _device({
+  required String role,
+  String status = 'approved',
+  String deviceId = 'local-device-001',
+  String publicKey = 'local-public-key',
+}) {
   return TrustedDevice(
-    deviceId: 'local-device-001',
+    deviceId: deviceId,
     ownerName: 'Responder One',
     role: role,
     status: status,
-    publicKey: 'local-public-key',
+    publicKey: publicKey,
     keyVersion: 1,
     updatedAt: DateTime.utc(2026, 8, 15),
   );
