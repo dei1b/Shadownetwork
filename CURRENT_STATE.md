@@ -539,7 +539,6 @@ The updated use case diagram contains one `<<include>>` relationship: Broadcast 
 8. Validation sessions remain phone-local and require manual export; there is no cross-device aggregation or automatic admin synchronization.
 9. Offline map coverage is geographically limited.
 10. Firebase authentication exists, but the current emergency app shell is not auth-gated and offline identity is separate from Firebase identity.
-11. The project `README.md` still contains the default Flutter description.
 
 ## Recommended Next Priorities
 
@@ -552,7 +551,6 @@ The phased implementation roadmap for these priorities is maintained in `IMPLEME
 5. Perform structured tests with at least sender, relay, and rescuer Android devices across indoor and outdoor distances.
 6. Run persisted validation sessions and record delivery rate, discovery time, node latency, end-to-end propagation, hop count, transport fallback, and battery impact for each trial.
 7. Expand and verify offline map coverage for the final deployment area.
-8. Update the project README with setup, run, permission, admin, and field-testing instructions.
 
 ## Adviser Summary
 

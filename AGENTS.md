@@ -11,10 +11,11 @@ flutter pub get
 flutter analyze
 flutter test
 flutter run
+flutter run -d edge -t lib/admin_web_main.dart --web-port 8080
 flutter build apk
 ```
 
-`flutter pub get` installs dependencies, `flutter analyze` applies `flutter_lints`, `flutter test` runs unit/widget tests, `flutter run` starts a local device or emulator build, and `flutter build apk` creates the Android release artifact.
+`flutter pub get` installs dependencies, `flutter analyze` applies `flutter_lints`, `flutter test` runs unit/widget tests, `flutter run` starts a local device or emulator build, `flutter run -d edge -t lib/admin_web_main.dart --web-port 8080` runs the browser admin app on a stable local origin, and `flutter build apk` creates the Android release artifact.
 
 ## Coding Style & Naming Conventions
 Use Dart defaults: two-space indentation, `lowerCamelCase` for variables and methods, `UpperCamelCase` for classes/enums, and `snake_case.dart` filenames. Keep widgets focused on rendering; put state transitions in Riverpod providers/notifiers and business rules in domain services. Prefer repository interfaces in `domain` and concrete SQLite, transport, or platform implementations in `data`.
