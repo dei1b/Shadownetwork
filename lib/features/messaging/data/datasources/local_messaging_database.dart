@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 8;
+  static const databaseVersion = 9;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -37,6 +37,8 @@ class LocalMessagingDatabase {
     6: _addTargetedSosMetadata,
     7: _addTrustEnforcementSchema,
     8: _addValidationMetricsSchema,
+    // Version 9 changes lookup data only; existing SOS rows retain their codes.
+    9: seedLookupTables,
   };
 
   static Future<Database> open({
@@ -508,7 +510,7 @@ class LocalMessagingDatabase {
       batch.insert(categoriesTable, {
         'id': category.index + 1,
         'code': category.name,
-        'label': _categoryLabel(category),
+        'label': category.label,
         'sort_order': category.index,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -523,19 +525,6 @@ class LocalMessagingDatabase {
     }
 
     await batch.commit(noResult: true);
-  }
-
-  static String _categoryLabel(Category category) {
-    return switch (category) {
-      Category.rescue => 'Rescue',
-      Category.food => 'Food',
-      Category.water => 'Water',
-      Category.medical => 'Medical',
-      Category.shelter => 'Shelter',
-      Category.transport => 'Transport',
-      Category.information => 'Information',
-      Category.other => 'Other',
-    };
   }
 
   static String _peerTypeLabel(PeerType peerType) {

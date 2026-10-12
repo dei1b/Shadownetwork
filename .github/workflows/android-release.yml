@@ -13,9 +13,6 @@ permissions:
 jobs:
   build-release-apk:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: shadownetwork
 
     steps:
       - name: Check out repository
@@ -36,6 +33,12 @@ jobs:
 
       - name: Resolve dependencies
         run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-pub
+
+      - name: Run tests
+        run: flutter test --no-pub
 
       - name: Read app version
         id: app_version

@@ -40,7 +40,8 @@ bool shouldShowSosMessageOnMap({
 }) {
   return message.moderationStatus != MessageModerationStatus.spam &&
       message.trustStatus != DeviceTrustStatus.revoked &&
-      visibleCategories.contains(message.category) &&
+      (visibleCategories.contains(message.category) ||
+          visibleCategories.contains(message.category.sosCategory)) &&
       message.latitude != null &&
       message.longitude != null;
 }

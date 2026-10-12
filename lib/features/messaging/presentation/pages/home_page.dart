@@ -28,6 +28,7 @@ import 'conversation_page.dart';
 import '../providers/local_messaging_providers.dart';
 import '../providers/relay_runtime_provider.dart';
 import '../utils/message_feed_filter.dart';
+import '../widgets/sos_category_picker.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -44,7 +45,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   int _selectedMessageFilter = 0;
   int _selectedPeerFilter = 0;
   final Set<messaging.Category> _visibleMapCategories = {
-    ...messaging.Category.values,
+    ...messaging.Category.sosCategories,
   };
   bool _showMapPeers = true;
   bool _showMapLocation = true;
@@ -1535,38 +1536,44 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String _messageTypeForCategory(messaging.Category category) {
     return switch (category) {
-      messaging.Category.rescue || messaging.Category.medical => 'SOS',
+      messaging.Category.rescue ||
+      messaging.Category.medical ||
+      messaging.Category.fireElectrical ||
+      messaging.Category.safetyThreat ||
+      messaging.Category.publicHazard ||
+      messaging.Category.other => 'SOS',
       messaging.Category.food ||
       messaging.Category.water ||
       messaging.Category.shelter ||
       messaging.Category.transport => 'REQUEST',
-      messaging.Category.information || messaging.Category.other => 'UPDATE',
+      messaging.Category.information => 'UPDATE',
     };
   }
 
   String _labelForCategory(messaging.Category category) {
     return switch (category) {
-      messaging.Category.rescue => 'Rescue Request',
+      messaging.Category.rescue ||
+      messaging.Category.medical ||
+      messaging.Category.fireElectrical ||
+      messaging.Category.safetyThreat ||
+      messaging.Category.publicHazard ||
+      messaging.Category.other => category.label,
       messaging.Category.food => 'Food Request',
       messaging.Category.water => 'Water Request',
-      messaging.Category.medical => 'Medical SOS',
       messaging.Category.shelter => 'Shelter Request',
       messaging.Category.transport => 'Transport Request',
       messaging.Category.information => 'Information Update',
-      messaging.Category.other => 'General Update',
     };
   }
 
   String _shortLabelForCategory(messaging.Category category) {
-    return switch (category) {
-      messaging.Category.rescue => 'Rescue',
-      messaging.Category.food => 'Food',
-      messaging.Category.water => 'Water',
+    return switch (category.sosCategory) {
       messaging.Category.medical => 'Medical',
-      messaging.Category.shelter => 'Shelter',
-      messaging.Category.transport => 'Transport',
-      messaging.Category.information => 'Information',
-      messaging.Category.other => 'Other',
+      messaging.Category.fireElectrical => 'Fire / Electrical',
+      messaging.Category.safetyThreat => 'Safety Threat',
+      messaging.Category.rescue => 'Flood / Rescue',
+      messaging.Category.publicHazard => 'Public Hazard',
+      _ => 'Other Assistance',
     };
   }
 
@@ -1580,6 +1587,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.transport => 'RIDE',
       messaging.Category.information => 'INFO',
       messaging.Category.other => 'OTHER',
+      messaging.Category.fireElectrical => 'FIRE',
+      messaging.Category.safetyThreat => 'SAFETY',
+      messaging.Category.publicHazard => 'HAZARD',
     };
   }
 
@@ -1593,16 +1603,22 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.transport => Icons.directions_bus,
       messaging.Category.information => Icons.info,
       messaging.Category.other => Icons.more_horiz,
+      messaging.Category.fireElectrical => Icons.local_fire_department,
+      messaging.Category.safetyThreat => Icons.shield_outlined,
+      messaging.Category.publicHazard => Icons.warning_amber_rounded,
     };
   }
 
   Color _colorForCategory(messaging.Category category) {
     return switch (category) {
       messaging.Category.rescue ||
-      messaging.Category.medical => const Color(0xFFE83C3D),
+      messaging.Category.medical ||
+      messaging.Category.fireElectrical ||
+      messaging.Category.safetyThreat => const Color(0xFFE83C3D),
       messaging.Category.food ||
       messaging.Category.shelter ||
-      messaging.Category.transport => const Color(0xFFF39C12),
+      messaging.Category.transport ||
+      messaging.Category.publicHazard => const Color(0xFFF39C12),
       messaging.Category.water ||
       messaging.Category.information => const Color(0xFF3F66C4),
       messaging.Category.other => const Color(0xFF777777),
@@ -2119,7 +2135,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }) {
     final items = messages.valueOrNull ?? const <messaging.SosMessage>[];
     final activeCategories =
-        visibleCategories ?? messaging.Category.values.toSet();
+        visibleCategories ?? messaging.Category.sosCategories.toSet();
 
     return items
         .where(
@@ -2256,7 +2272,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const PopupMenuDivider(height: 8),
-        ...messaging.Category.values.map(
+        ...messaging.Category.sosCategories.map(
           (category) => PopupMenuItem<Object>(
             value: category,
             child: _MapLegendChoice(
@@ -2270,7 +2286,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   label: _markerLabelForCategory(category),
                 ),
               ),
-              label: _shortLabelForCategory(category),
+              label: category.label,
             ),
           ),
         ),
@@ -2343,7 +2359,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   bool get _allMapMarkersSelected {
-    return _visibleMapCategories.length == messaging.Category.values.length &&
+    return _visibleMapCategories.length ==
+            messaging.Category.sosCategories.length &&
         _showMapPeers &&
         _showMapLocation;
   }
@@ -2359,7 +2376,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       if (value == _mapFilterAllMarkers) {
         _visibleMapCategories
           ..clear()
-          ..addAll(messaging.Category.values);
+          ..addAll(messaging.Category.sosCategories);
         _showMapPeers = true;
         _showMapLocation = true;
         return;
@@ -3263,8 +3280,6 @@ class _MapLegendChoice extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -3500,39 +3515,8 @@ class _SosComposerSheet extends StatefulWidget {
 }
 
 class _SosComposerSheetState extends State<_SosComposerSheet> {
-  static const _categories = [
-    (
-      icon: Icons.accessibility_new,
-      label: 'Rescue',
-      category: messaging.Category.rescue,
-    ),
-    (icon: Icons.restaurant, label: 'Food', category: messaging.Category.food),
-    (icon: Icons.opacity, label: 'Water', category: messaging.Category.water),
-    (
-      icon: Icons.local_hospital,
-      label: 'Medical',
-      category: messaging.Category.medical,
-    ),
-    (icon: Icons.home, label: 'Shelter', category: messaging.Category.shelter),
-    (
-      icon: Icons.directions_bus,
-      label: 'Transport',
-      category: messaging.Category.transport,
-    ),
-    (
-      icon: Icons.info,
-      label: 'Information',
-      category: messaging.Category.information,
-    ),
-    (
-      icon: Icons.more_horiz,
-      label: 'Other',
-      category: messaging.Category.other,
-    ),
-  ];
-
   late final TextEditingController _messageController;
-  int _selectedCategory = 0;
+  messaging.Category _selectedCategory = messaging.Category.medical;
   TrustedDevice? _selectedRecipient;
   bool _updatingLocation = false;
   bool _sending = false;
@@ -3613,7 +3597,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Alert nearby peers about your situation',
+                          'Request urgent assistance',
                           style: TextStyle(
                             fontSize: 13,
                             color: Color(0xFF737373),
@@ -3626,7 +3610,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
               ),
               const SizedBox(height: 14),
               const Text(
-                'Message',
+                'Emergency details',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -3640,7 +3624,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                 minLines: 3,
                 maxLines: 3,
                 decoration: InputDecoration(
-                  hintText: 'Describe your situation...',
+                  hintText: 'What happened? Add a nearby landmark if known.',
                   counterText: '',
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -3673,7 +3657,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Category',
+                'SOS category',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -3681,57 +3665,12 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                 ),
               ),
               const SizedBox(height: 8),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _categories.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 4,
-                  mainAxisSpacing: 10,
-                  crossAxisSpacing: 10,
-                  childAspectRatio: 1.35,
-                ),
-                itemBuilder: (context, index) {
-                  final isSelected = _selectedCategory == index;
-                  final item = _categories[index];
-                  return InkWell(
-                    onTap: () => setState(() => _selectedCategory = index),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? const Color(0xFFFFF5F5)
-                            : const Color(0xFFF0EEEF),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isSelected
-                              ? const Color(0xFFE83C3D)
-                              : Colors.transparent,
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            item.icon,
-                            color: const Color(0xFFE83C3D),
-                            size: 20,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            item.label,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Color(0xFFDD3D3D),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
+              SosCategoryPicker(
+                selected: _selectedCategory,
+                onChanged: _sending
+                    ? null
+                    : (category) =>
+                          setState(() => _selectedCategory = category),
               ),
               const SizedBox(height: 10),
               const Text(
@@ -3942,7 +3881,9 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                               if (body.isEmpty) {
                                 messenger.showSnackBar(
                                   const SnackBar(
-                                    content: Text('Message cannot be empty.'),
+                                    content: Text(
+                                      'Describe the emergency before sending.',
+                                    ),
                                   ),
                                 );
                                 return;
@@ -3952,7 +3893,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                               try {
                                 await widget.onSend(
                                   body,
-                                  _categories[_selectedCategory].category,
+                                  _selectedCategory,
                                   _selectedRecipient,
                                 );
                                 if (mounted) {

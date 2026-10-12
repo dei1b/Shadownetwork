@@ -1,8 +1,8 @@
 # Shadow Network Current App State
 
-Updated: 2026-08-15
+Updated: 2026-10-12
 
-Repository: `C:\Users\Dave\Desktop\Shadownetwork\shadownetwork`
+Repository: `C:\Users\Dave\Desktop\Shadownetwork`
 
 ## Purpose of This Document
 
@@ -10,11 +10,12 @@ This file is the current technical snapshot of the Shadow Network capstone proje
 
 ## Executive Summary
 
-Shadow Network is an Android-first Flutter application for offline disaster messaging. It allows devices to create SOS and chat messages, save them locally, discover nearby Shadow Network devices, and relay queued payloads through Bluetooth Low Energy (BLE) or Wi-Fi Direct using Store-Carry-Forward (SCF).
+Shadow Network is an Android-first Flutter application for offline barangay SOS and complaint messaging. It allows devices to create SOS and chat messages, save them locally, discover nearby Shadow Network devices, and relay queued payloads through Bluetooth Low Energy (BLE) or Wi-Fi Direct using Store-Carry-Forward (SCF).
 
 The project is beyond a static UI prototype. The repository currently includes:
 
 - SQLite-backed SOS, chat, peer, conversation, and SCF persistence.
+- Barangay-focused SOS categories for medical, fire/electrical, safety, flood/rescue, public hazards, and other urgent assistance.
 - Structured, hashed, and versioned SOS and chat payloads.
 - SCF deduplication, TTL expiry, hop counting, retry state, and per-peer delivery tracking.
 - Android BLE discovery, app-peer identity exchange, BLE payload transfer, Wi-Fi Direct discovery, and TCP transfer.
@@ -114,7 +115,7 @@ Current boundary: the first valid signed bundle pins its administrator Ed25519 p
 
 Database file: `shadownetwork.db`
 
-Current database version: `8`
+Current database version: `9`
 
 ### Tables
 

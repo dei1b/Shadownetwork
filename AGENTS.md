@@ -1,10 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-The Flutter app lives in `shadownetwork/`; run project commands from that directory. App code is under `lib/`, with shared app setup in `lib/app`, reusable tokens/widgets in `lib/core`, and feature modules in `lib/features/<feature>/data`, `domain`, and `presentation`. Tests live in `test/`, with fixtures and helpers in `test/support/`. Static assets are in `assets/`, including auth/home images and offline Panabo map fonts, sprites, styles, and vector tiles. Platform-specific code is in `android/`, `ios/`, `linux/`, `macos/`, `web/`, and `windows/`; Android is the capstone delivery target.
+The Flutter app lives at the repository root; run project commands there. App code is under `lib/`, with shared app setup in `lib/app`, reusable tokens/widgets in `lib/core`, and feature modules in `lib/features/<feature>/data`, `domain`, and `presentation`. Tests live in `test/`, with fixtures and helpers in `test/support/`. Static assets are in `assets/`, including auth/home images and offline Panabo map fonts, sprites, styles, and vector tiles. Platform-specific code is in `android/`, `ios/`, `linux/`, `macos/`, `web/`, and `windows/`; Android is the capstone delivery target.
 
 ## Build, Test, and Development Commands
-From `shadownetwork/`:
+From the repository root:
 
 ```sh
 flutter pub get
