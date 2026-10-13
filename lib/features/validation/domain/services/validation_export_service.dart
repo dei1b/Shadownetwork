@@ -34,6 +34,7 @@ class ValidationExportService {
         'success',
         'value',
         'detail',
+        'transfer_id',
       ],
       ...data.events.map(_eventRow),
       ...data.discoveryAttempts.map(
@@ -51,6 +52,7 @@ class ValidationExportService {
           attempt.success,
           attempt.discoveredCount,
           attempt.error,
+          null,
         ],
       ),
       ...data.batterySamples.map(
@@ -68,6 +70,7 @@ class ValidationExportService {
           !sample.isCharging,
           sample.batteryPercent,
           '${sample.runtimeMode}; charging=${sample.isCharging}',
+          null,
         ],
       ),
     ];
@@ -88,6 +91,7 @@ class ValidationExportService {
     event.error == null,
     event.fallbackUsed ? 1 : 0,
     event.error ?? (event.metadata == null ? null : jsonEncode(event.metadata)),
+    event.transferId,
   ];
 
   String _csvCell(Object? value) {

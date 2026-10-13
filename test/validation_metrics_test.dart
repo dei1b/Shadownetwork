@@ -46,6 +46,84 @@ void main() {
     expect(active?.deviceId, 'responder-1');
   });
 
+  test('transfer ID and ACK event survive SQLite reopen and export', () async {
+    final harness = await DatabaseMigrationTestHarness.create();
+    addTearDown(harness.dispose);
+    final db = await harness.openCurrentDatabase();
+    final metrics = SqliteValidationMetricsRepository(database: db);
+    final session = await metrics.startSession(
+      name: 'ACK persistence',
+      environment: 'Mock',
+      deviceId: 'sender',
+      deviceRole: 'civilian',
+    );
+    await metrics.captureEvent(
+      type: ValidationEventType.envelopeAcknowledged,
+      transferId: 'persisted-transfer',
+      messageHash: 'hash',
+      peerId: 'receiver',
+      transport: 'bluetooth',
+      latencyMs: 321,
+    );
+    await db.close();
+    final reopened = await harness.openCurrentDatabase();
+    addTearDown(reopened.close);
+    final data = await SqliteValidationMetricsRepository(
+      database: reopened,
+    ).getSessionData(session.id);
+    const export = ValidationExportService();
+    final decoded = export.decodeJson(export.encodeJson(data));
+    expect(decoded.events.single.transferId, 'persisted-transfer');
+    expect(
+      decoded.events.single.type,
+      ValidationEventType.envelopeAcknowledged,
+    );
+    expect(decoded.events.single.latencyMs, 321);
+    expect(export.encodeCsv(data), contains('transfer_id'));
+    expect(export.encodeCsv(data), contains('persisted-transfer'));
+    final legacy = data.events.single.toJson()..remove('transfer_id');
+    expect(ValidationMessageEvent.fromJson(legacy).transferId, isNull);
+  });
+
+  test('success and latency exclude legacy writes and deduplicate ACK IDs', () {
+    final source = _completeSessionData();
+    ValidationSessionData evidence(List<ValidationMessageEvent> events) =>
+        ValidationSessionData(
+          session: source.session,
+          events: events,
+          discoveryAttempts: const [],
+          batterySamples: const [],
+          exportRecords: const [],
+        );
+    const calculator = ValidationMetricsCalculator();
+    final offer = source.events[1];
+    final write = source.events[2];
+    final ack = source.events[3];
+    final legacy = calculator.calculate(evidence([write]));
+    expect(legacy.deliverySuccessRate, isNull);
+    expect(legacy.averageNodeLatencyMs, isNull);
+    final writeOnly = calculator.calculate(evidence([offer, write]));
+    expect(writeOnly.deliverySuccessRate, 0);
+    expect(writeOnly.averageNodeLatencyMs, isNull);
+    final duplicate = ValidationMessageEvent.fromJson(
+      ack.toJson()..['id'] = 'duplicate-ack',
+    );
+    final summary = calculator.calculate(
+      evidence([offer, offer, ack, duplicate]),
+    );
+    expect(summary.deliverySuccessRate, 1);
+    expect(summary.averageNodeLatencyMs, 200);
+    for (final field in ['peer_id', 'message_hash']) {
+      final mismatch = ValidationMessageEvent.fromJson(
+        ack.toJson()..[field] = 'wrong',
+      );
+      expect(
+        calculator.calculate(evidence([offer, mismatch])).deliverySuccessRate,
+        0,
+      );
+    }
+  });
+
   test('event IDs are duplicate-safe and owned by their session', () async {
     final database = await LocalMessagingDatabase.open(
       databasePath: inMemoryDatabasePath,
@@ -82,7 +160,7 @@ void main() {
     final data = _completeSessionData();
     final summary = const ValidationMetricsCalculator().calculate(data);
 
-    expect(summary.telemetryRecordCount, 8);
+    expect(summary.telemetryRecordCount, 9);
     expect(summary.deliverySuccessRate, 1);
     expect(summary.discoverySuccessRate, 0.5);
     expect(summary.averageNodeLatencyMs, 200);
@@ -131,7 +209,7 @@ void main() {
 
     final summary = const ValidationMetricsCalculator().calculate(data);
 
-    expect(summary.deliverySuccessRate, 1);
+    expect(summary.deliverySuccessRate, isNull);
     expect(summary.averagePropagationMs, 5000);
   });
 
@@ -148,6 +226,7 @@ void main() {
       'queued',
       'offered',
       'sent',
+      'acknowledged',
       'delivered',
     ]);
     expect(decoded.discoveryAttempts, hasLength(2));
@@ -172,7 +251,7 @@ void main() {
       await repository.importSessionData(data);
       final imported = await repository.getSessionData(data.session.id);
 
-      expect(imported.events, hasLength(4));
+      expect(imported.events, hasLength(5));
       expect(imported.discoveryAttempts, hasLength(2));
       expect(imported.batterySamples, hasLength(2));
     },
@@ -208,7 +287,15 @@ void main() {
       transport: 'mock',
     );
     final endpoint = network.registerPeer(sender);
-    network.registerPeer(receiver);
+    final receivingEndpoint = network.registerPeer(receiver);
+    final receiverHarness = await DatabaseMigrationTestHarness.create();
+    addTearDown(receiverHarness.dispose);
+    final receiverDatabase = await receiverHarness.openCurrentDatabase();
+    addTearDown(receiverDatabase.close);
+    final receivingRelay = ScfRelayService(
+      scfService: ScfService(database: receiverDatabase),
+      transport: receivingEndpoint,
+    );
     final scf = ScfService(database: database);
     await scf.storeMessage(
       SosMessage(
@@ -227,16 +314,22 @@ void main() {
       metricsRecorder: metrics,
     );
 
-    final result = await relay.relayToPeer(
+    final sending = relay.relayToPeer(
       receiver,
       now: DateTime.utc(2026, 8, 15, 8, 0, 1),
     );
+    await receivingEndpoint.relayEvents.first;
+    await receivingRelay.ingestIncoming(
+      now: DateTime.utc(2026, 8, 15, 8, 0, 2),
+    );
+    final result = await sending;
     final data = await metrics.getSessionData(session.id);
 
     expect(result.sentCount, 1);
     expect(data.events.map((event) => event.type), [
       ValidationEventType.envelopeOffered,
       ValidationEventType.envelopeSent,
+      ValidationEventType.envelopeAcknowledged,
     ]);
     expect(data.events.last.transport, 'mock');
     expect(data.events.last.latencyMs, isNotNull);
@@ -269,6 +362,7 @@ ValidationSessionData _completeSessionData() {
       ),
       ValidationMessageEvent(
         id: 'offered',
+        transferId: 'attempt-1',
         sessionId: sessionId,
         type: ValidationEventType.envelopeOffered,
         occurredAt: startedAt.add(const Duration(seconds: 1)),
@@ -278,6 +372,7 @@ ValidationSessionData _completeSessionData() {
       ),
       ValidationMessageEvent(
         id: 'sent',
+        transferId: 'attempt-1',
         sessionId: sessionId,
         type: ValidationEventType.envelopeSent,
         occurredAt: startedAt.add(const Duration(seconds: 2)),
@@ -287,6 +382,17 @@ ValidationSessionData _completeSessionData() {
         hopCount: 1,
         latencyMs: 200,
         fallbackUsed: true,
+      ),
+      ValidationMessageEvent(
+        id: 'acknowledged',
+        transferId: 'attempt-1',
+        sessionId: sessionId,
+        type: ValidationEventType.envelopeAcknowledged,
+        occurredAt: startedAt.add(const Duration(milliseconds: 2200)),
+        messageHash: 'hash-1',
+        peerId: 'relay-1',
+        transport: 'bluetooth',
+        latencyMs: 200,
       ),
       ValidationMessageEvent(
         id: 'delivered',

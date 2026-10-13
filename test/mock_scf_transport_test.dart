@@ -89,13 +89,15 @@ void main() {
     await scfA.storeMessage(message, receivedAt: now);
 
     final peersFromA = await relayA.discoverPeers();
-    final result = await relayA.relayToPeer(
+    final sending = relayA.relayToPeer(
       peersFromA.single,
       now: now.add(const Duration(minutes: 1)),
     );
+    await transportB.relayEvents.first;
     final ingestedByB = await relayB.ingestIncoming(
       now: now.add(const Duration(minutes: 2)),
     );
+    final result = await sending;
     final storedAtB = await scfB.getStoredEnvelopes(
       now: now.add(const Duration(minutes: 3)),
     );
@@ -149,13 +151,23 @@ void main() {
     final message = _message(sender: nodeA);
 
     await scfA.storeMessage(message, receivedAt: now);
-    await relayA.relayToPeer(nodeB, now: now.add(const Duration(minutes: 1)));
+    final sendingA = relayA.relayToPeer(
+      nodeB,
+      now: now.add(const Duration(minutes: 1)),
+    );
+    await transportB.relayEvents.first;
     await relayB.ingestIncoming(now: now.add(const Duration(minutes: 2)));
-    await relayB.relayToPeer(nodeA, now: now.add(const Duration(minutes: 3)));
+    expect((await sendingA).sentCount, 1);
+    final sendingB = relayB.relayToPeer(
+      nodeA,
+      now: now.add(const Duration(minutes: 3)),
+    );
+    await transportA.relayEvents.first;
 
     final ingestedByA = await relayA.ingestIncoming(
       now: now.add(const Duration(minutes: 4)),
     );
+    expect((await sendingB).sentCount, 1);
     final storedAtA = await scfA.getStoredEnvelopes(
       now: now.add(const Duration(minutes: 5)),
     );

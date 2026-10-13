@@ -1,8 +1,8 @@
 # Shadow Network Protocol Compatibility Policy
 
-Status: Updated for barangay SOS categories
+Status: Updated for acknowledged hop transfers
 
-Updated: 2026-10-12
+Updated: 2026-10-14
 
 ## Purpose
 
@@ -22,11 +22,11 @@ This policy defines how Shadow Network devices handle database versions, transpo
 
 | Layer | Current writer | Supported readers | Unknown future version |
 |---|---:|---|---|
-| SQLite database | 9 | Sequential migrations 1 through 9 | App must not open without a defined migration |
-| Android transport handshake | 1 | Exact protocol version 1 | Reject as incompatible peer |
+| SQLite database | 11 | Sequential migrations 1 through 11 | App must not open without a defined migration |
+| Android transport handshake/frame | 2 | Exact protocol version 2 | Reject as incompatible peer |
 | SOS payload | 4 | 1, 2, 3, 4 | Reject visible parsing; do not guess fields |
 | Chat payload | 2 | 1, 2 | Reject visible parsing; do not guess fields |
-| Trust bundle | 1 | 1 | Reject import and keep last valid bundle |
+| Trust bundle | 2 | Signed schema 2 | Reject import and keep last valid bundle |
 | Targeted message security | `x25519-hkdf-sha256-aes-256-gcm-v1` | SOS v4 and chat v2 | Reject unknown algorithm, key, or authentication tag |
 | Legacy targeted SOS security | `sn-sha256-stream-v1` | SOS v3 read compatibility only | Never use for new outgoing messages |
 
@@ -51,15 +51,20 @@ This policy defines how Shadow Network devices handle database versions, transpo
 
 ### Chat
 
-- Schema 1 is the only supported chat schema.
-- Chat is recipient-targeted but currently plaintext inside its envelope.
+- Schema 2 is the current encrypted targeted-chat writer; schema 1 remains readable.
 - A non-recipient stores and relays the envelope without adding it to a visible conversation.
 
 ### Android transport
 
-- BLE identity, Wi-Fi Direct DNS-SD, and socket hello messages advertise transport protocol version 1.
-- Version 1 currently requires an exact protocol match.
+- BLE identity, Wi-Fi Direct DNS-SD, socket hello, and envelope frames use transport protocol version 2.
+- Version 2 requires an exact protocol match. Update all test phones together; protocol 1 cannot participate in acknowledged transfers.
 - An app ID or protocol mismatch must not appear as a valid nearby Shadow Network peer.
+- Envelope frames add `transferId` and `sourcePeerId`; each retry uses a new ID without changing message hash, TTL, or the originating payload schema.
+- Flutter acknowledges SQLite envelope acceptance with `envelope_ack`, matching `transferId`, `messageHash`, `receiverPeerId`, and `status` (`stored` or `rejected`). Active duplicate envelopes can be acknowledged again; expired, hash-invalid, revoked, or storage-failed envelopes cannot receive `stored`.
+- Wi-Fi Direct uses the same socket; BLE uses readable GATT ACK UUID `9f7a7773-1b31-4f1d-8f99-6d7a9f50a101` on the same connection (200 ms polling). A write alone is not success.
+- The storage-ACK deadline is 10 seconds after transport write completion, separately from connection/write deadlines. Measured monotonic latency starts before actual transport setup and ends at the matching stored ACK. For fallback, it measures the successful BLE attempt, excluding the failed Wi-Fi setup/write.
+- ACKs confirm next-hop storage, not intended-recipient decryption, visible delivery, or rescuer resolution. ACKs are not signed; matching radio-session/peer/hash/ID context is correlation, not cryptographic authentication.
+- Schema 10 preserves first SOS receipt metadata; schema 11 adds nullable indexed `message_events.transfer_id`. Existing rows migrate in place without clearing data. Legacy validation exports remain readable; write-only latency and missing-ID events do not establish acknowledged-hop metrics.
 
 ## Phase 1 Rollout Rules
 
@@ -75,17 +80,17 @@ The secure payload rollout was completed in this order:
 
 There must be no writer switch before recipients have the required reader and key material.
 
-## Planned Version Allocation
+## Implemented Version Allocation
 
-| Contract | Planned next version | Purpose |
+| Contract | Current version | Purpose |
 |---|---:|---|
-| SQLite database | 7 | Trusted device, public-key, and trust-bundle metadata |
+| SQLite database | 11 | Trust, validation sessions, SOS receipts (10), and indexed transfer events (11) |
 | SOS payload | 4 | Standard recipient encryption and explicit security versioning |
 | Chat payload | 2 | Standard recipient encryption |
 | Trust bundle | 2 | Bundle version, public keys, issuer, and signature |
-| Transport protocol | Remains 1 unless framing changes | Payload security alone does not require a transport bump |
+| Transport protocol | 2 | Per-attempt identity and receiver-storage ACK framing |
 
-Version numbers are reservations for planning. If implementation requirements change, update this document before merging code.
+Transport 2 is independent of the unchanged targeted-message encryption suite.
 
 ## Failure Handling
 

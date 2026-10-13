@@ -1,3 +1,6 @@
+import 'dart:math';
+
+import '../../domain/entities/envelope_transfer_result.dart';
 import '../../domain/entities/peer.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/scf_peer_status.dart';
@@ -53,49 +56,96 @@ class ScfRelayService {
     final storedEnvelopes = <ScfEnvelope>[];
 
     for (final envelope in envelopes) {
-      final messageCreatedAt = RelayPayloadCodec.createdAt(
-        envelope.payloadJson,
-      );
-      await metricsRecorder?.captureEvent(
-        type: ValidationEventType.envelopeReceived,
-        occurredAt: now,
-        messageHash: envelope.messageHash,
-        payloadType: envelope.payloadType,
-        hopCount: envelope.hopCount,
-        metadata: {
-          if (messageCreatedAt != null)
-            'message_created_at': messageCreatedAt.toIso8601String(),
-        },
-      );
-      final stored = await _scfService.storeEnvelope(envelope, now: now);
-      if (stored) {
-        final resolver = originTrustResolver;
-        if (resolver != null) {
-          final trustStatus = await resolver(envelope.payloadJson);
-          await _scfService.updateOriginTrustStatus(
-            messageHash: envelope.messageHash,
-            status: trustStatus,
-          );
-          if (trustStatus == DeviceTrustStatus.revoked) {
-            await metricsRecorder?.captureEvent(
-              type: ValidationEventType.envelopeRejected,
-              occurredAt: now,
-              messageHash: envelope.messageHash,
-              payloadType: envelope.payloadType,
-              hopCount: envelope.hopCount,
-              error: 'Origin device is revoked; retained in quarantine.',
-            );
-          }
-        }
-        storedEnvelopes.add(envelope);
-      } else {
+      var accepted = false;
+      try {
+        final messageCreatedAt = RelayPayloadCodec.createdAt(
+          envelope.payloadJson,
+        );
         await metricsRecorder?.captureEvent(
-          type: ValidationEventType.envelopeRejected,
+          type: ValidationEventType.envelopeReceived,
           occurredAt: now,
           messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
+          peerId: envelope.receivedFromPeerId,
+          transport: envelope.receivedTransport,
           payloadType: envelope.payloadType,
           hopCount: envelope.hopCount,
-          error: 'Duplicate or expired SCF envelope.',
+          metadata: {
+            if (messageCreatedAt != null)
+              'message_created_at': messageCreatedAt.toIso8601String(),
+          },
+        );
+        final stored = await _scfService.storeEnvelope(envelope, now: now);
+        final activeDuplicate =
+            !stored &&
+            !envelope.isExpired((now ?? DateTime.now()).toUtc()) &&
+            await _scfService.containsActiveEnvelope(
+              envelope.messageHash,
+              now: now,
+            );
+        if (stored || activeDuplicate) {
+          accepted = true;
+          final resolver = originTrustResolver;
+          if (resolver != null) {
+            final trustStatus = await resolver(envelope.payloadJson);
+            await _scfService.updateOriginTrustStatus(
+              messageHash: envelope.messageHash,
+              status: trustStatus,
+            );
+            if (trustStatus == DeviceTrustStatus.revoked) {
+              accepted = false;
+              await metricsRecorder?.captureEvent(
+                type: ValidationEventType.envelopeRejected,
+                occurredAt: now,
+                messageHash: envelope.messageHash,
+                transferId: envelope.transferId,
+                payloadType: envelope.payloadType,
+                hopCount: envelope.hopCount,
+                error: 'Origin device is revoked; retained in quarantine.',
+              );
+            }
+          }
+          // Quarantined records still need to reach the runtime's local view.
+          if (stored) storedEnvelopes.add(envelope);
+        } else {
+          await metricsRecorder?.captureEvent(
+            type: ValidationEventType.envelopeRejected,
+            occurredAt: now,
+            messageHash: envelope.messageHash,
+            transferId: envelope.transferId,
+            payloadType: envelope.payloadType,
+            hopCount: envelope.hopCount,
+            error: 'Expired SCF envelope.',
+          );
+        }
+      } catch (error) {
+        accepted = false;
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeRejected,
+          messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
+          peerId: envelope.receivedFromPeerId,
+          transport: envelope.receivedTransport,
+          error: error.toString(),
+          metadata: const {'phase': 'receive'},
+        );
+      }
+      // ACK delivery failure must not discard an already-persisted receipt.
+      // The sender may retry; an active duplicate will be acknowledged again.
+      try {
+        await _transport.acknowledgeEnvelope(
+          envelope: envelope,
+          accepted: accepted,
+        );
+      } catch (error) {
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeRejected,
+          messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
+          peerId: envelope.receivedFromPeerId,
+          transport: envelope.receivedTransport,
+          error: error.toString(),
+          metadata: const {'phase': 'ack_send'},
         );
       }
     }
@@ -119,48 +169,78 @@ class ScfRelayService {
     String? lastError;
     final sentMessageHashes = <String>[];
 
-    for (final envelope in outbound) {
+    for (final queuedEnvelope in outbound) {
+      // A retry of the same SOS is a new attempt, not a new logical message.
+      final envelope = queuedEnvelope.copyWith(transferId: _newTransferId());
       await metricsRecorder?.captureEvent(
         type: ValidationEventType.envelopeOffered,
         occurredAt: now,
         messageHash: envelope.messageHash,
+        transferId: envelope.transferId,
         payloadType: envelope.payloadType,
         peerId: peer.id,
         transport: peer.transport,
         hopCount: envelope.hopCount,
       );
       final stopwatch = Stopwatch()..start();
+      var sentRecorded = false;
       try {
         final transfer = await _transport.sendEnvelope(
           peer: peer,
           envelope: envelope,
         );
         stopwatch.stop();
+        if (transfer.transferId != envelope.transferId ||
+            !transfer.acknowledged ||
+            transfer.latencyMs < 0) {
+          throw EnvelopeTransferException(
+            transferId: envelope.transferId!,
+            message: 'Transport did not confirm storage for this transfer.',
+            code: 'invalid_ack',
+            transport: transfer.transport,
+            sentAt: transfer.sentAt,
+            latencyMs: stopwatch.elapsedMilliseconds,
+          );
+        }
         await _scfService.updatePeerStatus(
           messageHash: envelope.messageHash,
           peerId: peer.id,
           status: ScfPeerStatus.sent,
-          updatedAt: now,
+          updatedAt: transfer.acknowledgedAt,
         );
         sentCount++;
         sentMessageHashes.add(envelope.messageHash);
         await metricsRecorder?.captureEvent(
           type: ValidationEventType.envelopeSent,
-          occurredAt: now,
+          occurredAt: transfer.sentAt,
           messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
           payloadType: envelope.payloadType,
           peerId: peer.id,
           transport: transfer.transport,
           hopCount: envelope.hopCount,
           fallbackUsed: transfer.fallbackUsed,
-          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+        sentRecorded = true;
+        await metricsRecorder?.captureEvent(
+          type: ValidationEventType.envelopeAcknowledged,
+          occurredAt: transfer.acknowledgedAt,
+          messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
+          payloadType: envelope.payloadType,
+          peerId: peer.id,
+          transport: transfer.transport,
+          hopCount: envelope.hopCount,
+          fallbackUsed: transfer.fallbackUsed,
+          latencyMs: transfer.latencyMs,
         );
         if (RelayPayloadCodec.senderPeerId(envelope.payloadJson) !=
             _transport.localPeerId) {
           await metricsRecorder?.captureEvent(
             type: ValidationEventType.envelopeRelayed,
-            occurredAt: now,
+            occurredAt: transfer.acknowledgedAt,
             messageHash: envelope.messageHash,
+            transferId: envelope.transferId,
             payloadType: envelope.payloadType,
             peerId: peer.id,
             transport: transfer.transport,
@@ -171,8 +251,9 @@ class ScfRelayService {
         if (transfer.fallbackUsed) {
           await metricsRecorder?.captureEvent(
             type: ValidationEventType.transportFallback,
-            occurredAt: now,
+            occurredAt: transfer.acknowledgedAt,
             messageHash: envelope.messageHash,
+            transferId: envelope.transferId,
             payloadType: envelope.payloadType,
             peerId: peer.id,
             transport: transfer.transport,
@@ -183,24 +264,41 @@ class ScfRelayService {
         stopwatch.stop();
         lastError = error.toString();
         failedCount++;
+        final failure = error is EnvelopeTransferException ? error : null;
+        if (!sentRecorded && failure?.sentAt != null) {
+          await metricsRecorder?.captureEvent(
+            type: ValidationEventType.envelopeSent,
+            occurredAt: failure!.sentAt,
+            messageHash: envelope.messageHash,
+            transferId: envelope.transferId,
+            payloadType: envelope.payloadType,
+            peerId: peer.id,
+            transport: failure.transport ?? peer.transport,
+            hopCount: envelope.hopCount,
+            fallbackUsed: failure.fallbackUsed,
+          );
+        }
         await _scfService.updatePeerStatus(
           messageHash: envelope.messageHash,
           peerId: peer.id,
           status: ScfPeerStatus.failed,
-          updatedAt: now,
+          updatedAt: DateTime.now().toUtc(),
           lastError: lastError,
         );
         await metricsRecorder?.captureEvent(
           type: ValidationEventType.envelopeRejected,
-          occurredAt: now,
           messageHash: envelope.messageHash,
+          transferId: envelope.transferId,
           payloadType: envelope.payloadType,
           peerId: peer.id,
-          transport: peer.transport,
+          transport: failure?.transport ?? peer.transport,
           hopCount: envelope.hopCount,
-          latencyMs: stopwatch.elapsedMilliseconds,
+          latencyMs: failure?.latencyMs ?? stopwatch.elapsedMilliseconds,
           error: lastError,
-          metadata: const {'phase': 'send'},
+          metadata: {
+            'phase': 'send',
+            'failure_code': failure?.code ?? 'transport_failed',
+          },
         );
       }
     }
@@ -212,6 +310,14 @@ class ScfRelayService {
       sentMessageHashes: sentMessageHashes,
       lastError: lastError,
     );
+  }
+
+  static String _newTransferId() {
+    final random = Random.secure();
+    return List.generate(
+      16,
+      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
   }
 
   Future<List<ScfRelayResult>> relayToDiscoveredPeers({

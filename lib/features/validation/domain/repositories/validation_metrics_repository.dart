@@ -26,6 +26,7 @@ abstract interface class ValidationMetricsRepository {
     required ValidationEventType type,
     DateTime? occurredAt,
     String? messageHash,
+    String? transferId,
     String? payloadType,
     String? peerId,
     String? transport,

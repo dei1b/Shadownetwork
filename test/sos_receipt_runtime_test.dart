@@ -62,7 +62,6 @@ void main() {
         );
         final identity = await identityStore.loadOrCreate();
         final network = MockScfTransportNetwork();
-        network.registerPeer(relay);
         final transport = network.registerPeer(rescuer);
         final container = ProviderContainer(
           overrides: [

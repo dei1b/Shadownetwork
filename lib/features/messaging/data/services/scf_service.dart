@@ -102,6 +102,23 @@ class ScfService {
     return (await pruneExpiredHashes(now: now)).length;
   }
 
+  Future<bool> containsActiveEnvelope(
+    String messageHash, {
+    DateTime? now,
+  }) async {
+    final rows = await _database.query(
+      LocalMessagingDatabase.scfMessagesTable,
+      columns: ['message_hash'],
+      where: 'message_hash = ? AND expires_at > ?',
+      whereArgs: [
+        messageHash,
+        (now ?? DateTime.now()).toUtc().toIso8601String(),
+      ],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<List<String>> pruneExpiredHashes({DateTime? now}) async {
     final cutoff = (now ?? DateTime.now()).toUtc().toIso8601String();
     return _database.transaction((transaction) async {

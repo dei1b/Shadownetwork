@@ -7,6 +7,12 @@ import '../../domain/entities/envelope_transfer_result.dart';
 import '../../domain/services/scf_transport.dart';
 
 class MockScfTransportNetwork {
+  MockScfTransportNetwork({
+    this.acknowledgementTimeout = const Duration(seconds: 10),
+  });
+
+  final Duration acknowledgementTimeout;
+  final Map<String, _PendingMockTransfer> _pending = {};
   final Map<String, _MockNode> _nodes = {};
   final StreamController<void> _relayEvents =
       StreamController<void>.broadcast();
@@ -71,6 +77,68 @@ class MockScfTransportNetwork {
 
     return node.peer;
   }
+
+  Future<EnvelopeTransferResult> sendAndWait({
+    required String fromPeerId,
+    required String toPeerId,
+    required ScfEnvelope envelope,
+  }) async {
+    final id = envelope.transferId;
+    if (id == null || id.isEmpty || _pending.containsKey(id)) {
+      throw ArgumentError('A unique transferId is required.');
+    }
+    final pending = _PendingMockTransfer(toPeerId, envelope.messageHash);
+    _pending[id] = pending;
+    try {
+      send(fromPeerId: fromPeerId, toPeerId: toPeerId, envelope: envelope);
+      final accepted = await pending.completion.future.timeout(
+        acknowledgementTimeout,
+        onTimeout: () => throw EnvelopeAcknowledgementTimeout(
+          transferId: id,
+          message: 'Peer $toPeerId did not acknowledge storage.',
+          transport: 'mock',
+          sentAt: pending.sentAt,
+          latencyMs: pending.stopwatch.elapsedMilliseconds,
+        ),
+      );
+      if (!accepted) {
+        throw EnvelopeTransferException(
+          transferId: id,
+          message: 'Peer $toPeerId rejected the envelope.',
+          code: 'receiver_rejected',
+          transport: 'mock',
+          sentAt: pending.sentAt,
+          latencyMs: pending.stopwatch.elapsedMilliseconds,
+        );
+      }
+      return EnvelopeTransferResult(
+        transport: 'mock',
+        transferId: id,
+        acknowledged: true,
+        sentAt: pending.sentAt,
+        acknowledgedAt: pending.acknowledgedAt,
+        latencyMs: pending.stopwatch.elapsedMilliseconds,
+      );
+    } finally {
+      pending.stopwatch.stop();
+      _pending.remove(id);
+    }
+  }
+
+  void acknowledge(String receiverPeerId, ScfEnvelope envelope, bool accepted) {
+    final pending = _pending[envelope.transferId];
+    if (pending == null ||
+        pending.completion.isCompleted ||
+        pending.peerId != receiverPeerId ||
+        pending.hash != envelope.messageHash) {
+      return;
+    }
+    pending.stopwatch.stop();
+    pending.acknowledgedAt = DateTime.now().toUtc();
+    pending.completion.complete(accepted);
+  }
+
+  int get pendingTransferCount => _pending.length;
 }
 
 class MockScfTransportEndpoint implements ScfTransport {
@@ -124,18 +192,35 @@ class MockScfTransportEndpoint implements ScfTransport {
     required Peer peer,
     required ScfEnvelope envelope,
   }) async {
-    _network.send(
+    return _network.sendAndWait(
       fromPeerId: localPeerId,
       toPeerId: peer.id,
       envelope: envelope,
     );
-    return const EnvelopeTransferResult(transport: 'mock');
   }
 
   @override
   Future<List<ScfEnvelope>> receiveEnvelopes() async {
     return _network.drainInbox(localPeerId);
   }
+
+  @override
+  Future<void> acknowledgeEnvelope({
+    required ScfEnvelope envelope,
+    bool accepted = true,
+  }) async {
+    _network.acknowledge(localPeerId, envelope, accepted);
+  }
+}
+
+class _PendingMockTransfer {
+  _PendingMockTransfer(this.peerId, this.hash);
+  final String peerId;
+  final String hash;
+  final completion = Completer<bool>();
+  final stopwatch = Stopwatch()..start();
+  final sentAt = DateTime.now().toUtc();
+  DateTime? acknowledgedAt;
 }
 
 class _MockNode {

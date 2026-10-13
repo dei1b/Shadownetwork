@@ -1,6 +1,6 @@
 # Shadow Network Current App State
 
-Updated: 2026-10-12
+Updated: 2026-10-14
 
 Repository: `C:\Users\Dave\Desktop\Shadownetwork`
 
@@ -33,6 +33,7 @@ The project is beyond a static UI prototype. The repository currently includes:
 - Persisted approved, unknown, and revoked device trust states enforced across receiving, feeds, maps, recipient selection, and SCF relay eligibility.
 - Persisted responder validation sessions with real discovery, connection, relay, delivery, transport, runtime, latency, hop, and battery events.
 - Live validation summaries plus JSON and CSV export for manual backup and adviser review.
+- Persisted first SOS receipt metadata and acknowledged hop attempts with monotonic latency, timeout evidence, and unique transfer IDs.
 
 The project should still be treated as a capstone prototype rather than a production emergency system. Its largest remaining risks are sender authentication, secure multi-admin persistence, durable background execution, battery-aware scanning, mobile-to-admin synchronization, and real-device field validation.
 
@@ -115,7 +116,7 @@ Current boundary: the first valid signed bundle pins its administrator Ed25519 p
 
 Database file: `shadownetwork.db`
 
-Current database version: `9`
+Current database version: `11`
 
 ### Tables
 
@@ -139,7 +140,7 @@ Current database version: `9`
 
 - Foreign keys are enabled with `PRAGMA foreign_keys = ON`.
 - Category and peer-type lookup rows are seeded automatically.
-- Database migrations are defined from version 1 through version 8.
+- Database migrations are defined from version 1 through version 11.
 - SOS and chat messages persist routing, moderation, encryption, and sender-trust snapshots.
 - SCF payloads are stored separately from user-facing SOS and chat records.
 - SCF payloads persist origin trust state so revoked-origin envelopes can be retained without being offered for relay.
@@ -167,6 +168,15 @@ Current database version: `9`
 - `discovery_attempts` for timed BLE/Wi-Fi Direct discovery outcomes.
 - `battery_samples` for actual Android battery level, charging state, and runtime mode.
 - `metric_sync_batches` for manual exports now and responder-to-PC synchronization in Phase 4.
+
+### Version 9 through 11 additions
+
+Schema 9 expands the barangay SOS category lookup without rewriting old rows.
+Schema 10 adds nullable SOS `received_at`, `received_from_peer_id`,
+`received_transport`, and `transfer_id`. Runtime acceptance uses the receiving
+phone's UTC clock; duplicates and status updates preserve the first receipt.
+Locally originated/legacy messages keep null receipts. Schema 11 adds nullable
+indexed validation-event `transfer_id`, preserving prior SOS and event records.
 
 ## SOS Payload Contract
 
@@ -451,16 +461,16 @@ The runtime records real events only while a session is active:
 - SOS and chat queued events.
 - Peer discovery attempts, discovered peers, scan duration, result, and transport.
 - Connection attempts, successes, failures, and elapsed time.
-- Envelope offered, sent, received, relayed, delivered, expired, and rejected events.
+- Envelope offered, sent, acknowledged, received, relayed, delivered, expired, and rejected events, with per-attempt transfer IDs.
 - Actual BLE, Wi-Fi Direct, or mock-test transport and whether fallback was used.
 - Foreground/background runtime-mode changes.
 - Android battery percentage and charging state at session start, during the run, lifecycle changes, and completion.
 
 Calculated values use the persisted evidence rather than placeholders:
 
-- Delivery success rate uses successful local send attempts divided by successful plus failed send attempts. A receiver-only session uses uniquely delivered envelopes divided by uniquely received envelopes.
+- Hop delivery success is unique acknowledged IDs divided by unique offered IDs, requiring matching peer/hash evidence. Receiver-only and legacy sessions without offered transfer IDs show unavailable success rather than an inferred percentage.
 - Peer-discovery success rate uses successful scans divided by completed discovery attempts.
-- Node-to-node latency uses the measured duration of the actual transport send operation.
+- Node-to-node latency uses monotonic native timing through the matching receiver-storage ACK. Write-only legacy events are excluded. The actual successful transport's setup/write/ACK interval is included; failed Wi-Fi setup/write is excluded from BLE fallback latency.
 - End-to-end propagation uses local delivery time minus the original payload creation or queue timestamp when that evidence is available.
 - Hop-count distribution uses the hop value recorded on received or delivered envelopes.
 - Transport usage counts BLE and Wi-Fi Direct sends, and fallback rate uses recorded fallback events.
@@ -469,6 +479,21 @@ Calculated values use the persisted evidence rather than placeholders:
 Completed and active sessions can be exported as schema-versioned JSON or summary CSV through the system clipboard. JSON can be imported by the validation repository with duplicate event IDs ignored, enabling safe manual backup and later Phase 4 synchronization work.
 
 Current boundary: metrics remain local to each phone. The PC browser dashboard intentionally displays `No data` because automatic responder-to-PC synchronization, multi-device aggregation, and historical admin charts belong to Phase 4. A local sender success rate is not yet a cryptographic end-to-end acknowledgment from the destination device.
+
+The receipt/metrics roadmap is in `docs/SOS_PERFORMANCE_METRICS_AND_ADMIN_IMPORT_PLAN.md`.
+Its Phase 2 is implemented: Android transport protocol 2 waits for storage ACKs
+over the existing Wi-Fi socket or a readable BLE characteristic. Flutter returns
+`stored` only after SCF SQLite acceptance and hash/TTL/origin-trust checks.
+Revoked messages remain quarantined and return rejection. Active duplicates can
+ACK a retry; every retry has a fresh transfer ID. ACK failure cannot hide a
+stored SOS. Incoming processing runs independently of outgoing ACK waits.
+The ACK timeout is 10 seconds after writing, separately from setup/write
+deadlines; pending transfers are cleaned on success, failure, stop, or connection
+closure. All phones must upgrade together; protocol-1 peers are incompatible.
+This does not change SOS/chat hashes, encryption, TTL, or final-recipient
+delivery semantics. ACKs are correlation evidence, not cryptographic proof.
+The rescuer timing display (Phase 3), portable bundles, and browser import remain
+planned. Existing schema-1 JSON and CSV export include optional transfer IDs.
 
 ## Automated Tests
 
@@ -557,6 +582,13 @@ The phased implementation roadmap for these priorities is maintained in `IMPLEME
 Shadow Network currently provides a working capstone foundation for offline, device-to-device disaster messaging: local relational persistence, structured SOS and chat payloads, Store-Carry-Forward routing, deterministic message hashing, TTL and hop-count processing, same-sender spam detection, offline map support, Android BLE/Wi-Fi Direct transport code, background foreground-service visibility, X25519/HKDF/AES-GCM encrypted targeted messaging, secure on-device private-key storage, Ed25519-signed and versioned trust bundles, persisted device trust, revoked-message quarantine, and Version 8 responder validation sessions backed by real telemetry and exportable metrics. The next stage should focus on sender authentication, reliable background execution, battery optimization, secure admin persistence, authenticated mobile-to-admin synchronization, and controlled three-device field testing.
 
 ## Verification Record
+
+Acknowledged-hop implementation verified on 2026-10-14:
+
+- `flutter analyze`: no issues found.
+- `flutter test`: all 120 tests passed, including eight new ACK/runtime edge-case tests, native-channel ACK contracts, schema-10 upgrade preservation, and transfer-event restart/export checks.
+- `flutter build apk --debug`: produced `build/app/outputs/flutter-apk/app-debug.apk` with the Kotlin protocol-2 transport compiled successfully.
+- No physical-phone ACK, denied-permission, disabled-radio, stop/disconnect, fallback, or multi-hop field measurements were performed in this verification. All participating phones need the protocol-2 build.
 
 Verified on 2026-08-15:
 

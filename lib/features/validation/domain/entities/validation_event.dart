@@ -7,6 +7,7 @@ enum ValidationEventType {
   connectionFailed,
   envelopeOffered,
   envelopeSent,
+  envelopeAcknowledged,
   envelopeReceived,
   envelopeRelayed,
   envelopeDelivered,
@@ -23,6 +24,7 @@ class ValidationMessageEvent {
     required this.type,
     required this.occurredAt,
     this.messageHash,
+    this.transferId,
     this.payloadType,
     this.peerId,
     this.transport,
@@ -38,6 +40,7 @@ class ValidationMessageEvent {
   final ValidationEventType type;
   final DateTime occurredAt;
   final String? messageHash;
+  final String? transferId;
   final String? payloadType;
   final String? peerId;
   final String? transport;
@@ -53,6 +56,7 @@ class ValidationMessageEvent {
     'event_type': type.name,
     'occurred_at': occurredAt.toUtc().toIso8601String(),
     'message_hash': messageHash,
+    'transfer_id': transferId,
     'payload_type': payloadType,
     'peer_id': peerId,
     'transport': transport,
@@ -70,6 +74,7 @@ class ValidationMessageEvent {
       type: ValidationEventType.values.byName(json['event_type']! as String),
       occurredAt: DateTime.parse(json['occurred_at']! as String).toUtc(),
       messageHash: json['message_hash'] as String?,
+      transferId: json['transfer_id'] as String?,
       payloadType: json['payload_type'] as String?,
       peerId: json['peer_id'] as String?,
       transport: json['transport'] as String?,

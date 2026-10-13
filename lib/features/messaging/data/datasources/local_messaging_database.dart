@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 10;
+  static const databaseVersion = 11;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -40,6 +40,7 @@ class LocalMessagingDatabase {
     // Version 9 changes lookup data only; existing SOS rows retain their codes.
     9: seedLookupTables,
     10: _addSosReceiptMetadata,
+    11: _addTransferEventMetadata,
   };
 
   static Future<Database> open({
@@ -515,6 +516,16 @@ class LocalMessagingDatabase {
         'ALTER TABLE $sosMessagesTable ADD COLUMN $column TEXT',
       );
     }
+  }
+
+  static Future<void> _addTransferEventMetadata(Database database) async {
+    await database.execute(
+      'ALTER TABLE $messageEventsTable ADD COLUMN transfer_id TEXT',
+    );
+    await database.execute(
+      'CREATE INDEX idx_message_events_transfer '
+      'ON $messageEventsTable (transfer_id, event_type)',
+    );
   }
 
   static Future<void> seedLookupTables(Database database) async {

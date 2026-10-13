@@ -60,7 +60,8 @@ The project already contains several required pieces:
 - The responder-only `/validation` page starts sessions and exports JSON or CSV to the clipboard.
 - The browser admin dashboard's Validation Metrics card is currently a hard-coded `No data` placeholder.
 
-Important limitation: current node latency stops when `sendEnvelope()` completes. That confirms a transport write, but it does not prove the receiving phone stored the envelope. The transport protocol needs an acknowledgement.
+The original write-only latency limitation is resolved by Phase 2 below:
+`sendEnvelope()` now completes only after the next phone confirms storage.
 
 ## Phase 1: Persist rescuer receipt information
 
@@ -120,6 +121,55 @@ For SOS messages created locally, `receivedAt` should normally remain null unles
 
 ## Phase 2: Add acknowledged hop transfers
 
+Status: implemented. Android transport protocol is now **2** and SQLite schema
+is **11**. Update every sender, relay, and rescuer phone to the same build before
+testing; protocol-1 peers are incompatible. Upgrade in place without clearing
+app data. SOS/chat payload schemas, canonical message hashes, encryption, TTL,
+and first-receipt preservation are unchanged.
+
+Implementation notes for the next agent:
+
+- Each hop attempt, including retries, gets a fresh 128-bit random transfer ID.
+- Flutter sends `stored` only after SCF SQLite persistence, hash/TTL checks,
+  and origin-trust evaluation. Active duplicates can ACK again without another
+  stored record or hop increment. Revoked messages return `rejected` while
+  remaining available to the runtime for quarantine. Storage failures, bad
+  hashes, and expired envelopes never receive `stored`.
+- `stored` confirms next-hop envelope acceptance, not recipient decryption,
+  SOS display, rescuer action, or cryptographic sender authenticity.
+  `envelopeDelivered` remains a separate final-recipient event.
+- Wi-Fi Direct returns ACKs over the existing TCP socket. BLE polls a new
+  readable ACK characteristic on the same GATT connection every 200 ms.
+- The ACK deadline is 10 seconds **after** the write completes. Existing
+  connection/setup/write deadlines remain separate. Native monotonic latency
+  includes setup, writing, and storage ACK for the actual successful transport;
+  a BLE fallback measurement excludes the failed Wi-Fi attempt. Wall-clock
+  timestamps are retained for auditing, not subtracted for node latency.
+- ACK matching requires transfer ID, hash, receiver peer, and actual transport.
+  Pending state is cleared on completion/failure/stop/connection closure.
+  ACK timeout and receiver rejection do not trigger radio fallback; SCF can retry.
+- Incoming processing runs independently of outbound ACK waits to avoid
+  simultaneous-send deadlock. A lost outgoing ACK never hides a stored SOS.
+- Validation events have indexed `transfer_id` storage. JSON/CSV retain it;
+  the existing session-export schema remains 1 with an optional added field.
+  Legacy events without IDs remain readable but cannot establish hop success
+  or ACK-based latency. Portable schema-2 bundles remain Phase 5.
+- Hop success deduplicates IDs and requires matching offered/acknowledged
+  peer/hash evidence. Receiver-only/legacy datasets show unavailable success,
+  not an inferred percentage.
+
+Automated coverage includes simultaneous runtime sends, matching/duplicate/wrong
+ACKs, timeout with completed-write evidence, retry IDs, duplicate storage,
+expired/hash-invalid/revoked/storage-failed reception, lost ACKs, native-channel
+contracts, migration 10-to-11, and event persistence/export after restart.
+Physical BLE/Wi-Fi Direct ACK, radio/permission failures, stop/disconnect,
+fallback, and multi-hop validation still require Android phones. Receipt UI and
+browser admin import are not implemented in this phase; continue with Phase 3.
+
+Verification: `flutter analyze` reported no issues, all **120** Flutter tests
+passed, and `flutter build apk --debug` produced the Android APK with the native
+protocol-2 changes compiled. These checks are not physical-device evidence.
+
 ### Envelope contract
 
 Every individual hop attempt needs a unique `transferId`. A message hash identifies the logical SOS, whereas a transfer ID identifies one attempt to send it to one peer.
@@ -127,6 +177,7 @@ Every individual hop attempt needs a unique `transferId`. A message hash identif
 ```json
 {
   "type": "envelope",
+  "protocolVersion": 2,
   "transferId": "unique-transfer-attempt-id",
   "messageHash": "original-message-hash",
   "sourcePeerId": "phone-a",

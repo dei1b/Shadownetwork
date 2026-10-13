@@ -105,6 +105,8 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   Timer? _ecbDebounceTimer;
   StreamSubscription<void>? _relayEventSubscription;
   bool _syncInFlight = false;
+  Future<int>? _receiveTask;
+  bool _receiveRequested = false;
 
   @override
   RelayRuntimeState build() {
@@ -134,6 +136,13 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     });
     _relayEventSubscription?.cancel();
     _relayEventSubscription = transport.relayEvents.listen((_) {
+      // An outbound ACK wait must not prevent us acknowledging inbound data.
+      unawaited(
+        receiveIncoming().catchError((Object error) {
+          state = state.copyWith(lastError: error.toString());
+          return 0;
+        }),
+      );
       _scheduleEmergencyCellBroadcastSync();
     });
     await syncNow(force: true);
@@ -223,16 +232,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       final transport = ref.read(scfTransportProvider);
       final relayService = await ref.read(scfRelayServiceProvider.future);
       final peerRepository = await ref.read(peerRepositoryProvider.future);
-      final messageRepository = await ref.read(
-        sosMessageRepositoryProvider.future,
-      );
       final chatRepository = await ref.read(chatRepositoryProvider.future);
       final scfService = await ref.read(scfServiceProvider.future);
-      final spamDetectionService = ref.read(spamDetectionServiceProvider);
       final localPeer = await transport.getLocalPeer();
-      final localIdentity = await ref.read(deviceCryptoIdentityProvider.future);
-      final encryptionService = ref.read(messageEncryptionServiceProvider);
-      final trustRepository = await ref.read(trustRepositoryProvider.future);
       final metrics = await ref.read(
         validationMetricsRepositoryProvider.future,
       );
@@ -278,22 +280,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       }
       await _persistPeerSnapshot(peerRepository, discoveredPeers, now);
 
-      final inboundEnvelopes = await relayService.ingestIncomingEnvelopes(
-        now: now,
-      );
-      final receivedCount = await _persistIncomingMessages(
-        messageRepository: messageRepository,
-        chatRepository: chatRepository,
-        scfService: scfService,
-        spamDetectionService: spamDetectionService,
-        peerRepository: peerRepository,
-        localPeer: localPeer,
-        localIdentity: localIdentity,
-        encryptionService: encryptionService,
-        trustRepository: trustRepository,
-        metrics: metrics,
-        envelopes: inboundEnvelopes,
-      );
+      final receivedCount = await receiveIncoming();
 
       var relayedCount = 0;
       for (final peer in discoveredPeers) {
@@ -334,6 +321,41 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     } finally {
       _syncInFlight = false;
     }
+  }
+
+  Future<int> receiveIncoming() {
+    _receiveRequested = true;
+    return _receiveTask ??= _drainIncoming().whenComplete(
+      () => _receiveTask = null,
+    );
+  }
+
+  Future<int> _drainIncoming() async {
+    var count = 0;
+    do {
+      _receiveRequested = false;
+      final relayService = await ref.read(scfRelayServiceProvider.future);
+      final envelopes = await relayService.ingestIncomingEnvelopes();
+      if (envelopes.isEmpty) continue;
+      count += await _persistIncomingMessages(
+        messageRepository: await ref.read(sosMessageRepositoryProvider.future),
+        chatRepository: await ref.read(chatRepositoryProvider.future),
+        scfService: await ref.read(scfServiceProvider.future),
+        spamDetectionService: ref.read(spamDetectionServiceProvider),
+        peerRepository: await ref.read(peerRepositoryProvider.future),
+        localPeer: await ref.read(scfTransportProvider).getLocalPeer(),
+        localIdentity: await ref.read(deviceCryptoIdentityProvider.future),
+        encryptionService: ref.read(messageEncryptionServiceProvider),
+        trustRepository: await ref.read(trustRepositoryProvider.future),
+        metrics: await ref.read(validationMetricsRepositoryProvider.future),
+        envelopes: envelopes,
+      );
+    } while (_receiveRequested);
+    if (count > 0) {
+      state = state.copyWith(lastReceivedCount: count);
+      _invalidateViews();
+    }
+    return count;
   }
 
   Future<void> _persistPeerSnapshot(
@@ -425,6 +447,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             await metrics.captureEvent(
               type: ValidationEventType.envelopeDelivered,
               messageHash: envelope.messageHash,
+              transferId: envelope.transferId,
               payloadType: envelope.payloadType,
               peerId: localPeer.id,
               hopCount: envelope.hopCount,
@@ -492,6 +515,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           await metrics.captureEvent(
             type: ValidationEventType.envelopeDelivered,
             messageHash: envelope.messageHash,
+            transferId: envelope.transferId,
             payloadType: envelope.payloadType,
             peerId: localPeer.id,
             hopCount: envelope.hopCount,

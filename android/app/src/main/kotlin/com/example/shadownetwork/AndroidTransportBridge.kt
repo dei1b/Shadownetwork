@@ -37,6 +37,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import android.os.Build
+import android.os.SystemClock
 import android.os.BatteryManager
 import android.os.ParcelUuid
 import android.provider.Settings
@@ -77,6 +78,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private val bluetoothConnections = ConcurrentHashMap<String, ManagedConnection>()
     private val wifiConnections = ConcurrentHashMap<String, ManagedConnection>()
     private val wifiLock = Any()
+    private val pendingTransfers = ConcurrentHashMap<String, PendingTransfer>()
+    private val incomingTransfers = ConcurrentHashMap<String, IncomingTransfer>()
+    private val bleAckResponses = ConcurrentHashMap<String, String>()
 
     private var advertiser: BluetoothLeAdvertiser? = null
     private var scanner: BluetoothLeScanner? = null
@@ -171,9 +175,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     } catch (throwable: Throwable) {
                         postResult(result) {
                             this.error(
-                                "TRANSPORT_SEND_FAILED",
+                                if (throwable is TransferFailure) throwable.code.uppercase() else "TRANSPORT_SEND_FAILED",
                                 throwable.message ?: "Failed to send envelope.",
-                                null,
+                                (throwable as? TransferFailure)?.details,
                             )
                         }
                     }
@@ -185,12 +189,29 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 }
                 result.success(drained)
             }
+            "acknowledgeEnvelope" -> {
+                val transferId = call.argument<String>("transferId")
+                val hash = call.argument<String>("messageHash")
+                val accepted = call.argument<Boolean>("accepted") ?: true
+                Thread {
+                    try {
+                        acknowledgeEnvelope(transferId, hash, accepted)
+                        postResult(result) { success(null) }
+                    } catch (error: Throwable) {
+                        postResult(result) { this.error("ACK_SEND_FAILED", error.message, null) }
+                    }
+                }.start()
+            }
             else -> result.notImplemented()
         }
     }
 
     fun stop() {
         running.set(false)
+        pendingTransfers.values.forEach { it.fail("transport_stopped", "Relay stopped.") }
+        pendingTransfers.clear()
+        incomingTransfers.clear()
+        bleAckResponses.clear()
         RelayForegroundService.stop(context)
         stopBle()
         stopWifiDirect()
@@ -432,13 +453,21 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     }
                 }
 
+                override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
+                    if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                        bleFrameBuffers.remove(device.address)
+                        bleAckResponses.remove(device.address)
+                        incomingTransfers.entries.removeIf { it.value.bleAddress == device.address }
+                    }
+                }
+
                 override fun onCharacteristicReadRequest(
                     device: BluetoothDevice,
                     requestId: Int,
                     offset: Int,
                     characteristic: BluetoothGattCharacteristic,
                 ) {
-                    if (characteristic.uuid != BLE_IDENTITY_UUID) {
+                    if (characteristic.uuid != BLE_IDENTITY_UUID && characteristic.uuid != BLE_ACK_UUID) {
                         bleGattServer?.sendResponse(
                             device,
                             requestId,
@@ -448,7 +477,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                         )
                         return
                     }
-                    val value = JSONObject().apply {
+                    val value = if (characteristic.uuid == BLE_ACK_UUID) {
+                        (bleAckResponses[device.address] ?: "{}").toByteArray(Charsets.UTF_8)
+                    } else JSONObject().apply {
                         put("appId", APP_ID)
                         put("protocolVersion", PROTOCOL_VERSION)
                         put("peerId", localPeerId)
@@ -487,6 +518,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         ).apply {
             addCharacteristic(envelopeCharacteristic)
             addCharacteristic(identityCharacteristic)
+            addCharacteristic(BluetoothGattCharacteristic(
+                BLE_ACK_UUID,
+                BluetoothGattCharacteristic.PROPERTY_READ,
+                BluetoothGattCharacteristic.PERMISSION_READ,
+            ))
         }
         bleGattServer = server
         server.addService(service)
@@ -556,8 +592,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 }
                 enqueueEnvelope(
                     frame,
-                    receivedFromPeerId = resolvedBlePeerIds[address],
+                    receivedFromPeerId = frame.getString("sourcePeerId"),
                     receivedTransport = TransportKind.BLUETOOTH,
+                    bleAddress = address,
                 )
                 true
             }.getOrDefault(false)
@@ -986,6 +1023,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     }
 
     private fun onConnectionClosed(connection: ManagedConnection) {
+        pendingTransfers.values.filter { it.connection === connection }.forEach {
+            it.fail("connection_closed", "Connection closed before storage acknowledgement.")
+        }
+        incomingTransfers.entries.removeIf { it.value.connection === connection }
         connectionStore(connection.transport).remove(connection.peerId, connection)
         synchronized(discoveredPeers) {
             val existing = discoveredPeers[connection.peerId] ?: return
@@ -1026,8 +1067,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     frame,
                     receivedFromPeerId = connection.peerId,
                     receivedTransport = connection.transport,
+                    connection = connection,
                 )
             }
+            "envelope_ack" -> completeAcknowledgement(frame, connection.peerId, connection.transport)
         }
     }
 
@@ -1035,7 +1078,32 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         frame: JSONObject,
         receivedFromPeerId: String?,
         receivedTransport: String,
+        connection: ManagedConnection? = null,
+        bleAddress: String? = null,
     ) {
+        if (frame.optInt("protocolVersion", -1) != PROTOCOL_VERSION) {
+            throw IOException("Incompatible envelope protocol.")
+        }
+        val transferId = frame.getString("transferId")
+        val hash = frame.getString("messageHash")
+        val source = frame.getString("sourcePeerId")
+        require(transferId.isNotBlank() && source.isNotBlank()) { "Missing transfer identity." }
+        if (connection != null && source != connection.peerId) {
+            throw IOException("Envelope source does not match socket peer.")
+        }
+        if (bleAddress != null) {
+            val resolved = resolvedBlePeerIds[bleAddress]
+            if (resolved != null && resolved != source) throw IOException("BLE source mismatch.")
+            bleAckResponses.remove(bleAddress)
+        }
+        val route = IncomingTransfer(hash, source, connection, bleAddress)
+        val previous = incomingTransfers.putIfAbsent(transferId, route)
+        if (previous != null) {
+            require(previous.hash == hash && previous.sourcePeerId == source) { "Transfer ID collision." }
+            return
+        }
+        // Bound stale inbound routing entries if Flutter never processes them.
+        incomingTransfers.entries.removeIf { SystemClock.elapsedRealtime() - it.value.createdAt > 60_000 }
         synchronized(inbox) {
             inbox.add(
                 mapOf(
@@ -1046,11 +1114,38 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     "expiresAt" to frame.getString("expiresAt"),
                     "receivedFromPeerId" to receivedFromPeerId,
                     "receivedTransport" to receivedTransport,
-                    "transferId" to frame.optString("transferId").ifBlank { null },
+                    "transferId" to transferId,
                 ),
             )
         }
         notifyRelayEvent("envelope_available")
+    }
+
+    private fun acknowledgeEnvelope(transferId: String?, hash: String?, accepted: Boolean) {
+        val id = transferId ?: return
+        val incoming = incomingTransfers[id] ?: return
+        if (incoming.hash != hash) throw IOException("Acknowledgement hash mismatch.")
+        if (!incomingTransfers.remove(id, incoming)) return
+        val ack = JSONObject().apply {
+            put("type", "envelope_ack")
+            put("transferId", transferId)
+            put("messageHash", hash)
+            put("receiverPeerId", localPeerId)
+            put("status", if (accepted) "stored" else "rejected")
+        }
+        incoming.connection?.sendFrame(ack)
+        incoming.bleAddress?.let { bleAckResponses[it] = ack.toString() }
+    }
+
+    private fun completeAcknowledgement(frame: JSONObject, peerId: String, transport: String) {
+        val pending = pendingTransfers[frame.optString("transferId")] ?: return
+        if (pending.peerId != peerId || pending.transport != transport ||
+            frame.optString("receiverPeerId") != peerId ||
+            frame.optString("messageHash") != pending.hash || frame.optString("type") != "envelope_ack") return
+        when (frame.optString("status")) {
+            "stored" -> pending.acknowledge()
+            "rejected" -> pending.fail("receiver_rejected", "Peer rejected the envelope.")
+        }
     }
 
     private fun notifyRelayEvent(type: String) {
@@ -1087,6 +1182,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     ): Map<String, Any?> {
         val peer = findPeer(peerId)
             ?: throw IOException("Peer $peerId is not available for transport.")
+        val transferId = envelope["transferId"] as? String
+            ?: throw IOException("Envelope is missing transferId.")
+        require(transferId.isNotBlank()) { "Empty transferId." }
         val messageHash = envelope["messageHash"] as? String
             ?: throw IOException("Envelope is missing messageHash.")
         val payloadJson = envelope["payloadJson"] as? String
@@ -1100,6 +1198,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
         val envelopeJson = JSONObject().apply {
             put("type", "envelope")
+            put("protocolVersion", PROTOCOL_VERSION)
+            put("transferId", transferId)
+            put("sourcePeerId", localPeerId)
             put("messageHash", messageHash)
             put("payloadJson", payloadJson)
             put("hopCount", hopCount)
@@ -1109,30 +1210,53 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
         val transfer = when (peer.transport) {
             TransportKind.WIFI_DIRECT -> runCatching {
-                ensureWifiConnection(peer).sendFrame(envelopeJson)
-                mapOf(
-                    "transport" to TransportKind.WIFI_DIRECT,
-                    "fallbackUsed" to false,
-                )
+                sendAcknowledged(peer, envelopeJson, TransportKind.WIFI_DIRECT, false)
             }.getOrElse {
-                if (peer.bluetoothAddress.isNullOrBlank()) {
+                // Storage timeout/rejection is not a radio setup failure. Retry
+                // through SCF later, rather than claiming a fallback success.
+                if (peer.bluetoothAddress.isNullOrBlank() ||
+                    (it is TransferFailure && it.code in setOf("ack_timeout", "receiver_rejected", "transport_stopped"))) {
                     throw it
                 }
-                sendBleEnvelope(peer.copy(transport = TransportKind.BLUETOOTH), envelopeJson)
-                mapOf(
-                    "transport" to TransportKind.BLUETOOTH,
-                    "fallbackUsed" to true,
-                )
+                sendAcknowledged(peer.copy(transport = TransportKind.BLUETOOTH), envelopeJson, TransportKind.BLUETOOTH, true)
             }
             else -> {
-                sendBleEnvelope(peer, envelopeJson)
-                mapOf(
-                    "transport" to TransportKind.BLUETOOTH,
-                    "fallbackUsed" to false,
-                )
+                sendAcknowledged(peer, envelopeJson, TransportKind.BLUETOOTH, false)
             }
         }
         return transfer
+    }
+
+    private fun sendAcknowledged(peer: DiscoveredPeer, frame: JSONObject, transport: String, fallback: Boolean): Map<String, Any?> {
+        val id = frame.getString("transferId")
+        val pending = PendingTransfer(peer.id, frame.getString("messageHash"), transport, fallback)
+        if (pendingTransfers.putIfAbsent(id, pending) != null) throw IOException("Transfer ID already pending.")
+        try {
+            if (transport == TransportKind.WIFI_DIRECT) {
+                val connection = ensureWifiConnection(peer)
+                pending.connection = connection
+                pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
+                connection.sendFrame(frame)
+                pending.sentAt = System.currentTimeMillis()
+                awaitStorageAcknowledgement(pending)
+            } else {
+                sendBleEnvelope(peer, frame, pending)
+            }
+            return pending.details() + mapOf("transferId" to id, "acknowledged" to true)
+        } catch (error: Throwable) {
+            if (error is TransferFailure) throw error
+            pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
+            throw TransferFailure("transport_send_failed", error.message ?: "Transfer failed.", pending.details())
+        } finally {
+            pendingTransfers.remove(id, pending)
+        }
+    }
+
+    private fun awaitStorageAcknowledgement(pending: PendingTransfer) {
+        if (!pending.completed.await(ACK_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+            throw TransferFailure("ack_timeout", "Timed out waiting for receiver storage acknowledgement.", pending.details())
+        }
+        pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
     }
 
     @SuppressLint("MissingPermission")
@@ -1158,7 +1282,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun sendBleEnvelope(peer: DiscoveredPeer, frame: JSONObject) {
+    private fun sendBleEnvelope(peer: DiscoveredPeer, frame: JSONObject, pending: PendingTransfer) {
         val adapter = bluetoothAdapter ?: throw IOException("Bluetooth is unavailable.")
         if (!adapter.isEnabled) {
             throw IOException("Bluetooth is disabled.")
@@ -1169,14 +1293,22 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val completed = CountDownLatch(1)
         val nextIndex = AtomicInteger(0)
         val failure = AtomicReference<IOException?>()
+        val readCompleted = AtomicReference<CountDownLatch?>()
+        val readValue = AtomicReference<ByteArray?>()
 
         val callback = object : BluetoothGattCallback() {
             private fun fail(message: String) {
                 failure.compareAndSet(null, IOException(message))
                 completed.countDown()
+                pending.fail("connection_closed", message)
+                readCompleted.get()?.countDown()
             }
 
             private fun writeNext(gatt: BluetoothGatt) {
+                if (pending.failure.get() != null) {
+                    completed.countDown()
+                    return
+                }
                 val characteristic = gatt.getService(SERVICE_UUID)
                     ?.getCharacteristic(BLE_ENVELOPE_UUID)
                     ?: run {
@@ -1241,6 +1373,21 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     completed.countDown()
                 }
             }
+
+            private fun receivedAck(value: ByteArray, status: Int) {
+                if (status == BluetoothGatt.GATT_SUCCESS) readValue.set(value)
+                else fail("BLE acknowledgement read failed.")
+                readCompleted.get()?.countDown()
+            }
+
+            @Suppress("DEPRECATION")
+            override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, status: Int) {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) receivedAck(characteristic.value ?: byteArrayOf(), status)
+            }
+
+            override fun onCharacteristicRead(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+                receivedAck(value, status)
+            }
         }
 
         val device = adapter.getRemoteDevice(address)
@@ -1250,13 +1397,40 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             device.connectGatt(context, false, callback)
         }
 
+        pending.onFailure = {
+            completed.countDown()
+            readCompleted.get()?.countDown()
+            runCatching { gatt.disconnect() }
+        }
         try {
+            pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
             if (!completed.await(BLE_SEND_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
                 throw IOException("Timed out sending relay payload to ${peer.id} over BLE.")
             }
             failure.get()?.let { throw it }
+            pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
+            pending.sentAt = System.currentTimeMillis()
+            val ackCharacteristic = gatt.getService(SERVICE_UUID)?.getCharacteristic(BLE_ACK_UUID)
+                ?: throw IOException("Peer does not support storage acknowledgements.")
+            val deadline = SystemClock.elapsedRealtime() + ACK_TIMEOUT_MS
+            while (pending.completed.count > 0 && SystemClock.elapsedRealtime() < deadline) {
+                val latch = CountDownLatch(1)
+                readCompleted.set(latch)
+                readValue.set(null)
+                if (!gatt.readCharacteristic(ackCharacteristic)) throw IOException("Unable to read BLE acknowledgement.")
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (!latch.await(remaining.coerceAtLeast(1), TimeUnit.MILLISECONDS)) break
+                failure.get()?.let { throw it }
+                readValue.get()?.let { value ->
+                    runCatching { completeAcknowledgement(JSONObject(value.toString(Charsets.UTF_8)), peer.id, TransportKind.BLUETOOTH) }
+                }
+                if (pending.completed.count > 0) pending.completed.await(200, TimeUnit.MILLISECONDS)
+            }
+            if (pending.completed.count > 0) throw TransferFailure("ack_timeout", "Timed out waiting for BLE receiver storage acknowledgement.", pending.details())
+            pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
             rememberPeer(peer.copy(isConnected = true))
         } finally {
+            pending.onFailure = null
             runCatching { gatt.disconnect() }
             runCatching { gatt.close() }
         }
@@ -1571,6 +1745,46 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         }
     }
 
+    private class PendingTransfer(val peerId: String, val hash: String, val transport: String, val fallback: Boolean) {
+        val completed = CountDownLatch(1)
+        val failure = AtomicReference<Pair<String, String>?>()
+        private val finished = AtomicBoolean(false)
+        private val startedNanos = SystemClock.elapsedRealtimeNanos()
+        @Volatile var connection: ManagedConnection? = null
+        @Volatile var sentAt: Long? = null
+        @Volatile var acknowledgedAt: Long? = null
+        @Volatile var latencyMs: Long? = null
+        @Volatile var onFailure: (() -> Unit)? = null
+
+        fun acknowledge() {
+            if (!finished.compareAndSet(false, true)) return
+            acknowledgedAt = System.currentTimeMillis()
+            latencyMs = (SystemClock.elapsedRealtimeNanos() - startedNanos) / 1_000_000
+            completed.countDown()
+        }
+
+        fun fail(code: String, message: String) {
+            if (!finished.compareAndSet(false, true)) return
+            failure.set(code to message)
+            completed.countDown()
+            onFailure?.invoke()
+        }
+
+        fun details(): Map<String, Any?> = mapOf(
+            "transport" to transport,
+            "fallbackUsed" to fallback,
+            "sentAt" to sentAt,
+            "acknowledgedAt" to acknowledgedAt,
+            "latencyMs" to (latencyMs ?: (SystemClock.elapsedRealtimeNanos() - startedNanos) / 1_000_000),
+        )
+    }
+
+    private class IncomingTransfer(val hash: String, val sourcePeerId: String, val connection: ManagedConnection?, val bleAddress: String?) {
+        val createdAt = SystemClock.elapsedRealtime()
+    }
+
+    private class TransferFailure(val code: String, message: String, val details: Map<String, Any?>) : IOException(message)
+
     private data class DiscoveredPeer(
         val id: String,
         val name: String,
@@ -1653,7 +1867,8 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         const val CHANNEL_NAME = "shadownetwork/android_transport"
         private const val BLUETOOTH_SERVICE_NAME = "ShadowNetworkTransport"
         private const val APP_ID = "shadownetwork"
-        private const val PROTOCOL_VERSION = 1
+        private const val PROTOCOL_VERSION = 2
+        private const val ACK_TIMEOUT_MS = 10_000L
         private const val WIFI_SERVICE_INSTANCE = "ShadowNetwork"
         private const val WIFI_SERVICE_TYPE = "_shadownetwork._tcp"
         private const val DEFAULT_LOCAL_PEER_ID = "local-device"
@@ -1677,5 +1892,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             UUID.fromString("9f7a7771-1b31-4f1d-8f99-6d7a9f50a101")
         private val BLE_IDENTITY_UUID: UUID =
             UUID.fromString("9f7a7772-1b31-4f1d-8f99-6d7a9f50a101")
+        private val BLE_ACK_UUID: UUID =
+            UUID.fromString("9f7a7773-1b31-4f1d-8f99-6d7a9f50a101")
     }
 }

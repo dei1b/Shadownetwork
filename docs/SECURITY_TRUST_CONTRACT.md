@@ -2,7 +2,7 @@
 
 Status: Phase 1 encryption and Phase 2 signed trust enforcement implemented
 
-Updated: 2026-08-15
+Updated: 2026-10-14
 
 ## Scope
 
@@ -175,6 +175,19 @@ The implemented capstone policy retains revoked-origin payloads for audit but ex
 - Revoked-origin messages are retained in Quarantine, excluded from normal feeds and maps, and not automatically relayed.
 - Unknown-origin messages remain available with an Unverified label and continue through SCF.
 - Bundle trust does not replace sender signatures. A payload currently carries a claimed sender device ID, so cryptographic sender impersonation resistance remains future work.
+
+## Acknowledged-hop boundary (transport protocol 2)
+
+`stored` acknowledges an SCF envelope after SQLite persistence, canonical hash
+and TTL checks, and origin-trust evaluation. Unknown-origin envelopes remain
+accepted; revoked-origin envelopes are retained in quarantine and return
+`rejected`. This is not final-recipient decryption or visible SOS acceptance.
+An ACK matches transfer ID, message hash, receiver peer ID, and actual transport
+context (socket peer or selected BLE GATT peer). BLE source IDs are checked
+against the resolved address identity when available. These IDs and ACKs are
+not cryptographically signed; a compatible malicious peer can falsely claim
+storage. Sender impersonation resistance and authenticated ACKs remain future
+work. No private keys or SOS body text are added to ACKs or metrics.
 
 ## Key Rotation and Recovery
 

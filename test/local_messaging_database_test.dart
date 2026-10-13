@@ -185,6 +185,7 @@ void main() {
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
       await _removeReceiptColumns(original);
+      await _removeTransferEventColumn(original);
 
       // Versions 8 and 9 share a schema; reconstruct the eight original lookup rows.
       await original.delete(
@@ -335,11 +336,84 @@ void main() {
     expect(rows.single['received_at'], isNull);
   });
 
+  test(
+    'version 10 upgrade preserves receipts and adds nullable event transfer IDs',
+    () async {
+      final harness = await DatabaseMigrationTestHarness.create();
+      addTearDown(harness.dispose);
+      final original = await harness.openCurrentDatabase();
+      await _removeTransferEventColumn(original);
+      await original.setVersion(10);
+      await original.insert(LocalMessagingDatabase.peersTable, {
+        'id': 'victim',
+        'display_name': 'Resident',
+        'peer_type_code': 'civilian',
+        'created_at': '2026-10-13T02:00:00.000Z',
+      });
+      await original.insert(LocalMessagingDatabase.sosMessagesTable, {
+        'id': 'receipt',
+        'sender_peer_id': 'victim',
+        'body': 'Need help',
+        'category_code': 'medical',
+        'status': 'received',
+        'message_hash': 'hash',
+        'created_at': '2026-10-13T02:00:00.000Z',
+        'received_at': '2026-10-13T02:01:00.000Z',
+        'received_from_peer_id': 'relay',
+        'received_transport': 'bluetooth',
+        'transfer_id': 'receipt-transfer',
+        'hop_count': 2,
+      });
+      await original.insert(LocalMessagingDatabase.validationSessionsTable, {
+        'id': 'session',
+        'name': 'Test',
+        'environment': 'Mock',
+        'device_id': 'rescuer',
+        'device_role': 'responder',
+        'started_at': '2026-10-13T02:00:00.000Z',
+        'status': 'active',
+      });
+      await original.insert(LocalMessagingDatabase.messageEventsTable, {
+        'event_id': 'old-event',
+        'session_id': 'session',
+        'event_type': 'envelopeReceived',
+        'message_hash': 'hash',
+        'occurred_at': '2026-10-13T02:01:00.000Z',
+      });
+      final receipts = await original.query(
+        LocalMessagingDatabase.sosMessagesTable,
+      );
+      final events = await original.query(
+        LocalMessagingDatabase.messageEventsTable,
+      );
+      await original.close();
+      final upgraded = await harness.openCurrentDatabase();
+      addTearDown(upgraded.close);
+      expect(await upgraded.getVersion(), 11);
+      expect(
+        await upgraded.query(LocalMessagingDatabase.sosMessagesTable),
+        receipts,
+      );
+      expect(
+        await upgraded.query(LocalMessagingDatabase.messageEventsTable),
+        events.map((row) => {...row, 'transfer_id': null}).toList(),
+      );
+      expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+      expect(
+        await upgraded.rawQuery(
+          "SELECT name FROM sqlite_master WHERE name = 'idx_message_events_transfer'",
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
   test('version 9 migration preserves SOS and validation records', () async {
     final harness = await DatabaseMigrationTestHarness.create();
     addTearDown(harness.dispose);
     final original = await harness.openCurrentDatabase();
     await _removeReceiptColumns(original);
+    await _removeTransferEventColumn(original);
     await original.setVersion(9);
     await original.insert(LocalMessagingDatabase.peersTable, {
       'id': 'resident',
@@ -384,14 +458,14 @@ void main() {
 
     final upgraded = await harness.openCurrentDatabase();
     addTearDown(upgraded.close);
-    expect(await upgraded.getVersion(), 10);
+    expect(await upgraded.getVersion(), LocalMessagingDatabase.databaseVersion);
     expect(
       await upgraded.query(LocalMessagingDatabase.validationSessionsTable),
       sessions,
     );
     expect(
       await upgraded.query(LocalMessagingDatabase.messageEventsTable),
-      events,
+      events.map((row) => {...row, 'transfer_id': null}).toList(),
     );
     expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
     final message = (await SqliteSosMessageRepository(
@@ -421,6 +495,11 @@ Future<void> _removeReceiptColumns(Database database) async {
       'ALTER TABLE ${LocalMessagingDatabase.sosMessagesTable} DROP COLUMN $column',
     );
   }
+}
+
+Future<void> _removeTransferEventColumn(Database database) async {
+  await database.execute('DROP INDEX idx_message_events_transfer');
+  await database.execute('ALTER TABLE message_events DROP COLUMN transfer_id');
 }
 
 Future<void> _createVersion5FixtureSchema(

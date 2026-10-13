@@ -107,14 +107,79 @@ class AndroidScfTransport implements ScfTransport {
     required Peer peer,
     required ScfEnvelope envelope,
   }) async {
-    final result = await _channel.invokeMethod<Map<Object?, Object?>>(
-      'sendEnvelope',
-      {'peerId': peer.id, 'envelope': _envelopeToPlatformMap(envelope)},
-    );
-    return EnvelopeTransferResult(
-      transport: result?['transport'] as String? ?? peer.transport ?? 'unknown',
-      fallbackUsed: result?['fallbackUsed'] as bool? ?? false,
-    );
+    final id = envelope.transferId;
+    if (id == null || id.isEmpty) {
+      throw ArgumentError('transferId is required.');
+    }
+    try {
+      final result = await _channel.invokeMethod<Map<Object?, Object?>>(
+        'sendEnvelope',
+        {'peerId': peer.id, 'envelope': _envelopeToPlatformMap(envelope)},
+      );
+      final transfer = EnvelopeTransferResult(
+        transport:
+            result?['transport'] as String? ?? peer.transport ?? 'unknown',
+        fallbackUsed: result?['fallbackUsed'] as bool? ?? false,
+        transferId: result?['transferId'] as String? ?? '',
+        acknowledged: result?['acknowledged'] == true,
+        latencyMs: (result?['latencyMs'] as num?)?.toInt() ?? -1,
+        sentAt: _timestamp(result?['sentAt']),
+        acknowledgedAt: _timestamp(result?['acknowledgedAt']),
+      );
+      if (transfer.transferId != id ||
+          !transfer.acknowledged ||
+          transfer.latencyMs < 0) {
+        throw EnvelopeTransferException(
+          transferId: id,
+          message:
+              'Native transport returned an invalid storage acknowledgement.',
+          code: 'invalid_ack',
+          transport: transfer.transport,
+          sentAt: transfer.sentAt,
+          fallbackUsed: transfer.fallbackUsed,
+        );
+      }
+      return transfer;
+    } on PlatformException catch (error) {
+      final details = error.details is Map ? error.details as Map : const {};
+      final message = error.message ?? 'Envelope transfer failed.';
+      if (error.code == 'ACK_TIMEOUT') {
+        throw EnvelopeAcknowledgementTimeout(
+          transferId: id,
+          message: message,
+          transport: details['transport'] as String? ?? peer.transport,
+          sentAt: _timestamp(details['sentAt']),
+          latencyMs: (details['latencyMs'] as num?)?.toInt(),
+          fallbackUsed: details['fallbackUsed'] == true,
+        );
+      }
+      throw EnvelopeTransferException(
+        transferId: id,
+        message: message,
+        code: error.code.toLowerCase(),
+        transport: details['transport'] as String? ?? peer.transport,
+        sentAt: _timestamp(details['sentAt']),
+        latencyMs: (details['latencyMs'] as num?)?.toInt(),
+        fallbackUsed: details['fallbackUsed'] == true,
+      );
+    }
+  }
+
+  static DateTime? _timestamp(Object? milliseconds) => milliseconds is num
+      ? DateTime.fromMillisecondsSinceEpoch(milliseconds.toInt(), isUtc: true)
+      : null;
+
+  @override
+  Future<void> acknowledgeEnvelope({
+    required ScfEnvelope envelope,
+    bool accepted = true,
+  }) async {
+    if (envelope.transferId == null) return;
+    await _channel.invokeMethod<void>('acknowledgeEnvelope', {
+      'transferId': envelope.transferId,
+      'messageHash': envelope.messageHash,
+      'accepted': accepted,
+    });
   }
 
   @override
@@ -168,6 +233,7 @@ class AndroidScfTransport implements ScfTransport {
       'hopCount': envelope.hopCount,
       'receivedAt': envelope.receivedAt.toUtc().toIso8601String(),
       'expiresAt': envelope.expiresAt.toUtc().toIso8601String(),
+      'transferId': envelope.transferId,
     };
   }
 

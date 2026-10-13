@@ -22,4 +22,11 @@ abstract class ScfTransport {
   });
 
   Future<List<ScfEnvelope>> receiveEnvelopes();
+
+  /// Called only after SQLite storage and origin-trust checks finish.
+  /// An already stored active duplicate may be acknowledged again safely.
+  Future<void> acknowledgeEnvelope({
+    required ScfEnvelope envelope,
+    bool accepted = true,
+  });
 }

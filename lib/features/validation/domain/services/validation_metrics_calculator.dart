@@ -36,7 +36,29 @@ class ValidationMetricsCalculator {
               event.metadata?['phase'] == 'send',
         )
         .toList(growable: false);
-    final latencies = sentEvents
+    final offeredById = <String, ValidationMessageEvent>{};
+    for (final event in data.events.where(
+      (e) => e.type == ValidationEventType.envelopeOffered,
+    )) {
+      final id = event.transferId;
+      if (id != null && id.isNotEmpty) offeredById.putIfAbsent(id, () => event);
+    }
+    final acknowledgedById = <String, ValidationMessageEvent>{};
+    for (final event in data.events.where(
+      (e) => e.type == ValidationEventType.envelopeAcknowledged,
+    )) {
+      final id = event.transferId;
+      if (id != null && id.isNotEmpty) {
+        acknowledgedById.putIfAbsent(id, () => event);
+      }
+    }
+    final matchingAcknowledgements = acknowledgedById.entries.where((entry) {
+      final offer = offeredById[entry.key];
+      return offer != null &&
+          offer.messageHash == entry.value.messageHash &&
+          offer.peerId == entry.value.peerId;
+    }).length;
+    final latencies = acknowledgedById.values
         .map((event) => event.latencyMs)
         .whereType<int>()
         .where((value) => value >= 0)
@@ -111,12 +133,9 @@ class ValidationMetricsCalculator {
       deliveredMessageCount: deliveredHashes.length,
       sentTransferCount: sentEvents.length,
       failedTransferCount: failedEvents.length,
-      deliverySuccessRate: _deliverySuccessRate(
-        sentEvents: sentEvents,
-        failedEvents: failedEvents,
-        receivedEvents: receivedEvents,
-        deliveredHashes: deliveredHashes,
-      ),
+      deliverySuccessRate: offeredById.isEmpty
+          ? null
+          : matchingAcknowledgements / offeredById.length,
       discoverySuccessRate: data.discoveryAttempts.isEmpty
           ? null
           : successfulDiscoveryCount / data.discoveryAttempts.length,
@@ -135,25 +154,6 @@ class ValidationMetricsCalculator {
   double? _average(List<int> values) {
     if (values.isEmpty) return null;
     return values.reduce((a, b) => a + b) / values.length;
-  }
-
-  double? _deliverySuccessRate({
-    required List<ValidationMessageEvent> sentEvents,
-    required List<ValidationMessageEvent> failedEvents,
-    required Iterable<ValidationMessageEvent> receivedEvents,
-    required Set<String> deliveredHashes,
-  }) {
-    final transferAttempts = sentEvents.length + failedEvents.length;
-    if (transferAttempts > 0) {
-      return sentEvents.length / transferAttempts;
-    }
-    final receivedHashes = receivedEvents
-        .map((event) => event.messageHash)
-        .whereType<String>()
-        .toSet();
-    if (receivedHashes.isEmpty) return null;
-    return deliveredHashes.intersection(receivedHashes).length /
-        receivedHashes.length;
   }
 
   (double?, double?) _batteryMetrics(ValidationSessionData data) {
