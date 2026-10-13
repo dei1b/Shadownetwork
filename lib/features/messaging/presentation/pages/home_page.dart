@@ -29,6 +29,8 @@ import '../providers/local_messaging_providers.dart';
 import '../providers/relay_runtime_provider.dart';
 import '../utils/message_feed_filter.dart';
 import '../widgets/sos_category_picker.dart';
+import '../widgets/sos_detail_sheet.dart';
+import '../widgets/sos_receipt_summary.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -1066,10 +1068,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   .map(
                     (item) => _buildMessageFeedCard(
                       item,
-                      onTap: () => _openConversation(
-                        item.message.sender,
-                        linkedSosMessage: item.message,
-                      ),
+                      onTap: () => _openSosMessage(item.message),
                     ),
                   )
                   .toList(growable: false),
@@ -1254,6 +1253,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         ? const Color(0xFFE83C3D)
         : const Color(0xFF1F1F1F);
     return Material(
+      key: ValueKey('sos-card-${item.message.id}'),
       color: cardColor,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
@@ -1308,14 +1308,21 @@ class _HomePageState extends ConsumerState<HomePage> {
                             ),
                           ),
                         ),
-                        Text(
-                          item.time,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
+                        if (_isResponder)
+                          const Icon(
+                            Icons.chevron_right,
+                            size: 20,
                             color: Color(0xFF888888),
                           ),
-                        ),
+                        if (!_isResponder)
+                          Text(
+                            item.time,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF888888),
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 6),
@@ -1327,28 +1334,42 @@ class _HomePageState extends ConsumerState<HomePage> {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
+                    if (_isResponder) ...[
+                      const SizedBox(height: 8),
+                      SosReceiptSummary(message: item.message),
+                    ],
                     const SizedBox(height: 8),
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Icon(
-                          Icons.location_on,
-                          size: 16,
-                          color: isSpam
-                              ? const Color(0xFF8A6A1F)
-                              : const Color(0xFFE83C3D),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.location_on,
+                              size: 16,
+                              color: isSpam
+                                  ? const Color(0xFF8A6A1F)
+                                  : const Color(0xFFE83C3D),
+                            ),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                item.distance,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF585858),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          item.distance,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF585858),
-                          ),
-                        ),
-                        const Spacer(),
                         _TrustStatusBadge(status: item.trustStatus),
-                        const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -1502,6 +1523,19 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _openSosMessage(messaging.SosMessage message) async {
+    if (!_isResponder) {
+      await _openConversation(message.sender, linkedSosMessage: message);
+      return;
+    }
+    await showSosDetailSheet(
+      context,
+      message: message,
+      onMessageSender: () =>
+          _openConversation(message.sender, linkedSosMessage: message),
     );
   }
 
@@ -2151,8 +2185,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             width: markerSize,
             height: markerSize,
             child: GestureDetector(
-              onTap: () =>
-                  _openConversation(message.sender, linkedSosMessage: message),
+              onTap: () => _openSosMessage(message),
               child: _TriageMarker(
                 icon: _iconForCategory(message.category),
                 color: _colorForCategory(message.category),

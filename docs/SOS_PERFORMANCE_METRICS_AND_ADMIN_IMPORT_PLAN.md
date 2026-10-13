@@ -260,6 +260,50 @@ unique acknowledged transfer IDs / unique offered transfer IDs
 
 ## Phase 3: Display timing on the rescuer phone
 
+Status: implemented on 2026-10-14. Responder SOS cards show receipt age,
+propagation time, hop count, and last-hop transport from persisted records.
+Tapping a responder SOS card or SOS map marker opens the scrollable detail
+sheet; `Message sender` preserves the linked-SOS conversation action. Civilian
+SOS taps still open the conversation directly. Existing Spam/Quarantine filters
+and map visibility rules are unchanged.
+
+Reference files for the next agent:
+
+- `presentation/widgets/sos_receipt_summary.dart`: compact timing display.
+- `presentation/widgets/sos_detail_sheet.dart`: full SOS audit/receipt details,
+  full-hash clipboard copying, and sender-chat action.
+- `presentation/utils/sos_timing_labels.dart`: deterministic duration, hop,
+  transport, timestamp, clock-warning, and TTL formatting.
+- `presentation/providers/sos_clock_provider.dart`: shared auto-disposed
+  one-second clock, watched only by receipt summaries and the TTL row. It
+  pauses when the app is not resumed and refreshes immediately on resume;
+  it does not query/write SQLite or rebuild the application shell.
+
+All paths above are under `lib/features/messaging/`. Detailed timestamps are
+explicitly shown in UTC for audit consistency. Travel time stays fixed at
+`receivedAt - createdAt`; received age and TTL are live. TTL display uses origin
+creation plus the stored duration, never the latest receipt or status update.
+Local/legacy records without a receipt show `Created … ago` and
+`Propagation time unavailable`, not invented delivery measurements. Missing
+transport, relay peer, hash, accuracy, and receipt remain `Not recorded` in
+details. Mock transport is labeled `Mock (simulation)`.
+
+No schema, transport, security, or export contract changes are required for this
+phase. Tests cover formatting boundaries, missing/future/reversed timestamps,
+live updates without parent rebuilds, lifecycle/disposal, TTL expiry, narrow
+screens/enlarged text, trust/moderation, full-hash copy and copy failure, and
+detail-to-chat navigation. Multi-phone radio measurements remain deferred;
+one phone is sufficient for local UI/storage checks. Continue with Phase 4
+(shared field-test identity), not admin import yet.
+
+Verification: `flutter analyze` found no issues; `flutter test --coverage`
+passed all **145** tests, including 25 new Phase-3 formatting/widget tests.
+The four new presentation components have 177/179 covered executable lines.
+`flutter build apk --debug` produced the updated APK. Rendered component
+fixtures were visually inspected; they are explicitly labeled simulation, not
+physical-phone timing evidence. Hardware profiling and multi-phone transfer
+validation were not performed.
+
 Update the SOS list/card implementation in `lib/features/messaging/presentation/pages/home_page.dart`.
 
 ### Compact SOS card

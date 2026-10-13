@@ -34,6 +34,7 @@ The project is beyond a static UI prototype. The repository currently includes:
 - Persisted responder validation sessions with real discovery, connection, relay, delivery, transport, runtime, latency, hop, and battery events.
 - Live validation summaries plus JSON and CSV export for manual backup and adviser review.
 - Persisted first SOS receipt metadata and acknowledged hop attempts with monotonic latency, timeout evidence, and unique transfer IDs.
+- Responder SOS cards with live receipt age, fixed travel time, hops, and transport, plus scrollable receipt/audit details and sender-chat access.
 
 The project should still be treated as a capstone prototype rather than a production emergency system. Its largest remaining risks are sender authentication, secure multi-admin persistence, durable background execution, battery-aware scanning, mobile-to-admin synchronization, and real-device field validation.
 
@@ -393,6 +394,18 @@ Implemented mobile areas include:
 - Responder-only Validation Test screen for starting, monitoring, exporting, and completing persisted field-test sessions.
 - App update-check service and provider.
 
+Responder SOS timing (receipt roadmap Phase 3) is implemented in the existing
+home feed and SOS map: tapping an alert opens a scrollable detail sheet with
+created/received UTC times, propagation, hop count, transport, sender, last relay
+peer, shortened hash with full-copy action, GPS accuracy, TTL, delivery state,
+trust, and moderation. `Message sender` opens the existing linked conversation;
+civilian taps are unchanged. Missing receipts show creation age and unavailable
+propagation; reversed/future clocks show warnings rather than negative elapsed
+measurements. A shared auto-disposed Riverpod clock updates only receipt/TTL
+widgets each second, pauses outside the resumed lifecycle, and refreshes on
+resume. It does not write to SQLite. Mock evidence is explicitly labeled as
+simulation. This adds no transport, database, or encryption changes.
+
 ## Browser Admin and Device Trust
 
 The separate Flutter web admin currently supports:
@@ -492,8 +505,9 @@ deadlines; pending transfers are cleaned on success, failure, stop, or connectio
 closure. All phones must upgrade together; protocol-1 peers are incompatible.
 This does not change SOS/chat hashes, encryption, TTL, or final-recipient
 delivery semantics. ACKs are correlation evidence, not cryptographic proof.
-The rescuer timing display (Phase 3), portable bundles, and browser import remain
-planned. Existing schema-1 JSON and CSV export include optional transfer IDs.
+The rescuer timing display (Phase 3) is implemented. Shared run identity,
+portable bundles, and browser import remain planned. Existing schema-1 JSON and
+CSV export include optional transfer IDs.
 
 ## Automated Tests
 
@@ -582,6 +596,14 @@ The phased implementation roadmap for these priorities is maintained in `IMPLEME
 Shadow Network currently provides a working capstone foundation for offline, device-to-device disaster messaging: local relational persistence, structured SOS and chat payloads, Store-Carry-Forward routing, deterministic message hashing, TTL and hop-count processing, same-sender spam detection, offline map support, Android BLE/Wi-Fi Direct transport code, background foreground-service visibility, X25519/HKDF/AES-GCM encrypted targeted messaging, secure on-device private-key storage, Ed25519-signed and versioned trust bundles, persisted device trust, revoked-message quarantine, and Version 8 responder validation sessions backed by real telemetry and exportable metrics. The next stage should focus on sender authentication, reliable background execution, battery optimization, secure admin persistence, authenticated mobile-to-admin synchronization, and controlled three-device field testing.
 
 ## Verification Record
+
+Rescuer timing UI (receipt roadmap Phase 3) verified on 2026-10-14:
+
+- `flutter analyze`: no issues found.
+- `flutter test --coverage`: all 145 tests passed, including 25 new formatting/widget tests; 177/179 executable lines covered across the four new presentation components.
+- `flutter build apk --debug`: updated `build/app/outputs/flutter-apk/app-debug.apk` successfully.
+- Rendered mock component previews were inspected for timing labels, scrollable details, and sender-chat access. Widget tests cover widths 320/412 at 1.5x text scale, lifecycle/timer disposal, missing/clock-skew evidence, TTL expiry, and clipboard success/failure inside the modal.
+- No on-device performance profile or physical BLE/Wi-Fi Direct trial was performed. The developer currently has one Android phone; multi-phone validation remains deferred, not passed. No database/protocol/security contracts changed in this UI phase.
 
 Acknowledged-hop implementation verified on 2026-10-14:
 
