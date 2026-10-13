@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 9;
+  static const databaseVersion = 10;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -39,6 +39,7 @@ class LocalMessagingDatabase {
     8: _addValidationMetricsSchema,
     // Version 9 changes lookup data only; existing SOS rows retain their codes.
     9: seedLookupTables,
+    10: _addSosReceiptMetadata,
   };
 
   static Future<Database> open({
@@ -501,6 +502,19 @@ class LocalMessagingDatabase {
       'CREATE INDEX idx_metric_sync_batches_session '
       'ON $metricSyncBatchesTable (session_id, created_at)',
     );
+  }
+
+  static Future<void> _addSosReceiptMetadata(Database database) async {
+    for (final column in [
+      'received_at',
+      'received_from_peer_id',
+      'received_transport',
+      'transfer_id',
+    ]) {
+      await database.execute(
+        'ALTER TABLE $sosMessagesTable ADD COLUMN $column TEXT',
+      );
+    }
   }
 
   static Future<void> seedLookupTables(Database database) async {

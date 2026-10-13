@@ -6,6 +6,9 @@ class ScfEnvelope {
     required this.receivedAt,
     required this.expiresAt,
     this.payloadType = 'sos_message',
+    this.receivedFromPeerId,
+    this.receivedTransport,
+    this.transferId,
   });
 
   final String messageHash;
@@ -14,6 +17,11 @@ class ScfEnvelope {
   final DateTime receivedAt;
   final DateTime expiresAt;
   final String payloadType;
+
+  /// Inbound hop context supplied by the local transport, not the SOS origin.
+  final String? receivedFromPeerId;
+  final String? receivedTransport;
+  final String? transferId;
 
   bool isExpired(DateTime now) {
     return !expiresAt.isAfter(now);
@@ -26,6 +34,9 @@ class ScfEnvelope {
     DateTime? receivedAt,
     DateTime? expiresAt,
     String? payloadType,
+    String? receivedFromPeerId,
+    String? receivedTransport,
+    String? transferId,
   }) {
     return ScfEnvelope(
       messageHash: messageHash ?? this.messageHash,
@@ -34,6 +45,9 @@ class ScfEnvelope {
       receivedAt: receivedAt ?? this.receivedAt,
       expiresAt: expiresAt ?? this.expiresAt,
       payloadType: payloadType ?? this.payloadType,
+      receivedFromPeerId: receivedFromPeerId ?? this.receivedFromPeerId,
+      receivedTransport: receivedTransport ?? this.receivedTransport,
+      transferId: transferId ?? this.transferId,
     );
   }
 }

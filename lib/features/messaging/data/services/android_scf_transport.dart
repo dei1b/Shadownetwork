@@ -180,6 +180,9 @@ class AndroidScfTransport implements ScfTransport {
       receivedAt: DateTime.parse(map['receivedAt']! as String),
       expiresAt: DateTime.parse(map['expiresAt']! as String),
       payloadType: RelayPayloadCodec.payloadType(payloadJson),
+      receivedFromPeerId: map['receivedFromPeerId'] as String?,
+      receivedTransport: map['receivedTransport'] as String?,
+      transferId: map['transferId'] as String?,
     );
   }
 }

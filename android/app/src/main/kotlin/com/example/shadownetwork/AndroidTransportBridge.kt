@@ -554,7 +554,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 if (frame.optString("type") != "envelope") {
                     return false
                 }
-                enqueueEnvelope(frame)
+                enqueueEnvelope(
+                    frame,
+                    receivedFromPeerId = resolvedBlePeerIds[address],
+                    receivedTransport = TransportKind.BLUETOOTH,
+                )
                 true
             }.getOrDefault(false)
         }
@@ -1018,12 +1022,20 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 )
             }
             "envelope" -> {
-                enqueueEnvelope(frame)
+                enqueueEnvelope(
+                    frame,
+                    receivedFromPeerId = connection.peerId,
+                    receivedTransport = connection.transport,
+                )
             }
         }
     }
 
-    private fun enqueueEnvelope(frame: JSONObject) {
+    private fun enqueueEnvelope(
+        frame: JSONObject,
+        receivedFromPeerId: String?,
+        receivedTransport: String,
+    ) {
         synchronized(inbox) {
             inbox.add(
                 mapOf(
@@ -1032,6 +1044,9 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     "hopCount" to frame.getInt("hopCount"),
                     "receivedAt" to frame.getString("receivedAt"),
                     "expiresAt" to frame.getString("expiresAt"),
+                    "receivedFromPeerId" to receivedFromPeerId,
+                    "receivedTransport" to receivedTransport,
+                    "transferId" to frame.optString("transferId").ifBlank { null },
                 ),
             )
         }

@@ -81,6 +81,15 @@ void main() {
     expect(columnNames, contains('trust_role'));
     expect(columnNames, contains('trust_owner_name'));
     expect(
+      columnNames,
+      containsAll([
+        'received_at',
+        'received_from_peer_id',
+        'received_transport',
+        'transfer_id',
+      ]),
+    );
+    expect(
       sosColumns.singleWhere(
         (row) => row['name'] == 'moderation_status',
       )['dflt_value'],
@@ -175,6 +184,7 @@ void main() {
       final harness = await DatabaseMigrationTestHarness.create();
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
+      await _removeReceiptColumns(original);
 
       // Versions 8 and 9 share a schema; reconstruct the eight original lookup rows.
       await original.delete(
@@ -209,13 +219,26 @@ void main() {
 
       final upgraded = await harness.openCurrentDatabase();
       addTearDown(upgraded.close);
-      expect(await upgraded.getVersion(), 9);
+      expect(
+        await upgraded.getVersion(),
+        LocalMessagingDatabase.databaseVersion,
+      );
       expect(
         await upgraded.query(
           LocalMessagingDatabase.sosMessagesTable,
           orderBy: 'id',
         ),
-        before,
+        before
+            .map(
+              (row) => {
+                ...row,
+                'received_at': null,
+                'received_from_peer_id': null,
+                'received_transport': null,
+                'transfer_id': null,
+              },
+            )
+            .toList(),
       );
       expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
       final repository = SqliteSosMessageRepository(database: upgraded);
@@ -243,7 +266,7 @@ void main() {
     },
   );
 
-  test('migrates populated version 5 data to version 9', () async {
+  test('migrates populated version 5 data to the current version', () async {
     final harness = await DatabaseMigrationTestHarness.create();
     addTearDown(harness.dispose);
 
@@ -290,7 +313,10 @@ void main() {
     final migratedDatabase = await harness.openCurrentDatabase();
     addTearDown(migratedDatabase.close);
 
-    expect(await migratedDatabase.getVersion(), 9);
+    expect(
+      await migratedDatabase.getVersion(),
+      LocalMessagingDatabase.databaseVersion,
+    );
     final rows = await migratedDatabase.query(
       LocalMessagingDatabase.sosMessagesTable,
       where: 'id = ?',
@@ -306,7 +332,95 @@ void main() {
     expect(rows.single['trust_status'], 'unknown');
     expect(rows.single['trust_role'], isNull);
     expect(rows.single['trust_owner_name'], isNull);
+    expect(rows.single['received_at'], isNull);
   });
+
+  test('version 9 migration preserves SOS and validation records', () async {
+    final harness = await DatabaseMigrationTestHarness.create();
+    addTearDown(harness.dispose);
+    final original = await harness.openCurrentDatabase();
+    await _removeReceiptColumns(original);
+    await original.setVersion(9);
+    await original.insert(LocalMessagingDatabase.peersTable, {
+      'id': 'resident',
+      'display_name': 'Resident',
+      'peer_type_code': 'civilian',
+      'created_at': '2026-10-13T02:00:00.000Z',
+    });
+    await original.insert(LocalMessagingDatabase.sosMessagesTable, {
+      'id': 'existing-sos',
+      'sender_peer_id': 'resident',
+      'body': 'Need medical help',
+      'category_code': 'medical',
+      'status': 'received',
+      'message_hash': 'existing-hash',
+      'created_at': '2026-10-13T02:00:00.000Z',
+      'hop_count': 3,
+    });
+    await original.insert(LocalMessagingDatabase.validationSessionsTable, {
+      'id': 'existing-session',
+      'name': 'Field test',
+      'environment': 'Outdoor',
+      'device_id': 'rescuer',
+      'device_role': 'responder',
+      'started_at': '2026-10-13T02:00:00.000Z',
+      'status': 'active',
+    });
+    await original.insert(LocalMessagingDatabase.messageEventsTable, {
+      'event_id': 'existing-event',
+      'session_id': 'existing-session',
+      'message_hash': 'existing-hash',
+      'event_type': 'envelopeReceived',
+      'occurred_at': '2026-10-13T02:02:00.000Z',
+      'hop_count': 3,
+    });
+    final sessions = await original.query(
+      LocalMessagingDatabase.validationSessionsTable,
+    );
+    final events = await original.query(
+      LocalMessagingDatabase.messageEventsTable,
+    );
+    await original.close();
+
+    final upgraded = await harness.openCurrentDatabase();
+    addTearDown(upgraded.close);
+    expect(await upgraded.getVersion(), 10);
+    expect(
+      await upgraded.query(LocalMessagingDatabase.validationSessionsTable),
+      sessions,
+    );
+    expect(
+      await upgraded.query(LocalMessagingDatabase.messageEventsTable),
+      events,
+    );
+    expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+    final message = (await SqliteSosMessageRepository(
+      database: upgraded,
+    ).getMessages()).single;
+    expect(message.id, 'existing-sos');
+    expect(message.body, 'Need medical help');
+    expect(message.messageHash, 'existing-hash');
+    expect(message.hopCount, 3);
+    expect(message.receivedAt, isNull);
+    expect(message.receivedFromPeerId, isNull);
+    expect(message.receivedTransport, isNull);
+    expect(message.transferId, isNull);
+    expect(message.propagationDuration, isNull);
+  });
+}
+
+Future<void> _removeReceiptColumns(Database database) async {
+  // Reconstruct the actual version 9 schema before exercising migration 10.
+  for (final column in [
+    'received_at',
+    'received_from_peer_id',
+    'received_transport',
+    'transfer_id',
+  ]) {
+    await database.execute(
+      'ALTER TABLE ${LocalMessagingDatabase.sosMessagesTable} DROP COLUMN $column',
+    );
+  }
 }
 
 Future<void> _createVersion5FixtureSchema(

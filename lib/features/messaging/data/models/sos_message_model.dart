@@ -26,8 +26,12 @@ class SosMessageModel {
       body: map['body']! as String,
       category: Category.values.byName(map['category_code']! as String),
       status: MessageStatus.values.byName(map['status']! as String),
-      createdAt: DateTime.parse(map['created_at']! as String),
+      createdAt: DateTime.parse(map['created_at']! as String).toUtc(),
       updatedAt: _dateTimeFromMap(map['updated_at']),
+      receivedAt: _dateTimeFromMap(map['received_at']),
+      receivedFromPeerId: map['received_from_peer_id'] as String?,
+      receivedTransport: map['received_transport'] as String?,
+      transferId: map['transfer_id'] as String?,
       messageHash: map['message_hash'] as String?,
       latitude: map['latitude'] as double?,
       longitude: map['longitude'] as double?,
@@ -88,8 +92,12 @@ class SosMessageModel {
       'trust_status': message.trustStatus.name,
       'trust_role': message.trustRole,
       'trust_owner_name': message.trustOwnerName,
-      'created_at': message.createdAt.toIso8601String(),
-      'updated_at': message.updatedAt?.toIso8601String(),
+      'created_at': message.createdAt.toUtc().toIso8601String(),
+      'updated_at': message.updatedAt?.toUtc().toIso8601String(),
+      'received_at': message.receivedAt?.toUtc().toIso8601String(),
+      'received_from_peer_id': message.receivedFromPeerId,
+      'received_transport': message.receivedTransport,
+      'transfer_id': message.transferId,
     };
   }
 
@@ -98,6 +106,6 @@ class SosMessageModel {
       return null;
     }
 
-    return DateTime.parse(value as String);
+    return DateTime.parse(value as String).toUtc();
   }
 }

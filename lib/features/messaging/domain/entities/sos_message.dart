@@ -13,6 +13,10 @@ class SosMessage {
     required this.status,
     required this.createdAt,
     this.updatedAt,
+    this.receivedAt,
+    this.receivedFromPeerId,
+    this.receivedTransport,
+    this.transferId,
     this.messageHash,
     this.latitude,
     this.longitude,
@@ -36,6 +40,12 @@ class SosMessage {
   final MessageStatus status;
   final DateTime createdAt;
   final DateTime? updatedAt;
+
+  /// Local receipt metadata; never included in the originating SOS payload.
+  final DateTime? receivedAt;
+  final String? receivedFromPeerId;
+  final String? receivedTransport;
+  final String? transferId;
   final String? messageHash;
   final double? latitude;
   final double? longitude;
@@ -51,6 +61,14 @@ class SosMessage {
   final String? trustRole;
   final String? trustOwnerName;
 
+  /// Null for an unreceived SOS or an invalid cross-device clock interval.
+  Duration? get propagationDuration {
+    final receipt = receivedAt;
+    if (receipt == null) return null;
+    final duration = receipt.difference(createdAt);
+    return duration.isNegative ? null : duration;
+  }
+
   SosMessage copyWith({
     String? id,
     Peer? sender,
@@ -59,6 +77,10 @@ class SosMessage {
     MessageStatus? status,
     DateTime? createdAt,
     DateTime? updatedAt,
+    Object? receivedAt = _sentinel,
+    Object? receivedFromPeerId = _sentinel,
+    Object? receivedTransport = _sentinel,
+    Object? transferId = _sentinel,
     String? messageHash,
     double? latitude,
     double? longitude,
@@ -82,6 +104,18 @@ class SosMessage {
       status: status ?? this.status,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      receivedAt: identical(receivedAt, _sentinel)
+          ? this.receivedAt
+          : receivedAt as DateTime?,
+      receivedFromPeerId: identical(receivedFromPeerId, _sentinel)
+          ? this.receivedFromPeerId
+          : receivedFromPeerId as String?,
+      receivedTransport: identical(receivedTransport, _sentinel)
+          ? this.receivedTransport
+          : receivedTransport as String?,
+      transferId: identical(transferId, _sentinel)
+          ? this.transferId
+          : transferId as String?,
       messageHash: messageHash ?? this.messageHash,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,

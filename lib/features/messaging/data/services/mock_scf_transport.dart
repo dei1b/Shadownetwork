@@ -43,7 +43,12 @@ class MockScfTransportNetwork {
       throw StateError('Mock peer $toPeerId is not registered.');
     }
 
-    recipient.inbox.add(envelope);
+    recipient.inbox.add(
+      envelope.copyWith(
+        receivedFromPeerId: fromPeerId,
+        receivedTransport: 'mock',
+      ),
+    );
     _relayEvents.add(null);
   }
 

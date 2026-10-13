@@ -100,9 +100,27 @@ class SqliteSosMessageRepository implements SosMessageRepository {
           timestamp: message.createdAt,
         );
       }
+      final row = SosMessageModel.toMap(message);
+      final existing = await transaction.query(
+        LocalMessagingDatabase.sosMessagesTable,
+        columns: [
+          'received_at',
+          'received_from_peer_id',
+          'received_transport',
+          'transfer_id',
+        ],
+        where: 'id = ?',
+        whereArgs: [message.id],
+        limit: 1,
+      );
+      // Keep the first accepted receipt and its matching last-hop metadata.
+      // Status changes and repeated deliveries must not reset propagation time.
+      if (existing.isNotEmpty && existing.single['received_at'] != null) {
+        row.addAll(existing.single);
+      }
       await transaction.insert(
         LocalMessagingDatabase.sosMessagesTable,
-        SosMessageModel.toMap(message),
+        row,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
     });

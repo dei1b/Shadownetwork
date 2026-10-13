@@ -443,24 +443,29 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         if (targetPeerId != null && targetPeerId != localPeer.id) {
           continue;
         }
-        final decoded =
-            (isSecureSos
-                    ? await SecureSosMessagePayload.decode(
-                        payload,
-                        localPeerId: localPeer.id,
-                        encryptionService: encryptionService,
-                        localIdentity: localIdentity,
-                      )
-                    : SosMessagePayload.fromPayload(
-                        payload,
-                        localPeerId: localPeer.id,
-                      ))
-                .copyWith(
-                  status: MessageStatus.received,
-                  trustStatus: senderTrust.status,
-                  trustRole: senderTrust.role,
-                  trustOwnerName: senderTrust.ownerName,
-                );
+        final incoming = isSecureSos
+            ? await SecureSosMessagePayload.decode(
+                payload,
+                localPeerId: localPeer.id,
+                encryptionService: encryptionService,
+                localIdentity: localIdentity,
+              )
+            : SosMessagePayload.fromPayload(payload, localPeerId: localPeer.id);
+        final isLocalOrigin = incoming.sender.id == localPeer.id;
+        final decoded = incoming.copyWith(
+          status: MessageStatus.received,
+          // The envelope timestamp belongs to the previous phone.
+          // Record this device's acceptance time independently.
+          receivedAt: isLocalOrigin ? null : DateTime.now().toUtc(),
+          receivedFromPeerId: isLocalOrigin
+              ? null
+              : envelope.receivedFromPeerId,
+          receivedTransport: isLocalOrigin ? null : envelope.receivedTransport,
+          transferId: isLocalOrigin ? null : envelope.transferId,
+          trustStatus: senderTrust.status,
+          trustRole: senderTrust.role,
+          trustOwnerName: senderTrust.ownerName,
+        );
         await peerRepository.upsertPeer(
           decoded.sender.copyWith(
             isConnected: false,
