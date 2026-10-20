@@ -1,6 +1,6 @@
 # Shadow Network Current App State
 
-Updated: 2026-10-14
+Updated: 2026-10-20
 
 Repository: `C:\Users\Dave\Desktop\Shadownetwork`
 
@@ -15,6 +15,9 @@ Shadow Network is an Android-first Flutter application for offline barangay SOS 
 The project is beyond a static UI prototype. The repository currently includes:
 
 - SQLite-backed SOS, chat, peer, conversation, and SCF persistence.
+- Ed25519 sender signatures for new SOS/chat payloads, bound to approved user/device signing keys.
+- Signed registration QR carrying encryption and signing public keys, with explicit replacement review.
+- A service-owned Flutter engine for sticky restart recovery and adaptive BLE scan windows.
 - Barangay-focused SOS categories for medical, fire/electrical, safety, flood/rescue, public hazards, and other urgent assistance.
 - Structured, hashed, and versioned SOS and chat payloads.
 - SCF deduplication, TTL expiry, hop counting, retry state, and per-peer delivery tracking.
@@ -36,7 +39,7 @@ The project is beyond a static UI prototype. The repository currently includes:
 - Persisted first SOS receipt metadata and acknowledged hop attempts with monotonic latency, timeout evidence, and unique transfer IDs.
 - Responder SOS cards with live receipt age, fixed travel time, hops, and transport, plus scrollable receipt/audit details and sender-chat access.
 
-The project should still be treated as a capstone prototype rather than a production emergency system. Its largest remaining risks are sender authentication, secure multi-admin persistence, durable background execution, battery-aware scanning, mobile-to-admin synchronization, and real-device field validation.
+The project should still be treated as a capstone prototype rather than a production emergency system. Its largest remaining risks are secure multi-admin persistence, authenticated ACKs, historical signing-key rotation policy, mobile-to-admin synchronization, and physical-device validation of background recovery, scanning tradeoffs, battery use, and range.
 
 ## Main Entry Points
 
@@ -94,7 +97,7 @@ Then open `http://localhost:8080`.
 - Google Sign-In support is included in the project dependencies.
 - The current `home` route opens `AppShellPage` directly; authentication is not currently enforced as a gate before emergency messaging.
 - `AppShellPage` resolves the local device access profile before displaying the main interface.
-- Responder access requires an approved local device ID, matching X25519 public key and key version, and the `responder` role.
+- Responder access requires an approved local device ID, matching X25519 public key and key version plus the registered Ed25519 signing key, and the `responder` role.
 - Revocation takes priority over approval. Unregistered, key-mismatched, and revoked devices cannot enter the responder interface.
 - Approved responders are routed automatically to a responder-focused dashboard; there is no manual role-switch setting.
 - The mobile app does not contain an admin dashboard. Administration is separated into the browser entry point.
@@ -117,7 +120,7 @@ Current boundary: the first valid signed bundle pins its administrator Ed25519 p
 
 Database file: `shadownetwork.db`
 
-Current database version: `11`
+Current database version: `12`
 
 ### Tables
 
@@ -141,7 +144,7 @@ Current database version: `11`
 
 - Foreign keys are enabled with `PRAGMA foreign_keys = ON`.
 - Category and peer-type lookup rows are seeded automatically.
-- Database migrations are defined from version 1 through version 11.
+- Database migrations are defined from version 1 through version 12.
 - SOS and chat messages persist routing, moderation, encryption, and sender-trust snapshots.
 - SCF payloads are stored separately from user-facing SOS and chat records.
 - SCF payloads persist origin trust state so revoked-origin envelopes can be retained without being offered for relay.
@@ -181,7 +184,7 @@ indexed validation-event `transfer_id`, preserving prior SOS and event records.
 
 ## SOS Payload Contract
 
-Current SOS payload schema version: `4`
+Current SOS payload schema version: `5` (signed); versions 1–4 remain readable as unverified legacy messages
 
 Default TTL: `24 hours`
 
@@ -207,7 +210,7 @@ Implemented behavior:
 - SHA-256 produces a deterministic message hash.
 - Mutable relay hop count is normalized to zero when calculating the hash.
 - Relay rewriting changes the hop count without changing the message hash.
-- Legacy SOS schema versions 1, 2, and 3 remain readable.
+- Legacy SOS schema versions 1, 2, 3, and 4 remain readable as unverified reports.
 - Broadcast SOS messages retain plaintext in `payload_text` and set `security.encrypted` to false.
 - Targeted SOS messages set `payload_text` to null and place the key ID/version, ephemeral X25519 public key, random nonce, ciphertext, authentication tag, algorithm, and protocol version under `security`.
 - Immutable message metadata is authenticated as AES-GCM additional authenticated data; mutable hop count remains relay-editable.
@@ -224,18 +227,18 @@ Relevant files:
 
 ## Chat Payload Contract
 
-Current chat payload schema version: `2`
+Current chat payload schema version: `3` (signed); versions 1 and 2 remain readable as unverified legacy messages
 
 Implemented behavior:
 
 - Chat messages are targeted to a recipient device.
-- New chat payloads contain no plaintext body and use the same authenticated X25519/HKDF/AES-GCM envelope as targeted SOS.
+- New signed chat schema 3 payloads contain no plaintext body and use the same authenticated X25519/HKDF/AES-GCM envelope as targeted SOS.
 - Chat payloads include sender, recipient, conversation, routing, timestamp, and optional related-SOS metadata.
 - SHA-256 message hashing ignores mutable hop count.
 - A relay-only device stores and carries a chat envelope without displaying it.
 - The intended recipient opens or updates the conversation, applies spam classification, saves the message, increments unread state, and consumes the delivered SCF payload.
 
-Legacy chat schema version 1 remains readable for compatibility; production outgoing chat uses encrypted schema version 2.
+Legacy chat schemas 1 and 2 remain readable as unverified; production outgoing chat uses signed, encrypted schema 3.
 
 ## Store-Carry-Forward Relay
 
@@ -279,7 +282,7 @@ The Riverpod relay runtime currently:
 
 Current timing:
 
-- Periodic synchronization: every `4 seconds`.
+- Adaptive synchronization: every 4 seconds during recent queued traffic, 12 seconds foreground idle, or 30 seconds background idle. At battery level <=20% without charging, use 15 seconds for recent queued traffic or 60 seconds idle. Recent traffic is a two-minute queue window; older unexpired messages remain relayable. Native events still trigger an immediate receive and a debounced sync.
 - Native-event debounce: `350 milliseconds`.
 
 The term ECB-style describes immediate local processing after a nearby Shadow Network payload event. This is not Android's cellular Emergency Cell Broadcast API and does not bypass Android radio, permission, or background-execution rules.
@@ -336,7 +339,9 @@ The Android manifest declares permissions for:
 
 The foreground service displays the ongoing notification `Shadow Network relay active` with the text `Listening for nearby peers and queued messages.`
 
-Current boundary: background relaying is designed to continue while the Flutter process remains alive and the UI is paused. The foreground service itself mainly maintains Android foreground-service status; it does not independently rebuild the full Flutter relay runtime after process death, force-stop, reboot, or aggressive manufacturer battery management. Durable recovery still requires additional native scheduling/service work and real-device validation.
+The connected-device service and activity share one application-owned Flutter engine and native transport. Destroying the activity no longer stops that engine or radios. A sticky service restart recreates the engine, providers, SQLite-backed queue and validation-session capture without waiting for a UI frame. A receiver attempts restoration after reboot or an in-place package update only if relay was previously enabled. Force-stop and manufacturer restrictions still require user/device intervention; no physical-phone recovery result is claimed. Permission dialogs are requested only from an attached foreground activity.
+
+BLE advertising and scanning use balanced modes. Scan windows are active 15s/on and 5s/off, balanced 8s/on and 22s/off, or low-battery 6s/on and 54s/off. Advertising/GATT reception remain enabled between scan windows. These policies require measured battery and delivery comparisons before claiming savings.
 
 ## Offline Map and Location
 
@@ -410,7 +415,9 @@ simulation. This adds no transport, database, or encryption changes.
 
 The separate Flutter web admin currently supports:
 
-- Registering a device ID, encryption public key, owner name, and role.
+- Registering a user full name/unit, role, device ID, encryption public key and Ed25519 signing public key.
+- Verifying the phone registration QR signature before form auto-fill.
+- Replacing phone keys for the same device ID after confirmation, resetting approval to pending and requiring a new distributed bundle.
 - PC-camera scanning of a phone registration QR to auto-fill the exact Device ID and public-key fields.
 - Roles: civilian, responder, relay, and admin.
 - Initial pending status for new registrations.
@@ -423,7 +430,7 @@ The separate Flutter web admin currently supports:
 - Copying the trust bundle or displaying it as a QR code.
 - Empty validation-metric placeholders rather than fabricated values.
 
-The Android app verifies the signed bundle before replacing local trust state. Bundle versions increase monotonically, older versions and altered same-version bundles are rejected, failed imports preserve the last valid bundle, and a different administrator key is rejected after first-use pinning. Approved devices are normal recipients and receive an Approved/Verified trust indicator; unknown senders remain visible as Unverified; revoked senders are retained in Quarantine but excluded from normal feeds, maps, and automatic relay.
+The Android app verifies the signed bundle before replacing local trust state. Bundle versions increase monotonically, older versions and altered same-version bundles are rejected, failed imports preserve the last valid bundle, and a different administrator key is rejected after first-use pinning. Approved devices remain eligible recipients; a message receives Verified only after its sender signature matches the approved signing public key; unknown senders remain visible as Unverified; revoked senders are retained in Quarantine but excluded from normal feeds, maps, and automatic relay.
 
 ### Admin limitations
 
@@ -460,8 +467,8 @@ The Android app verifies the signed bundle before replacing local trust state. B
 
 - SOS schema 3 and `sn-sha256-stream-v1` remain readable only for migration compatibility and must not be used for new outgoing messages.
 - Broadcast SOS payload bodies remain plaintext by design.
-- Payload hashes are not digital signatures and do not authenticate the sender.
-- Approved/Verified labels indicate a match between the payload's claimed device ID and the signed administrative list; sender message signatures are still required to prevent device-ID spoofing cryptographically.
+- SHA-256 hashes provide deduplication; new SOS schema 5/chat schema 3 additionally authenticate immutable payload content using Ed25519 signatures.
+- Verified labels require a valid sender signature and a matching, unexpired administrative approval. Unknown self-signed messages remain Unverified. Legacy unsigned messages never inherit approval from a claimed device ID; database migration 12 removes earlier unsupported approved-message labels. Invalid signatures are rejected before storage ACK and before outbound transfer. Signing does not prove that emergency content is factually true.
 - The PC administrator signing key and registry are browser-local and do not yet have admin login, audit logging, backup, or secure multi-PC synchronization.
 - Clearing application data rotates the private key; the replacement public key must be re-registered and redistributed before older targeted envelopes can be decrypted.
 
@@ -568,11 +575,11 @@ The updated use case diagram contains one `<<include>>` relationship: Broadcast 
 
 ## Current Known Risks
 
-1. The fixed four-second relay loop and low-latency BLE scan mode can consume significant battery.
-2. Background operation is not guaranteed after process death, force-stop, reboot, or manufacturer-specific battery restrictions.
-3. Encryption protects confidentiality and integrity, but messages do not yet carry sender signatures.
+1. Adaptive relay/scan policies are implemented; their actual battery savings and delivery tradeoffs require field measurement.
+2. Service-owned engine recovery is implemented; process-death, reboot, screen-off and manufacturer behavior remain physically unvalidated. Force-stop is not bypassed.
+3. Sender signatures verify authorship against current approved keys; false content from approved users and authenticated next-hop ACKs remain unresolved.
 4. Admin registration and signing keys remain browser-local without authenticated backend persistence or audit logs.
-5. Trust classification relies on a claimed sender device ID because per-message sender signatures are not yet implemented.
+5. New signing keys require re-registration and redistribution. Old signed payloads do not become verified under a replacement key; historical retired-key acceptance is not implemented.
 6. Wi-Fi Direct behavior can require Android system interaction and varies by device and OS version.
 7. Real BLE/Wi-Fi Direct reliability, range, latency, and fallback behavior require multi-device field tests.
 8. Validation sessions remain phone-local and require manual export; there is no cross-device aggregation or automatic admin synchronization.
@@ -583,19 +590,38 @@ The updated use case diagram contains one `<<include>>` relationship: Broadcast 
 
 The phased implementation roadmap for these priorities is maintained in `IMPLEMENTATION_PLAN.md`.
 
-1. Add sender signatures and define trusted key-rotation/retirement handling for historical messages.
+1. Define historical signing-key retirement/rotation handling and add authenticated next-hop ACKs.
 2. Add a secure admin backend or controlled local synchronization service with authentication, audit logs, signing-key backup, and stable persistence.
 3. Implement authenticated mobile-rescuer-to-admin metric synchronization and cross-device session aggregation.
-4. Add adaptive, battery-aware scanning and a durable Android background recovery strategy.
+4. Validate service recovery and adaptive scan battery/delivery behavior on physical Android devices.
 5. Perform structured tests with at least sender, relay, and rescuer Android devices across indoor and outdoor distances.
 6. Run persisted validation sessions and record delivery rate, discovery time, node latency, end-to-end propagation, hop count, transport fallback, and battery impact for each trial.
 7. Expand and verify offline map coverage for the final deployment area.
 
 ## Adviser Summary
 
-Shadow Network currently provides a working capstone foundation for offline, device-to-device disaster messaging: local relational persistence, structured SOS and chat payloads, Store-Carry-Forward routing, deterministic message hashing, TTL and hop-count processing, same-sender spam detection, offline map support, Android BLE/Wi-Fi Direct transport code, background foreground-service visibility, X25519/HKDF/AES-GCM encrypted targeted messaging, secure on-device private-key storage, Ed25519-signed and versioned trust bundles, persisted device trust, revoked-message quarantine, and Version 8 responder validation sessions backed by real telemetry and exportable metrics. The next stage should focus on sender authentication, reliable background execution, battery optimization, secure admin persistence, authenticated mobile-to-admin synchronization, and controlled three-device field testing.
+Shadow Network currently provides a working capstone foundation for offline, device-to-device disaster messaging: local relational persistence, structured SOS and chat payloads, Store-Carry-Forward routing, deterministic message hashing, TTL and hop-count processing, same-sender spam detection, offline map support, Android BLE/Wi-Fi Direct transport code, background foreground-service visibility, X25519/HKDF/AES-GCM encrypted targeted messaging, secure on-device private-key storage, Ed25519-signed and versioned trust bundles, persisted device trust, revoked-message quarantine, and Version 8 responder validation sessions backed by real telemetry and exportable metrics. The next stage should validate sender authentication, service recovery and adaptive scanning on physical devices, then address secure admin persistence, authenticated mobile-to-admin synchronization and controlled three-device field testing.
+
+## Sender-signature and recovery update (2026-10-20)
+
+- Database 12 adds trusted-device signing public keys and downgrades historical message labels that lacked cryptographic sender proof.
+- New production writers use signed SOS 5/chat 3. The signed canonical map includes ciphertext or broadcast text, sender, recipient, timestamps, TTL, location/category and signing metadata. Hop count alone remains mutable. Legacy hash/encryption readers remain unchanged.
+- Signed TTL is anchored to the original creation timestamp; a relay cannot extend it by altering an envelope expiry.
+- The admin bundle stays schema 2 with optional, signed `signing_public_key` fields; existing records without this field remain readable but cannot verify sender messages. Registration QR version 2 proves possession of the signing key and binds both public keys. Manual public-key entry remains an administrator-controlled path.
+- All participating phones must update together and users must re-register the phone signing key, obtain approval, and distribute/import a newer bundle before expecting verified messages or responder access.
+- Admin storage remains browser-local. Sender signatures do not make radio identity exchanges or storage ACKs cryptographically authenticated.
 
 ## Verification Record
+
+Defense-minutes app improvements verified on 2026-10-20:
+
+- `flutter analyze --no-pub`: no issues found.
+- `flutter test --no-pub --coverage`: all 168 tests passed. New checks cover signing-key persistence/concurrency, signed QR tampering, approved/unknown/revoked signatures, impersonation and metadata changes, canonical JSON reordering, encrypted signed SOS/chat through relay hops, production SOS writer integration, signed TTL extension rejection, inbound rejected ACKs, outbound validation of tampered queues, signed admin export/import, database-11-to-12 preservation, responder signing-key matching and power policy decisions.
+- `flutter build apk --debug --no-pub`: produced `build/app/outputs/flutter-apk/app-debug.apk` with service-owned engine, reboot/update receiver and BLE duty-cycle code compiled.
+- `flutter build web --no-pub -t lib/admin_web_main.dart`: produced `build/web`. Flutter reported its existing Cupertino-font availability warning; compilation succeeded.
+- `adb devices -l`: no attached Android devices. No phone install, screen-off/process-death/reboot/permission trial, measured battery comparison, range trial, or three-device multi-hop field run was performed. Native compilation and mock tests do not establish those outcomes.
+- Update participating phones together, retain app data, re-register both public keys, approve the user/phone, and distribute/import a newer signed trust bundle. Old bundles lack the signing key needed for verified messages and current responder access.
+
 
 Rescuer timing UI (receipt roadmap Phase 3) verified on 2026-10-14:
 

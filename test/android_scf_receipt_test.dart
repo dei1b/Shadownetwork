@@ -30,6 +30,18 @@ void main() {
   );
 
   test(
+    'adaptive power profile is sent to the native relay without changing transport frames',
+    () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'setPowerProfile');
+        expect(call.arguments, {'profile': 'saving'});
+        return null;
+      });
+      await AndroidScfTransport(channel: channel).setPowerProfile('saving');
+    },
+  );
+
+  test(
     'Android send passes transfer ID and returns native monotonic ACK latency',
     () async {
       messenger.setMockMethodCallHandler(channel, (call) async {

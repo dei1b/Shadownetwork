@@ -10,6 +10,7 @@ class DeviceAccessResolver {
     required int keyVersion,
     required TrustBundle? bundle,
     DateTime? now,
+    String? signingPublicKey,
   }) {
     final normalizedDeviceId = deviceId.trim();
     final revokedDevice = _findDevice(
@@ -42,7 +43,11 @@ class DeviceAccessResolver {
       return DeviceAccessProfile.unregistered(deviceId: normalizedDeviceId);
     }
 
-    if (!_matchesLocalKey(approvedDevice, publicKey, keyVersion)) {
+    if (!_matchesLocalKey(approvedDevice, publicKey, keyVersion) ||
+        (signingPublicKey != null &&
+            (approvedDevice.signingPublicKey == null ||
+                _withoutPadding(approvedDevice.signingPublicKey!) !=
+                    _withoutPadding(signingPublicKey)))) {
       return DeviceAccessProfile(
         deviceId: normalizedDeviceId,
         ownerName: approvedDevice.ownerName,

@@ -22,6 +22,7 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(relayRuntimeProvider.notifier).setBackground(false);
       ref.read(relayRuntimeProvider.notifier).start();
       unawaited(
         ref
@@ -42,6 +43,7 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
     final controller = ref.read(relayRuntimeProvider.notifier);
     switch (state) {
       case AppLifecycleState.resumed:
+        controller.setBackground(false);
         controller.start();
         unawaited(
           ref
@@ -52,6 +54,7 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
       case AppLifecycleState.inactive:
+        controller.setBackground(true);
         // Keep the relay alive while the UI is backgrounded. Android keeps the
         // native radio work visible through a foreground service notification.
         unawaited(
@@ -61,7 +64,7 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
         );
         break;
       case AppLifecycleState.detached:
-        controller.stop();
+        controller.setBackground(true);
         unawaited(
           ref
               .read(validationSessionProvider.notifier)

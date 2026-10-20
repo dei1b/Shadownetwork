@@ -33,12 +33,14 @@ import '../../domain/repositories/sos_message_repository.dart';
 import '../../domain/services/scf_transport.dart';
 import '../../domain/services/spam_detection_service.dart';
 import '../../../security/data/services/device_identity_store.dart';
+import '../../../security/data/services/device_signing_identity_store.dart';
+import '../../../security/domain/entities/device_signing_identity.dart';
+import '../../../security/data/services/message_authentication_service.dart';
 import '../../../security/data/services/message_encryption_service.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../trust/data/services/trust_bundle_store.dart';
 import '../../../trust/data/repositories/sqlite_trust_repository.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
-import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
 import '../../../validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
@@ -93,6 +95,17 @@ final deviceCryptoIdentityProvider = FutureProvider<DeviceCryptoIdentity>((
   return ref.watch(deviceIdentityStoreProvider).loadOrCreate();
 });
 
+final deviceSigningIdentityStoreProvider = Provider<DeviceSigningIdentityStore>(
+  (ref) => DeviceSigningIdentityStore(),
+);
+final deviceSigningIdentityProvider = FutureProvider<DeviceSigningIdentity>(
+  (ref) => ref.watch(deviceSigningIdentityStoreProvider).loadOrCreate(),
+);
+final messageAuthenticationServiceProvider =
+    Provider<MessageAuthenticationService>(
+      (ref) => const MessageAuthenticationService(),
+    );
+
 final messageEncryptionServiceProvider = Provider<MessageEncryptionService>(
   (ref) => MessageEncryptionService(),
 );
@@ -125,13 +138,11 @@ final scfRelayServiceProvider = FutureProvider<ScfRelayService>((ref) async {
   return ScfRelayService(
     scfService: scfService,
     transport: transport,
-    originTrustResolver: (payloadJson) async {
-      final senderPeerId = RelayPayloadCodec.senderPeerId(payloadJson);
-      if (senderPeerId == null) {
-        return DeviceTrustStatus.unknown;
-      }
-      return (await trustRepository.getDevice(senderPeerId)).status;
-    },
+    originTrustResolver: (payloadJson) async =>
+        (await ref
+                .read(messageAuthenticationServiceProvider)
+                .authenticate(payloadJson, trustRepository))
+            .status,
     metricsRecorder: metricsRecorder,
   );
 });
@@ -241,8 +252,15 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
       encryptionService: ref.read(messageEncryptionServiceProvider),
       recipientPublicKey: recipientPublicKey,
       recipientKeyVersion: recipient?.keyVersion ?? 1,
+      signingIdentity: await ref.read(deviceSigningIdentityProvider.future),
     );
+    final authenticatedSender = await ref
+        .read(messageAuthenticationServiceProvider)
+        .authenticate(prepared.payloadJson, trustRepository);
     final securedMessage = moderatedMessage.copyWith(
+      trustStatus: authenticatedSender.status,
+      trustRole: authenticatedSender.role,
+      trustOwnerName: authenticatedSender.ownerName,
       messageHash: prepared.hash,
     );
     await repository.saveMessage(securedMessage);
@@ -312,8 +330,15 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
       encryptionService: ref.read(messageEncryptionServiceProvider),
       recipientPublicKey: recipient?.publicKey,
       recipientKeyVersion: recipient?.keyVersion ?? 1,
+      signingIdentity: await ref.read(deviceSigningIdentityProvider.future),
     );
+    final authenticatedSender = await ref
+        .read(messageAuthenticationServiceProvider)
+        .authenticate(prepared.payloadJson, trustRepository);
     final securedMessage = moderatedMessage.copyWith(
+      trustStatus: authenticatedSender.status,
+      trustRole: authenticatedSender.role,
+      trustOwnerName: authenticatedSender.ownerName,
       messageHash: prepared.hash,
       isEncrypted: trustedMessage.recipient != null,
     );

@@ -2,26 +2,25 @@ package com.example.shadownetwork
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
+import android.content.Context
 
 class MainActivity : FlutterActivity() {
-    private lateinit var androidTransport: AndroidTransportBridge
+    override fun provideFlutterEngine(context: Context): FlutterEngine = RelayEngineHost.getOrCreate(context)
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
-        androidTransport = AndroidTransportBridge(this)
-        val channel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            AndroidTransportBridge.CHANNEL_NAME,
-        )
-        androidTransport.attachChannel(channel)
-        channel.setMethodCallHandler(androidTransport::handle)
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
+    override fun onResume() {
+        super.onResume()
+        RelayEngineHost.attachActivity(this)
+    }
+
+    override fun onPause() {
+        RelayEngineHost.attachActivity(null)
+        super.onPause()
     }
 
     override fun onDestroy() {
-        if (::androidTransport.isInitialized) {
-            androidTransport.stop()
-        }
+        // The connected-device service owns the engine and radios after the UI closes.
         super.onDestroy()
     }
 }

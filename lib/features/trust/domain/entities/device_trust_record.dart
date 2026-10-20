@@ -12,6 +12,7 @@ class DeviceTrustRecord {
     required this.adminUpdatedAt,
     required this.importedAt,
     this.publicKey,
+    this.signingPublicKey,
   });
 
   const DeviceTrustRecord.unknown(String deviceId)
@@ -32,6 +33,7 @@ class DeviceTrustRecord {
   final String role;
   final DeviceTrustStatus status;
   final String? publicKey;
+  final String? signingPublicKey;
   final int keyVersion;
   final int bundleVersion;
   final String bundleHash;

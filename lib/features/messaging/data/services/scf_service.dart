@@ -66,7 +66,10 @@ class ScfService {
     }
 
     final now = (receivedAt ?? DateTime.now()).toUtc();
-    final expiresAt = now.add(ttl ?? defaultTtl);
+    final expiresAt =
+        RelayPayloadCodec.signedExpiry(payloadJson) ??
+        now.add(ttl ?? defaultTtl);
+    if (!expiresAt.isAfter(now)) return false;
     final messageHash = RelayPayloadCodec.hashPayload(payloadJson);
     final envelope = ScfEnvelope(
       messageHash: messageHash,
@@ -88,6 +91,10 @@ class ScfService {
       throw const FormatException('SCF envelope hash does not match payload.');
     }
 
+    final signedExpiry = RelayPayloadCodec.signedExpiry(envelope.payloadJson);
+    if (signedExpiry != null && envelope.expiresAt.isAfter(signedExpiry)) {
+      envelope = envelope.copyWith(expiresAt: signedExpiry);
+    }
     final timestamp = (now ?? DateTime.now()).toUtc();
     if (envelope.isExpired(timestamp)) {
       return false;
@@ -263,6 +270,24 @@ class ScfService {
     }
 
     return ScfPeerDeliveryModel.fromMap(rows.single);
+  }
+
+  Future<bool> hasRecentQueuedEnvelopes() async {
+    final rows = await _database.query(
+      LocalMessagingDatabase.scfMessagesTable,
+      columns: ['message_hash'],
+      where: 'expires_at > ? AND origin_trust_status != ? AND received_at >= ?',
+      whereArgs: [
+        DateTime.now().toUtc().toIso8601String(),
+        DeviceTrustStatus.revoked.name,
+        DateTime.now()
+            .toUtc()
+            .subtract(const Duration(minutes: 2))
+            .toIso8601String(),
+      ],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
   }
 
   Future<List<ScfEnvelope>> getStoredEnvelopes({DateTime? now}) async {

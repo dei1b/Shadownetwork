@@ -25,6 +25,10 @@ class AndroidScfTransport implements ScfTransport {
   static final StreamController<void> _relayEvents =
       StreamController<void>.broadcast();
 
+  static final StreamController<void> _relayStops =
+      StreamController<void>.broadcast();
+  Stream<void> get stopRequests => _relayStops.stream;
+
   @override
   final String localPeerId;
 
@@ -32,6 +36,7 @@ class AndroidScfTransport implements ScfTransport {
   Stream<void> get relayEvents => _relayEvents.stream;
 
   static Future<void> _handleNativeRelayEvent(MethodCall call) async {
+    if (call.method == 'onRelayStopped') _relayStops.add(null);
     if (call.method == 'onRelayEvent') {
       _relayEvents.add(null);
     }
@@ -72,6 +77,9 @@ class AndroidScfTransport implements ScfTransport {
         }) ??
         false;
   }
+
+  Future<void> setPowerProfile(String profile) =>
+      _channel.invokeMethod<void>('setPowerProfile', {'profile': profile});
 
   Future<void> stop() async {
     await _channel.invokeMethod<void>('stop');

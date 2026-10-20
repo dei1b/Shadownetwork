@@ -29,6 +29,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   final TextEditingController _deviceIdController = TextEditingController();
   final TextEditingController _ownerController = TextEditingController();
   final TextEditingController _publicKeyController = TextEditingController();
+  final TextEditingController _signingKeyController = TextEditingController();
 
   List<RegisteredDevice> _devices = const [];
   RegisteredDeviceRole _selectedRole = RegisteredDeviceRole.civilian;
@@ -47,6 +48,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     _deviceIdController.dispose();
     _ownerController.dispose();
     _publicKeyController.dispose();
+    _signingKeyController.dispose();
     super.dispose();
   }
 
@@ -84,21 +86,49 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     final deviceId = _deviceIdController.text.trim();
     final owner = _ownerController.text.trim();
     final publicKey = _publicKeyController.text.trim();
-    if (deviceId.isEmpty || owner.isEmpty || publicKey.isEmpty) {
-      _showSnackBar('Device ID, owner, and public key are required.');
+    final signingPublicKey = _signingKeyController.text.trim();
+    if (deviceId.isEmpty ||
+        owner.isEmpty ||
+        publicKey.isEmpty ||
+        signingPublicKey.isEmpty) {
+      _showSnackBar(
+        'User name, device ID, encryption key, and signing key are required.',
+      );
       return;
     }
-    if (!_isValidX25519PublicKey(publicKey)) {
-      _showSnackBar('Public key must be a 32-byte X25519 base64url key.');
+    if (!_isValidX25519PublicKey(publicKey) ||
+        !_isValidX25519PublicKey(signingPublicKey)) {
+      _showSnackBar(
+        'Encryption and signing public keys must each contain 32 bytes.',
+      );
       return;
     }
 
     final alreadyRegistered = _devices.any(
-      (device) => device.deviceId.toUpperCase() == deviceId,
+      (device) =>
+          device.deviceId.trim().toLowerCase() == deviceId.toLowerCase(),
     );
     if (alreadyRegistered) {
-      _showSnackBar('$deviceId is already registered.');
-      return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Replace phone keys for this user?'),
+          content: const Text(
+            'The replacement requires approval and a new trust bundle. Previously encrypted messages still require the old phone key.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Replace and review'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
     }
 
     final now = DateTime.now().toUtc();
@@ -112,15 +142,20 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         updatedAt: now,
         lastSeenLabel: 'New registration',
         publicKey: publicKey,
+        signingPublicKey: signingPublicKey,
         keyVersion: _registrationKeyVersion,
       ),
-      ..._devices,
+      ..._devices.where(
+        (device) =>
+            device.deviceId.trim().toLowerCase() != deviceId.toLowerCase(),
+      ),
     ];
 
     await _saveDevices(nextDevices);
     _deviceIdController.clear();
     _ownerController.clear();
     _publicKeyController.clear();
+    _signingKeyController.clear();
     setState(() {
       _selectedRole = RegisteredDeviceRole.civilian;
       _registrationKeyVersion = 1;
@@ -138,12 +173,25 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 
     try {
       final registration = DeviceRegistrationQr.fromJsonString(source);
+      await registration.verifySignature();
+      if (!mounted) return;
       setState(() {
         _deviceIdController.text = registration.deviceId;
         _publicKeyController.text = registration.publicKey;
         _registrationKeyVersion = registration.keyVersion;
+        _signingKeyController.text = registration.signingPublicKey!;
+        for (final device in _devices) {
+          if (device.deviceId.toLowerCase() ==
+              registration.deviceId.toLowerCase()) {
+            _ownerController.text = device.ownerName;
+            _selectedRole = device.role;
+            break;
+          }
+        }
       });
-      _showSnackBar('Device ID and encryption key filled from the phone QR.');
+      _showSnackBar(
+        'Phone registration signature checked. Enter the user name and role.',
+      );
     } on FormatException catch (error) {
       _showSnackBar(error.message);
     }
@@ -193,7 +241,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Edit registered device'),
+              title: const Text('Edit registered user'),
               content: SizedBox(
                 width: 440,
                 child: Form(
@@ -220,12 +268,12 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                       TextFormField(
                         controller: ownerController,
                         decoration: const InputDecoration(
-                          labelText: 'Device name / username',
+                          labelText: 'User full name / Unit name',
                           prefixIcon: Icon(Icons.person_outline_rounded),
                         ),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                            ? 'Device name or username is required.'
+                            ? 'User full name or unit name is required.'
                             : null,
                       ),
                       const SizedBox(height: 16),
@@ -251,7 +299,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                       ),
                       const SizedBox(height: 12),
                       const Text(
-                        'The device ID and encryption key cannot be edited. Delete and register the phone again to replace its identity.',
+                        'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
                         style: TextStyle(
                           color: _mobileMuted,
                           fontSize: 12,
@@ -464,6 +512,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
             deviceIdController: _deviceIdController,
             ownerController: _ownerController,
             publicKeyController: _publicKeyController,
+            signingKeyController: _signingKeyController,
             onRoleChanged: (value) => setState(() => _selectedRole = value),
             onRegister: _registerDevice,
             onScanRegistrationQr: _scanDeviceRegistrationQr,
@@ -491,6 +540,7 @@ class _AdminDashboardBody extends StatelessWidget {
     required this.deviceIdController,
     required this.ownerController,
     required this.publicKeyController,
+    required this.signingKeyController,
     required this.onRoleChanged,
     required this.onRegister,
     required this.onScanRegistrationQr,
@@ -507,6 +557,7 @@ class _AdminDashboardBody extends StatelessWidget {
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
   final TextEditingController publicKeyController;
+  final TextEditingController signingKeyController;
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
   final VoidCallback onScanRegistrationQr;
@@ -538,6 +589,7 @@ class _AdminDashboardBody extends StatelessWidget {
                         deviceIdController: deviceIdController,
                         ownerController: ownerController,
                         publicKeyController: publicKeyController,
+                        signingKeyController: signingKeyController,
                         selectedRole: selectedRole,
                         onRoleChanged: onRoleChanged,
                         onRegister: onRegister,
@@ -777,6 +829,7 @@ class _RegisterDeviceCard extends StatelessWidget {
     required this.deviceIdController,
     required this.ownerController,
     required this.publicKeyController,
+    required this.signingKeyController,
     required this.selectedRole,
     required this.onRoleChanged,
     required this.onRegister,
@@ -786,6 +839,7 @@ class _RegisterDeviceCard extends StatelessWidget {
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
   final TextEditingController publicKeyController;
+  final TextEditingController signingKeyController;
   final RegisteredDeviceRole selectedRole;
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
@@ -794,9 +848,9 @@ class _RegisterDeviceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Panel(
-      title: 'Register Device',
+      title: 'Register User',
       subtitle:
-          'PC admins can approve phones before disaster mode and export the trusted list.',
+          'Register a user and their phone, then approve their role for offline use.',
       child: Column(
         children: [
           SizedBox(
@@ -830,7 +884,7 @@ class _RegisterDeviceCard extends StatelessWidget {
           TextField(
             controller: ownerController,
             decoration: const InputDecoration(
-              labelText: 'Owner / Unit name',
+              labelText: 'User full name / Unit name',
               hintText: 'Example: Barangay Health Responder',
               prefixIcon: Icon(Icons.badge_rounded),
               border: OutlineInputBorder(),
@@ -844,6 +898,17 @@ class _RegisterDeviceCard extends StatelessWidget {
               labelText: 'X25519 public key',
               hintText: 'Paste from the phone Trust Bundle screen',
               prefixIcon: Icon(Icons.key_rounded),
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: signingKeyController,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              labelText: 'Ed25519 signing public key',
+              hintText: 'Filled from the phone registration QR',
+              prefixIcon: Icon(Icons.verified_user_outlined),
               border: OutlineInputBorder(),
             ),
           ),
@@ -1070,8 +1135,9 @@ class _DeviceTableCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Panel(
-      title: 'Device Registry',
-      subtitle: 'Approved devices can create verified SOS and relay messages.',
+      title: 'Registered users and phones',
+      subtitle:
+          'Verified messages require a valid sender signature matching the approved phone signing key.',
       child: devices.isEmpty
           ? const _RegistryEmptyState()
           : Column(

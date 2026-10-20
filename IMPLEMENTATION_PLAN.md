@@ -4,6 +4,8 @@ Created: 2026-08-03
 
 Source: `CURRENT_STATE.md`
 
+2026-10-20 implementation update: sender signatures, signed phone registration, same-device key replacement review, service-owned Flutter engine recovery and adaptive BLE scan/sync policies are implemented. User registration links a person/unit and role to their phone keys; there is no batch-registration requirement. Physical Android recovery, range, battery and three-device delivery gates remain unpassed. See the current security/protocol documents for exact rollout requirements.
+
 ## Objective
 
 Move Shadow Network from a functioning capstone prototype to a field-testable offline disaster messaging system with stronger cryptography, enforceable device trust, persistent validation metrics, controlled responder-to-admin synchronization, battery-aware background relay, verified offline map coverage, and complete project documentation.

@@ -36,6 +36,9 @@ import android.net.wifi.p2p.WifiP2pInfo
 import android.net.wifi.p2p.WifiP2pManager
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
+import android.os.Handler
+import android.os.Looper
+import java.lang.ref.WeakReference
 import android.os.Build
 import android.os.SystemClock
 import android.os.BatteryManager
@@ -63,14 +66,23 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
-internal class AndroidTransportBridge(private val activity: FlutterActivity) {
-    private val context: Context = activity.applicationContext
+internal class AndroidTransportBridge(private val context: Context) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var attachedActivity = WeakReference<FlutterActivity>(null)
+    private var permissionRequestPending = false
+    private var powerProfile = "balanced"
+    private var scanActive = false
+    private var scanCycle: Runnable? = null
+    fun attachActivity(activity: FlutterActivity?) {
+        attachedActivity = WeakReference(activity)
+        if (activity != null) permissionRequestPending = false
+    }
     private val bluetoothManager =
         context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     private val wifiP2pManager =
         context.getSystemService(Context.WIFI_P2P_SERVICE) as? WifiP2pManager
-    private val wifiChannel = wifiP2pManager?.initialize(context, activity.mainLooper, null)
+    private val wifiChannel = wifiP2pManager?.initialize(context, context.mainLooper, null)
     private val serviceUuid = ParcelUuid(SERVICE_UUID)
     private val running = AtomicBoolean(false)
     private val discoveredPeers = linkedMapOf<String, DiscoveredPeer>()
@@ -114,11 +126,20 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
             "getLocalPeer" -> result.success(localPeerMap())
             "getTransportStatus" -> result.success(transportStatusMap())
             "getBatteryStatus" -> result.success(batteryStatusMap())
+            "setPowerProfile" -> {
+                val profile = call.argument<String>("profile") ?: "balanced"
+                if (profile !in listOf("active", "balanced", "saving")) {
+                    result.error("INVALID_ARGUMENT", "Unsupported power profile.", null)
+                } else {
+                    powerProfile = profile
+                    result.success(null)
+                }
+            }
             "start" -> {
                 localPeerId = resolveLocalPeerId(call.argument<String>("localPeerId"))
                 localPeerName = resolveLocalPeerName(call.argument<String>("localPeerName"))
                 start()
-                result.success(true)
+                result.success(running.get())
             }
             "stop" -> {
                 stop()
@@ -208,6 +229,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
     fun stop() {
         running.set(false)
+        mainHandler.post { methodChannel?.invokeMethod("onRelayStopped", null) }
         pendingTransfers.values.forEach { it.fail("transport_stopped", "Relay stopped.") }
         pendingTransfers.clear()
         incomingTransfers.clear()
@@ -230,7 +252,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         result: MethodChannel.Result,
         block: MethodChannel.Result.() -> Unit,
     ) {
-        activity.runOnUiThread {
+        mainHandler.post {
             result.block()
         }
     }
@@ -300,7 +322,11 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
         val missing = missingPermissions()
 
         if (missing.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            activity.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST_CODE)
+            val activity = attachedActivity.get()
+            if (activity != null && !permissionRequestPending) {
+                permissionRequestPending = true
+                activity.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST_CODE)
+            }
             return false
         }
 
@@ -312,7 +338,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     private fun missingPermissions(): List<String> {
         return requiredPermissions().filter {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                activity.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+                context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -341,10 +367,10 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
     private fun start() {
         ensureLocalIdentity()
-        if (!ensurePermissions()) {
+        if (!hasRequiredPermissions()) {
             return
         }
-        RelayForegroundService.start(context)
+        if (!running.get() && !RelayForegroundService.start(context)) return
         if (running.compareAndSet(false, true)) {
             startBluetoothSocketServer()
             startWifiSocketServer()
@@ -364,7 +390,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
 
         advertiser?.let { bleAdvertiser ->
             val settings = AdvertiseSettings.Builder()
-                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
                 .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
                 .setConnectable(true)
                 .build()
@@ -382,7 +408,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                 .setServiceUuid(serviceUuid)
                 .build()
             val settings = ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setScanMode(ScanSettings.SCAN_MODE_BALANCED)
                 .build()
 
             scanCallback = object : ScanCallback() {
@@ -405,12 +431,30 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
                     resolveBleIdentityInBackground(result.device, signalStrength)
                 }
             }
-            bleScanner.startScan(listOf(filter), settings, scanCallback)
+            val callback = scanCallback ?: return
+            val cycle = object : Runnable {
+                override fun run() {
+                    if (!running.get() || scanCallback !== callback) return
+                    val onMs = when (powerProfile) { "active" -> 15_000L; "saving" -> 6_000L; else -> 8_000L }
+                    val offMs = when (powerProfile) { "active" -> 5_000L; "saving" -> 54_000L; else -> 22_000L }
+                    runCatching {
+                        if (scanActive) bleScanner.stopScan(callback)
+                        else bleScanner.startScan(listOf(filter), settings, callback)
+                    }.onFailure { scanActive = false }
+                        .onSuccess { scanActive = !scanActive }
+                    mainHandler.postDelayed(this, if (scanActive) onMs else offMs)
+                }
+            }
+            scanCycle = cycle
+            cycle.run()
         }
     }
 
     @SuppressLint("MissingPermission")
     private fun stopBle() {
+        scanCycle?.let { mainHandler.removeCallbacks(it) }
+        scanCycle = null
+        scanActive = false
         advertiseCallback?.let { advertiser?.stopAdvertising(it) }
         scanCallback?.let { scanner?.stopScan(it) }
         advertiseCallback = null
@@ -1149,7 +1193,7 @@ internal class AndroidTransportBridge(private val activity: FlutterActivity) {
     }
 
     private fun notifyRelayEvent(type: String) {
-        activity.runOnUiThread {
+        mainHandler.post {
             methodChannel?.invokeMethod("onRelayEvent", mapOf("type" to type))
         }
     }

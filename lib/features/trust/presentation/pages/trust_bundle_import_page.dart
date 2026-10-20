@@ -106,10 +106,16 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     Peer peer,
     DeviceCryptoIdentity identity,
   ) async {
-    final registration = DeviceRegistrationQr.fromIdentity(
+    final signingIdentity = await ref.read(
+      deviceSigningIdentityProvider.future,
+    );
+    if (!mounted) return;
+    final registration = await DeviceRegistrationQr.createSigned(
       deviceId: peer.id,
       identity: identity,
+      signingIdentity: signingIdentity,
     );
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) =>
@@ -446,7 +452,7 @@ class _HeaderBadge extends StatelessWidget {
   }
 }
 
-class _DeviceIdentityCard extends StatelessWidget {
+class _DeviceIdentityCard extends ConsumerWidget {
   const _DeviceIdentityCard({
     required this.localPeer,
     required this.cryptoIdentity,
@@ -462,7 +468,7 @@ class _DeviceIdentityCard extends StatelessWidget {
   final void Function(Peer, DeviceCryptoIdentity) onShowRegistrationQr;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return _TrustPanel(
       title: 'This Phone Device ID',
       subtitle: 'Register this exact ID in the PC admin dashboard.',
@@ -545,6 +551,54 @@ class _DeviceIdentityCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Signing public key',
+                    style: TextStyle(
+                      color: _trustRedDark,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ref
+                      .watch(deviceSigningIdentityProvider)
+                      .when(
+                        data: (signing) => Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SelectableText(
+                              signing.encodedPublicKey,
+                              style: const TextStyle(
+                                color: _trustMuted,
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              ),
+                            ),
+                            TextButton.icon(
+                              onPressed: () async {
+                                await Clipboard.setData(
+                                  ClipboardData(text: signing.encodedPublicKey),
+                                );
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Signing public key copied.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.copy),
+                              label: const Text('Copy signing key'),
+                            ),
+                          ],
+                        ),
+                        loading: () => const LinearProgressIndicator(),
+                        error: (_, _) => const Text(
+                          'Unable to load signing key. Reopen this screen to retry.',
+                        ),
+                      ),
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,

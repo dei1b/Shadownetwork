@@ -75,6 +75,10 @@ class ScfRelayService {
               'message_created_at': messageCreatedAt.toIso8601String(),
           },
         );
+        // Authenticate before writing or acknowledging. Invalid signatures never enter the relay queue.
+        final trustStatus = await originTrustResolver?.call(
+          envelope.payloadJson,
+        );
         final stored = await _scfService.storeEnvelope(envelope, now: now);
         final activeDuplicate =
             !stored &&
@@ -85,9 +89,7 @@ class ScfRelayService {
             );
         if (stored || activeDuplicate) {
           accepted = true;
-          final resolver = originTrustResolver;
-          if (resolver != null) {
-            final trustStatus = await resolver(envelope.payloadJson);
+          if (trustStatus != null) {
             await _scfService.updateOriginTrustStatus(
               messageHash: envelope.messageHash,
               status: trustStatus,
@@ -185,6 +187,20 @@ class ScfRelayService {
       final stopwatch = Stopwatch()..start();
       var sentRecorded = false;
       try {
+        final trustStatus = await originTrustResolver?.call(
+          envelope.payloadJson,
+        );
+        if (trustStatus != null) {
+          await _scfService.updateOriginTrustStatus(
+            messageHash: envelope.messageHash,
+            status: trustStatus,
+          );
+          if (trustStatus == DeviceTrustStatus.revoked) {
+            throw const FormatException(
+              'Origin device is revoked; retained in quarantine.',
+            );
+          }
+        }
         final transfer = await _transport.sendEnvelope(
           peer: peer,
           envelope: envelope,

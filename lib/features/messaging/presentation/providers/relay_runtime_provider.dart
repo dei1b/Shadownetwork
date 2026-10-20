@@ -9,6 +9,9 @@ import '../../data/models/relay_payload_codec.dart';
 import '../../data/models/secure_chat_message_payload.dart';
 import '../../data/models/secure_sos_message_payload.dart';
 import '../../data/services/scf_service.dart';
+import '../../data/services/android_scf_transport.dart';
+import '../../domain/services/relay_power_policy.dart';
+import '../../../validation/presentation/providers/validation_session_provider.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
@@ -23,7 +26,6 @@ import '../../domain/repositories/sos_message_repository.dart';
 import '../../domain/services/spam_detection_service.dart';
 import '../../../security/data/services/message_encryption_service.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
-import '../../../trust/domain/entities/device_trust_record.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
 import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../validation/domain/entities/validation_event.dart';
@@ -104,9 +106,26 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   Timer? _syncTimer;
   Timer? _ecbDebounceTimer;
   StreamSubscription<void>? _relayEventSubscription;
+  StreamSubscription<void>? _relayStopSubscription;
+  int _epoch = 0;
   bool _syncInFlight = false;
   Future<int>? _receiveTask;
   bool _receiveRequested = false;
+  bool _enabled = false;
+  bool _background = true;
+  Duration _syncInterval = const Duration(seconds: 12);
+
+  void setBackground(bool value) {
+    _background = value;
+    if (_enabled && !_syncInFlight) unawaited(syncNow());
+  }
+
+  void _scheduleNextSync() {
+    _syncTimer?.cancel();
+    if (_enabled) {
+      _syncTimer = Timer(_syncInterval, () => unawaited(syncNow(force: false)));
+    }
+  }
 
   @override
   RelayRuntimeState build() {
@@ -115,15 +134,16 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }
 
   Future<void> start() async {
-    if (state.isRunning) {
+    if (_enabled) {
       await syncNow(force: false);
       return;
     }
 
+    _enabled = true;
     final transport = ref.read(scfTransportProvider);
     final transportStatus = await transport.getStatus();
     state = state.copyWith(
-      isRunning: true,
+      isRunning: transportStatus.isRunning,
       permissionsGranted: transportStatus.permissionsGranted,
       discoveredPeers: transportStatus.discoveredPeerCount,
       connectedPeers: transportStatus.connectedPeerCount,
@@ -131,10 +151,14 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       lastError: null,
     );
     _syncTimer?.cancel();
-    _syncTimer = Timer.periodic(_syncInterval, (_) {
-      unawaited(syncNow(force: false));
-    });
+
     _relayEventSubscription?.cancel();
+    _relayStopSubscription?.cancel();
+    if (transport is AndroidScfTransport) {
+      _relayStopSubscription = transport.stopRequests.listen(
+        (_) => stop(stopTransport: false),
+      );
+    }
     _relayEventSubscription = transport.relayEvents.listen((_) {
       // An outbound ACK wait must not prevent us acknowledging inbound data.
       unawaited(
@@ -148,7 +172,21 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     await syncNow(force: true);
   }
 
-  void stop() {
+  void stop({bool stopTransport = true}) {
+    _epoch++;
+    _enabled = false;
+    _relayStopSubscription?.cancel();
+    _relayStopSubscription = null;
+    if (stopTransport) {
+      final transport = ref.read(scfTransportProvider);
+      if (transport is AndroidScfTransport) {
+        unawaited(
+          transport.stop().catchError((Object error) {
+            state = state.copyWith(lastError: error.toString());
+          }),
+        );
+      }
+    }
     _syncTimer?.cancel();
     _syncTimer = null;
     _ecbDebounceTimer?.cancel();
@@ -164,7 +202,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }
 
   void _scheduleEmergencyCellBroadcastSync() {
-    if (!state.isRunning) return;
+    if (!_enabled) return;
 
     _ecbDebounceTimer?.cancel();
     _ecbDebounceTimer = Timer(_ecbDebounceDelay, () {
@@ -220,11 +258,12 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }
 
   Future<void> syncNow({bool force = true}) async {
-    if (_syncInFlight || (!force && !state.isRunning)) {
+    if (_syncInFlight || (!force && !_enabled)) {
       return;
     }
 
     _syncInFlight = true;
+    final epoch = _epoch;
     state = state.copyWith(isSyncing: true, lastError: null);
     final now = DateTime.now();
 
@@ -246,6 +285,19 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           occurredAt: now,
           messageHash: messageHash,
         );
+      }
+
+      final hasQueuedMessages = await scfService.hasRecentQueuedEnvelopes();
+      final battery = await ref.read(batterySamplerProvider).sample();
+      final power = RelayPowerPolicy.resolve(
+        background: _background,
+        hasQueuedMessages: hasQueuedMessages,
+        batteryPercent: battery?.percent,
+        charging: battery?.isCharging ?? false,
+      );
+      _syncInterval = power.syncInterval;
+      if (transport is AndroidScfTransport) {
+        await transport.setPowerProfile(power.profile);
       }
 
       final discoveryStartedAt = DateTime.now().toUtc();
@@ -278,12 +330,14 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         );
         rethrow;
       }
+      if (epoch != _epoch) return;
       await _persistPeerSnapshot(peerRepository, discoveredPeers, now);
 
       final receivedCount = await receiveIncoming();
 
       var relayedCount = 0;
       for (final peer in discoveredPeers) {
+        if (epoch != _epoch) return;
         final result = await relayService.relayToPeer(peer, now: now);
         relayedCount += result.sentCount;
         for (final hash in result.sentMessageHashes) {
@@ -305,9 +359,11 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         connectedPeers: transportStatus.connectedPeerCount,
         lastUpdated: now,
         localPeer: transportStatus.localPeer,
-        lastError: transportStatus.permissionsGranted
-            ? null
-            : 'Bluetooth, location, and nearby device permissions are required.',
+        lastError: !transportStatus.permissionsGranted
+            ? 'Bluetooth, location, and nearby device permissions are required.'
+            : !transportStatus.isRunning
+            ? 'Relay is paused. Open the app and check Bluetooth and Wi-Fi.'
+            : null,
         lastReceivedCount: receivedCount,
         lastRelayedCount: relayedCount,
       );
@@ -320,6 +376,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       );
     } finally {
       _syncInFlight = false;
+      _scheduleNextSync();
     }
   }
 
@@ -391,12 +448,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     var storedCount = 0;
     for (final envelope in envelopes) {
       try {
-        final senderPeerId = RelayPayloadCodec.senderPeerId(
-          envelope.payloadJson,
-        );
-        final senderTrust = senderPeerId == null
-            ? const DeviceTrustRecord.unknown('unknown')
-            : await trustRepository.getDevice(senderPeerId);
+        final senderTrust = await ref
+            .read(messageAuthenticationServiceProvider)
+            .authenticate(envelope.payloadJson, trustRepository);
         await scfService.updateOriginTrustStatus(
           messageHash: envelope.messageHash,
           status: senderTrust.status,
@@ -406,8 +460,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         if (RelayPayloadCodec.payloadType(envelope.payloadJson) ==
             ChatMessagePayload.payloadType) {
           final chat =
-              payload['schema_version'] ==
-                  SecureChatMessagePayload.schemaVersion
+              SecureChatMessagePayload.supportsVersion(
+                payload['schema_version'],
+              )
               ? await SecureChatMessagePayload.decode(
                   payload,
                   localPeerId: localPeer.id,
@@ -458,8 +513,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           storedCount++;
           continue;
         }
-        final isSecureSos =
-            payload['schema_version'] == SecureSosMessagePayload.schemaVersion;
+        final isSecureSos = SecureSosMessagePayload.supportsVersion(
+          payload['schema_version'],
+        );
         final targetPeerId = isSecureSos
             ? SecureSosMessagePayload.targetPeerId(envelope.payloadJson)
             : SosMessagePayload.targetPeerId(envelope.payloadJson);
@@ -548,6 +604,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }
 
   void _dispose() {
+    _epoch++;
+    _enabled = false;
+    _relayStopSubscription?.cancel();
     _syncTimer?.cancel();
     _syncTimer = null;
     _ecbDebounceTimer?.cancel();
@@ -605,5 +664,4 @@ final relayRuntimeProvider =
       RelayRuntimeController.new,
     );
 
-const _syncInterval = Duration(seconds: 4);
 const _ecbDebounceDelay = Duration(milliseconds: 350);

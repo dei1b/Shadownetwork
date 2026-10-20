@@ -1,8 +1,8 @@
 # Shadow Network Protocol Compatibility Policy
 
-Status: Updated for acknowledged hop transfers
+Status: Updated for sender signatures and service recovery
 
-Updated: 2026-10-14
+Updated: 2026-10-20
 
 ## Purpose
 
@@ -22,10 +22,10 @@ This policy defines how Shadow Network devices handle database versions, transpo
 
 | Layer | Current writer | Supported readers | Unknown future version |
 |---|---:|---|---|
-| SQLite database | 11 | Sequential migrations 1 through 11 | App must not open without a defined migration |
+| SQLite database | 12 | Sequential migrations 1 through 12 | App must not open without a defined migration |
 | Android transport handshake/frame | 2 | Exact protocol version 2 | Reject as incompatible peer |
-| SOS payload | 4 | 1, 2, 3, 4 | Reject visible parsing; do not guess fields |
-| Chat payload | 2 | 1, 2 | Reject visible parsing; do not guess fields |
+| SOS payload | 5 | 1, 2, 3, 4, 5 | Reject visible parsing; do not guess fields |
+| Chat payload | 3 | 1, 2, 3 | Reject visible parsing; do not guess fields |
 | Trust bundle | 2 | Signed schema 2 | Reject import and keep last valid bundle |
 | Targeted message security | `x25519-hkdf-sha256-aes-256-gcm-v1` | SOS v4 and chat v2 | Reject unknown algorithm, key, or authentication tag |
 | Legacy targeted SOS security | `sn-sha256-stream-v1` | SOS v3 read compatibility only | Never use for new outgoing messages |
@@ -45,13 +45,13 @@ This policy defines how Shadow Network devices handle database versions, transpo
 - Schema 1 is accepted as a legacy broadcast SOS with the default 24-hour TTL.
 - Schema 2 is accepted as a hashed structured broadcast SOS.
 - Schema 3 remains readable and supports broadcast or targeted prototype-encrypted SOS.
-- Schema 4 is the current writer. Targeted bodies use X25519, HKDF-SHA-256, and AES-256-GCM.
+- Schema 4 remains a legacy reader. Schema 5 is the current signed writer. Targeted bodies use X25519, HKDF-SHA-256, and AES-256-GCM.
 - A relay may update allowed hop metadata without changing the stable message hash.
 - A non-recipient does not parse a targeted SOS into a visible message.
 
 ### Chat
 
-- Schema 2 is the current encrypted targeted-chat writer; schema 1 remains readable.
+- Schema 3 is the current signed, encrypted targeted-chat writer; schemas 1 and 2 remain readable as unverified legacy records.
 - A non-recipient stores and relays the envelope without adding it to a visible conversation.
 
 ### Android transport
@@ -84,13 +84,25 @@ There must be no writer switch before recipients have the required reader and ke
 
 | Contract | Current version | Purpose |
 |---|---:|---|
-| SQLite database | 11 | Trust, validation sessions, SOS receipts (10), and indexed transfer events (11) |
-| SOS payload | 4 | Standard recipient encryption and explicit security versioning |
-| Chat payload | 2 | Standard recipient encryption |
+| SQLite database | 12 | Prior data plus device signing keys and verified-label correction |
+| SOS payload | 5 | Ed25519 sender signature plus existing recipient encryption |
+| Chat payload | 3 | Ed25519 sender signature plus existing recipient encryption |
 | Trust bundle | 2 | Bundle version, public keys, issuer, and signature |
 | Transport protocol | 2 | Per-attempt identity and receiver-storage ACK framing |
 
 Transport 2 is independent of the unchanged targeted-message encryption suite.
+
+## Sender-signature rollout (2026-10-20)
+
+1. Update all participating phones without clearing app data. Transport remains version 2, but older applications cannot accept the new payload schemas.
+2. Show the new version-2 registration QR. The administrator verifies its self signature, records the user name/role and both public keys, approves the registration and exports a newer signed bundle.
+3. Import that bundle on all sender, relay and responder phones. Responder role access requires both registered keys to match the phone.
+4. Outgoing SOS 5/chat 3 always include an Ed25519 signature. Helpers still support explicit legacy fixtures. Signed hashes use canonical JSON of the full payload except `message_hash`, with `routing.hop_count` normalized to zero. Signature input uses the same normalization, excludes the signature value, and adds the domain `shadow-network-sender-signature-v1` followed by a newline. New encrypted schemas use canonical JSON for additional authenticated data; old schemas retain their exact original hash/AAD behavior.
+5. Validate at both inbound acceptance and outbound transfer. A bad/missing required signature or registered-key mismatch rejects transfer. Unknown self-signed origins remain unverified and relayable. Revoked origins remain quarantined and receive a rejected ACK. Legacy unsigned messages never receive Verified from a claimed device ID.
+6. Original signed creation time plus TTL caps envelope expiry. Neither retry nor relay metadata can extend it. Hop count remains an observational routing field, not proof of the physical route.
+7. Replacing keys requires fresh approval. Old queued signatures do not verify under replacement keys; already stored history is retained. There is no historical retired-key acceptance mechanism yet.
+
+Trust bundles remain signed schema 2 with an optional `signing_public_key` field per device. Existing bundles stay readable. QR schema 1 remains parseable for legacy fixtures, but the admin scanner requires signed QR schema 2 for new automatic registration.
 
 ## Failure Handling
 

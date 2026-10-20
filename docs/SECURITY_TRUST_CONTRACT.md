@@ -1,12 +1,12 @@
 # Shadow Network Security and Trust Contract Draft
 
-Status: Phase 1 encryption and Phase 2 signed trust enforcement implemented
+Status: Encryption, signed trust bundles and sender message signatures implemented
 
-Updated: 2026-10-14
+Updated: 2026-10-20
 
 ## Scope
 
-This document defines the implemented security boundaries for standard targeted-message encryption and signed device trust. Sender message signatures and secure multi-admin key management remain future hardening work.
+This document defines the implemented security boundaries for standard targeted-message encryption and signed device trust. New SOS 5/chat 3 carry Ed25519 sender signatures. Secure multi-admin key management, signed ACKs and historical key retirement remain future hardening work.
 
 ## Security Goals
 
@@ -174,7 +174,7 @@ The implemented capstone policy retains revoked-origin payloads for audit but ex
 - Approved recipients with valid X25519 keys are selectable for targeted encryption; missing keys prevent publication or sending.
 - Revoked-origin messages are retained in Quarantine, excluded from normal feeds and maps, and not automatically relayed.
 - Unknown-origin messages remain available with an Unverified label and continue through SCF.
-- Bundle trust does not replace sender signatures. A payload currently carries a claimed sender device ID, so cryptographic sender impersonation resistance remains future work.
+- Bundle trust binds Ed25519 signing keys to approved device IDs. New message signatures are verified against that binding; a claimed sender ID alone never earns Verified. Unknown self-signed emergency messages remain Unverified.
 
 ## Acknowledged-hop boundary (transport protocol 2)
 
@@ -186,7 +186,7 @@ An ACK matches transfer ID, message hash, receiver peer ID, and actual transport
 context (socket peer or selected BLE GATT peer). BLE source IDs are checked
 against the resolved address identity when available. These IDs and ACKs are
 not cryptographically signed; a compatible malicious peer can falsely claim
-storage. Sender impersonation resistance and authenticated ACKs remain future
+storage. Payload sender signatures authenticate new message content; authenticated ACKs remain future
 work. No private keys or SOS body text are added to ACKs or metrics.
 
 ## Key Rotation and Recovery
@@ -223,3 +223,12 @@ Safe diagnostic logs may include:
 - Added SOS schema 4 and chat schema 2 fixtures and tamper tests.
 - Defined key reset/rotation behavior and retained SOS v1-v3/chat v1 readers.
 - Completed automated security regression checks; independent security review and physical-device adversarial testing remain recommended before operational deployment.
+
+## Sender signatures (implemented 2026-10-20)
+
+- Each phone creates a separate Ed25519 signing identity in platform secure storage. Existing X25519 encryption keys are preserved. Concurrent requests share one signing-key initialization, and corrupt signing storage fails without silently replacing identity.
+- Registration QR v2 self-signs device ID, encryption public key/key ID/version and signing public key. The administrator checks the person/phone, approves the role, and publishes both keys in a signed trust bundle. The self signature proves key possession, not a person's real identity. Manual public-key entry requires the same administrator identity check.
+- SOS 5/chat 3 sign all immutable fields, including ciphertext or broadcast content. Canonical JSON and a signature-specific domain separate message signatures from admin/registration signatures. Signature and deduplication hash survive hop changes and JSON map reordering. Hash validation remains a separate check.
+- A valid signature matching a current, unexpired approved record produces Verified. Invalid signatures and registered-key mismatches are rejected before SQLite storage ACK and checked again before outbound transfer. Unknown self-signed and legacy unsigned reports remain Unverified; revoked origins stay quarantined. Migration 12 removes older labels based only on claimed IDs.
+- Signatures prove authorship under the registered key. They do not prove a report is factually true or protect against approved-device abuse, jamming, replay after a database reset, traffic analysis, compromised endpoints or dishonest unsigned storage ACKs. SCF deduplication and original signed TTL bound normal retransmission.
+- Key replacement resets registration to pending. The administrator must approve and redistribute a new bundle. Current-key mismatch rejects old signatures; accepting historical retired signing keys is not yet supported. Private signing keys never appear in QR, bundle, SQLite, transport or metric exports.

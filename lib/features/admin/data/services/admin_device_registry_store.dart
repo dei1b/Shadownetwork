@@ -120,6 +120,18 @@ class AdminDeviceRegistryStore {
       if (device.status != RegisteredDeviceStatus.approved) {
         continue;
       }
+      final signingKey = device.signingPublicKey;
+      if (signingKey != null) {
+        try {
+          if (base64Url.decode(signingKey).length != 32) {
+            throw const FormatException();
+          }
+        } catch (_) {
+          throw FormatException(
+            '${device.deviceId} has an invalid signing public key.',
+          );
+        }
+      }
       final publicKey = device.publicKey?.trim();
       try {
         if (publicKey == null || base64Url.decode(publicKey).length != 32) {
@@ -171,6 +183,8 @@ class AdminDeviceRegistryStore {
       'role': device.role.name,
       'status': device.status.name,
       'public_key': device.publicKey,
+      if (device.signingPublicKey != null)
+        'signing_public_key': device.signingPublicKey,
       'key_version': device.keyVersion,
       'updated_at': device.updatedAt.toUtc().toIso8601String(),
     };

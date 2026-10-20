@@ -29,6 +29,8 @@ class RelayForegroundService : Service() {
         }
 
         startForeground(NOTIFICATION_ID, buildNotification())
+        // A sticky service restart also rebuilds Dart, SQLite, signature checks and the relay queue.
+        RelayEngineHost.getOrCreate(applicationContext)
         return START_STICKY
     }
 
@@ -80,21 +82,24 @@ class RelayForegroundService : Service() {
         private const val NOTIFICATION_ID = 4208
         private const val ACTION_STOP = "com.example.shadownetwork.action.STOP_RELAY"
 
-        fun start(context: Context) {
+        fun wasEnabled(context: Context): Boolean =
+            context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE).getBoolean("enabled", false)
+
+        fun start(context: Context): Boolean {
             val intent = Intent(context, RelayForegroundService::class.java)
-            runCatching {
+            return runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
                     context.startService(intent)
                 }
-            }
+                context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
+            }.isSuccess
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, RelayForegroundService::class.java)
-                .setAction(ACTION_STOP)
-            runCatching { context.startService(intent) }
+            context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE).edit().putBoolean("enabled", false).apply()
+            runCatching { context.stopService(Intent(context, RelayForegroundService::class.java)) }
         }
     }
 }

@@ -135,6 +135,25 @@ void main() {
     expect(profile.canAccessResponderInterface, isFalse);
   });
 
+  test('responder mode checks both registered encryption and signing keys', () {
+    for (final registered in [null, 'wrong-signing-key', 'local-signing-key']) {
+      final profile = resolver.resolve(
+        deviceId: localDeviceId,
+        publicKey: localPublicKey,
+        keyVersion: 1,
+        signingPublicKey: 'local-signing-key',
+        now: now,
+        bundle: _bundle(
+          approved: [_device(role: 'responder', signingPublicKey: registered)],
+        ),
+      );
+      expect(
+        profile.canAccessResponderInterface,
+        registered == 'local-signing-key',
+      );
+    }
+  });
+
   test('missing trust bundle returns an unregistered profile', () {
     final profile = resolver.resolve(
       deviceId: localDeviceId,
@@ -177,6 +196,7 @@ TrustedDevice _device({
   String status = 'approved',
   String deviceId = 'local-device-001',
   String publicKey = 'local-public-key',
+  String? signingPublicKey,
 }) {
   return TrustedDevice(
     deviceId: deviceId,
@@ -184,6 +204,7 @@ TrustedDevice _device({
     role: role,
     status: status,
     publicKey: publicKey,
+    signingPublicKey: signingPublicKey,
     keyVersion: 1,
     updatedAt: DateTime.utc(2026, 8, 15),
   );

@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 11;
+  static const databaseVersion = 12;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -41,7 +41,33 @@ class LocalMessagingDatabase {
     9: seedLookupTables,
     10: _addSosReceiptMetadata,
     11: _addTransferEventMetadata,
+    12: _addSenderSigningKeys,
   };
+
+  static Future<void> _addSenderSigningKeys(Database database) async {
+    await database.execute(
+      'ALTER TABLE $trustedDevicesTable ADD COLUMN signing_public_key TEXT',
+    );
+    // Earlier releases classified a claimed sender ID as verified without a signature.
+    for (final table in [sosMessagesTable, chatMessagesTable]) {
+      await database.update(
+        table,
+        {
+          'trust_status': 'unknown',
+          'trust_role': null,
+          'trust_owner_name': null,
+        },
+        where: 'trust_status = ?',
+        whereArgs: ['approved'],
+      );
+    }
+    await database.update(
+      scfMessagesTable,
+      {'origin_trust_status': 'unknown'},
+      where: 'origin_trust_status = ?',
+      whereArgs: ['approved'],
+    );
+  }
 
   static Future<Database> open({
     String? databasePath,

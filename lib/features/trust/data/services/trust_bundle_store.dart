@@ -219,6 +219,15 @@ class TrustBundleStore {
           'Trust record for ${device.deviceId} is invalid.',
         );
       }
+      final signingKey = device.signingPublicKey;
+      if (signingKey != null &&
+          _decodeBase64Url(
+                signingKey,
+                fieldName: 'signing public key',
+              ).length !=
+              32) {
+        throw const FormatException('Invalid device signing public key.');
+      }
       final publicKey = device.publicKey?.trim();
       if (expectedStatus == 'approved' &&
           (publicKey == null ||

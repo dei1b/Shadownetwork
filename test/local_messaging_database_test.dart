@@ -186,6 +186,9 @@ void main() {
       final original = await harness.openCurrentDatabase();
       await _removeReceiptColumns(original);
       await _removeTransferEventColumn(original);
+      await original.execute(
+        'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
+      );
 
       // Versions 8 and 9 share a schema; reconstruct the eight original lookup rows.
       await original.delete(
@@ -343,6 +346,9 @@ void main() {
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
       await _removeTransferEventColumn(original);
+      await original.execute(
+        'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
+      );
       await original.setVersion(10);
       await original.insert(LocalMessagingDatabase.peersTable, {
         'id': 'victim',
@@ -389,7 +395,10 @@ void main() {
       await original.close();
       final upgraded = await harness.openCurrentDatabase();
       addTearDown(upgraded.close);
-      expect(await upgraded.getVersion(), 11);
+      expect(
+        await upgraded.getVersion(),
+        LocalMessagingDatabase.databaseVersion,
+      );
       expect(
         await upgraded.query(LocalMessagingDatabase.sosMessagesTable),
         receipts,
@@ -408,12 +417,68 @@ void main() {
     },
   );
 
+  test(
+    'version 11 migration preserves messages and quarantines while removing unsupported verified labels',
+    () async {
+      final harness = await DatabaseMigrationTestHarness.create();
+      addTearDown(harness.dispose);
+      final original = await harness.openCurrentDatabase();
+      await original.execute(
+        'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
+      );
+      await original.setVersion(11);
+      await original.insert(LocalMessagingDatabase.peersTable, {
+        'id': 'resident',
+        'display_name': 'Resident',
+        'peer_type_code': 'civilian',
+        'created_at': '2026-10-20T00:00:00Z',
+      });
+      for (final trust in ['approved', 'unknown', 'revoked']) {
+        await original.insert(LocalMessagingDatabase.sosMessagesTable, {
+          'id': trust,
+          'sender_peer_id': 'resident',
+          'body': 'Existing SOS',
+          'category_code': 'rescue',
+          'status': 'received',
+          'message_hash': trust,
+          'created_at': '2026-10-20T00:00:00Z',
+          'trust_status': trust,
+          'trust_role': 'civilian',
+          'trust_owner_name': 'Resident',
+        });
+      }
+      await original.close();
+      final upgraded = await harness.openCurrentDatabase();
+      addTearDown(upgraded.close);
+      final rows = await upgraded.query(
+        LocalMessagingDatabase.sosMessagesTable,
+      );
+      expect(rows, hasLength(3));
+      final priorApproved = rows.singleWhere((row) => row['id'] == 'approved');
+      expect(priorApproved['trust_status'], 'unknown');
+      expect(priorApproved['trust_owner_name'], isNull);
+      expect(priorApproved['body'], 'Existing SOS');
+      expect(
+        rows.singleWhere((row) => row['id'] == 'revoked')['trust_status'],
+        'revoked',
+      );
+      final columns = await upgraded.rawQuery(
+        'PRAGMA table_info(trusted_devices)',
+      );
+      expect(columns.any((row) => row['name'] == 'signing_public_key'), isTrue);
+      expect(await upgraded.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+    },
+  );
+
   test('version 9 migration preserves SOS and validation records', () async {
     final harness = await DatabaseMigrationTestHarness.create();
     addTearDown(harness.dispose);
     final original = await harness.openCurrentDatabase();
     await _removeReceiptColumns(original);
     await _removeTransferEventColumn(original);
+    await original.execute(
+      'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
+    );
     await original.setVersion(9);
     await original.insert(LocalMessagingDatabase.peersTable, {
       'id': 'resident',

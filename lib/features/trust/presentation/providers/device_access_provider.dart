@@ -18,6 +18,7 @@ final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
 ) async {
   final localPeer = await ref.watch(localPeerProvider.future);
   final identity = await ref.watch(deviceCryptoIdentityProvider.future);
+  final signingIdentity = await ref.watch(deviceSigningIdentityProvider.future);
   final bundle = await ref.watch(trustBundleStoreProvider).loadBundle();
   if (bundle?.isSignatureVerified == true) {
     final repository = await ref.watch(trustRepositoryProvider.future);
@@ -30,6 +31,7 @@ final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
         deviceId: localPeer.id,
         publicKey: identity.encodedPublicKey,
         keyVersion: identity.keyVersion,
+        signingPublicKey: signingIdentity.encodedPublicKey,
         bundle: bundle,
       );
 });

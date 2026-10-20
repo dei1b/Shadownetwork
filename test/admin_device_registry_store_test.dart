@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shadownetwork/features/admin/data/services/admin_device_registry_store.dart';
 import 'package:shadownetwork/features/admin/domain/entities/registered_device.dart';
+import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -40,6 +41,43 @@ void main() {
     expect(devices.single.deviceId, 'SN-CIVILIAN-999');
     expect(devices.single.status, RegisteredDeviceStatus.pending);
   });
+
+  test(
+    'approved user signing key survives storage, signed export and phone import',
+    () async {
+      final store = AdminDeviceRegistryStore();
+      final signingKey = base64UrlEncode(List<int>.filled(32, 2));
+      final user = RegisteredDevice(
+        deviceId: 'user-phone',
+        ownerName: 'Registered Resident',
+        role: RegisteredDeviceRole.civilian,
+        status: RegisteredDeviceStatus.approved,
+        registeredAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        lastSeenLabel: 'Ready',
+        publicKey: base64UrlEncode(List<int>.filled(32, 1)),
+        signingPublicKey: signingKey,
+      );
+      await store.saveDevices([user]);
+      final records = await store.loadDevices();
+      expect(
+        records.single.copyWith(ownerName: 'Updated Resident').signingPublicKey,
+        signingKey,
+      );
+      final source = await store.buildTrustBundleJson(records);
+      final imported = await TrustBundleStore().importBundleJson(source);
+      expect(imported.approvedDevices.single.signingPublicKey, signingKey);
+      final tampered = jsonDecode(source) as Map<String, Object?>;
+      ((tampered['approved_devices'] as List).single
+          as Map)['signing_public_key'] = base64UrlEncode(
+        List<int>.filled(32, 3),
+      );
+      await expectLater(
+        TrustBundleStore().importBundleJson(jsonEncode(tampered)),
+        throwsFormatException,
+      );
+    },
+  );
 
   test('removes legacy fake sample devices from stored registry', () async {
     final store = AdminDeviceRegistryStore();

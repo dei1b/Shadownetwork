@@ -192,6 +192,7 @@ class TrustedDevice {
     required this.status,
     required this.updatedAt,
     this.publicKey,
+    this.signingPublicKey,
     this.keyVersion = 1,
   });
 
@@ -201,6 +202,7 @@ class TrustedDevice {
   final String status;
   final DateTime updatedAt;
   final String? publicKey;
+  final String? signingPublicKey;
   final int keyVersion;
 
   Map<String, Object?> toJson() {
@@ -210,6 +212,7 @@ class TrustedDevice {
       'role': role,
       'status': status,
       'public_key': publicKey,
+      if (signingPublicKey != null) 'signing_public_key': signingPublicKey,
       'key_version': keyVersion,
       'updated_at': updatedAt.toUtc().toIso8601String(),
     };
@@ -222,6 +225,7 @@ class TrustedDevice {
       role: json['role'] as String? ?? 'unknown',
       status: json['status'] as String? ?? 'unknown',
       publicKey: json['public_key'] as String?,
+      signingPublicKey: json['signing_public_key'] as String?,
       keyVersion: (json['key_version'] as num?)?.toInt() ?? 1,
       updatedAt: TrustBundle._parseDate(json['updated_at'] as String?),
     );

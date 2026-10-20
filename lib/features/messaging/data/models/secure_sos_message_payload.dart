@@ -2,6 +2,10 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import '../../../security/domain/entities/device_signing_identity.dart';
+import '../../../security/data/services/message_authentication_service.dart';
+import '../../../trust/domain/services/canonical_json.dart';
+
 import '../../../security/data/services/message_encryption_service.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../security/domain/entities/encrypted_message_body.dart';
@@ -16,14 +20,21 @@ class SecureSosMessagePayload {
   const SecureSosMessagePayload._();
 
   static const schemaVersion = 4;
+  static const signedSchemaVersion = 5;
+  static bool supportsVersion(Object? value) =>
+      value == schemaVersion || value == signedSchemaVersion;
 
   static Future<PreparedRelayPayload> prepare(
     SosMessage message, {
     required MessageEncryptionService encryptionService,
     String? recipientPublicKey,
     int recipientKeyVersion = 1,
+    DeviceSigningIdentity? signingIdentity,
   }) async {
     final basePayload = _basePayload(message, hopCount: message.hopCount);
+    if (signingIdentity != null) {
+      basePayload['schema_version'] = signedSchemaVersion;
+    }
     final recipient = message.recipient;
     final Map<String, Object?> security;
     if (recipient == null) {
@@ -50,6 +61,9 @@ class SecureSosMessagePayload {
       'payload_text': recipient == null ? message.body.trim() : null,
       'security': security,
     };
+    if (signingIdentity != null) {
+      await const MessageAuthenticationService().sign(payload, signingIdentity);
+    }
     final hash = _hashMap(payload);
     return PreparedRelayPayload(
       payloadJson: jsonEncode({...payload, 'message_hash': hash}),
@@ -63,7 +77,7 @@ class SecureSosMessagePayload {
     required MessageEncryptionService encryptionService,
     required DeviceCryptoIdentity localIdentity,
   }) async {
-    if (payload['schema_version'] != schemaVersion) {
+    if (!supportsVersion(payload['schema_version'])) {
       throw const FormatException('Unsupported secure SOS payload.');
     }
     final hash = payload['message_hash'] as String?;
@@ -112,7 +126,7 @@ class SecureSosMessagePayload {
   static String hashPayload(String payloadJson) {
     final decoded = jsonDecode(payloadJson);
     if (decoded is! Map<String, Object?> ||
-        decoded['schema_version'] != schemaVersion) {
+        !supportsVersion(decoded['schema_version'])) {
       throw const FormatException('Unsupported secure SOS payload.');
     }
     return _hashMap(decoded);
@@ -123,7 +137,7 @@ class SecureSosMessagePayload {
     required int hopCount,
   }) {
     final payload = jsonDecode(payloadJson) as Map<String, Object?>;
-    if (payload['schema_version'] != schemaVersion) {
+    if (!supportsVersion(payload['schema_version'])) {
       throw const FormatException('Unsupported secure SOS payload.');
     }
     final routing = Map<String, Object?>.from(
@@ -163,8 +177,8 @@ class SecureSosMessagePayload {
 
   static String _authenticatedData(Map<String, Object?> payload) {
     final routing = payload['routing']! as Map<String, Object?>;
-    return jsonEncode({
-      'schema_version': schemaVersion,
+    final data = <String, Object?>{
+      'schema_version': payload['schema_version'],
       'payload_type': 'sos_message',
       'message_id': payload['message_id'],
       'category': payload['category'],
@@ -173,16 +187,30 @@ class SecureSosMessagePayload {
       'timestamp': payload['timestamp'],
       'sender': payload['sender'],
       'recipient': payload['recipient'],
-    });
+    };
+    return payload['schema_version'] == signedSchemaVersion
+        ? canonicalJsonEncode(data)
+        : jsonEncode(data);
   }
 
   static String _hashMap(Map<String, Object?> payload) {
+    if (payload['schema_version'] == signedSchemaVersion) {
+      final normalized = Map<String, Object?>.from(payload)
+        ..remove('message_hash');
+      normalized['routing'] = {
+        ...Map<String, Object?>.from(payload['routing']! as Map),
+        'hop_count': 0,
+      };
+      return sha256
+          .convert(utf8.encode(canonicalJsonEncode(normalized)))
+          .toString();
+    }
     final routing = payload['routing']! as Map<String, Object?>;
     return sha256
         .convert(
           utf8.encode(
             jsonEncode({
-              'schema_version': schemaVersion,
+              'schema_version': payload['schema_version'],
               'payload_type': 'sos_message',
               'message_id': payload['message_id'],
               'payload_text': payload['payload_text'],

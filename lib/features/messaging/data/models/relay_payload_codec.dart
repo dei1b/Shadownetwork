@@ -20,11 +20,11 @@ class RelayPayloadCodec {
     final type = (payload['payload_type'] as String?) ?? sosPayloadType;
     final version = payload['schema_version'];
     if (type == ChatMessagePayload.payloadType &&
-        version == SecureChatMessagePayload.schemaVersion) {
+        SecureChatMessagePayload.supportsVersion(version)) {
       return SecureChatMessagePayload.hashPayload(payloadJson);
     }
     if (type == sosPayloadType &&
-        version == SecureSosMessagePayload.schemaVersion) {
+        SecureSosMessagePayload.supportsVersion(version)) {
       return SecureSosMessagePayload.hashPayload(payloadJson);
     }
     return type == ChatMessagePayload.payloadType
@@ -51,6 +51,27 @@ class RelayPayloadCodec {
     return source == null ? null : DateTime.tryParse(source)?.toUtc();
   }
 
+  /// Signed TTL is anchored at creation, never extended by a relay's envelope.
+  static DateTime? signedExpiry(String payloadJson) {
+    final payload = jsonDecode(payloadJson) as Map<String, Object?>;
+    final signed =
+        (payload['payload_type'] == sosPayloadType &&
+            payload['schema_version'] ==
+                SecureSosMessagePayload.signedSchemaVersion) ||
+        (payload['payload_type'] == ChatMessagePayload.payloadType &&
+            payload['schema_version'] ==
+                SecureChatMessagePayload.signedSchemaVersion);
+    if (!signed) return null;
+    final seconds = (payload['routing'] as Map)['ttl'];
+    final created = createdAt(payloadJson);
+    if (seconds is! int || seconds <= 0 || created == null) {
+      throw const FormatException(
+        'Signed message TTL or timestamp is invalid.',
+      );
+    }
+    return created.add(Duration(seconds: seconds));
+  }
+
   static String payloadJsonForRelay(
     String payloadJson, {
     required int hopCount,
@@ -59,14 +80,14 @@ class RelayPayloadCodec {
     final type = (payload['payload_type'] as String?) ?? sosPayloadType;
     final version = payload['schema_version'];
     if (type == ChatMessagePayload.payloadType &&
-        version == SecureChatMessagePayload.schemaVersion) {
+        SecureChatMessagePayload.supportsVersion(version)) {
       return SecureChatMessagePayload.payloadJsonForRelay(
         payloadJson,
         hopCount: hopCount,
       );
     }
     if (type == sosPayloadType &&
-        version == SecureSosMessagePayload.schemaVersion) {
+        SecureSosMessagePayload.supportsVersion(version)) {
       return SecureSosMessagePayload.payloadJsonForRelay(
         payloadJson,
         hopCount: hopCount,

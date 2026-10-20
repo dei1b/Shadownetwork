@@ -2,6 +2,10 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import '../../../security/domain/entities/device_signing_identity.dart';
+import '../../../security/data/services/message_authentication_service.dart';
+import '../../../trust/domain/services/canonical_json.dart';
+
 import '../../../security/data/services/message_encryption_service.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../security/domain/entities/encrypted_message_body.dart';
@@ -16,17 +20,24 @@ class SecureChatMessagePayload {
   const SecureChatMessagePayload._();
 
   static const schemaVersion = 2;
+  static const signedSchemaVersion = 3;
+  static bool supportsVersion(Object? value) =>
+      value == schemaVersion || value == signedSchemaVersion;
 
   static Future<PreparedRelayPayload> prepare(
     ChatMessage message, {
     required MessageEncryptionService encryptionService,
     required String recipientPublicKey,
     int recipientKeyVersion = 1,
+    DeviceSigningIdentity? signingIdentity,
   }) async {
     if (recipientPublicKey.trim().isEmpty) {
       throw MissingRecipientPublicKeyException(message.recipient.id);
     }
     final basePayload = _basePayload(message, hopCount: message.hopCount);
+    if (signingIdentity != null) {
+      basePayload['schema_version'] = signedSchemaVersion;
+    }
     final encryptedBody = await encryptionService.encrypt(
       plainText: message.body.trim(),
       recipientPublicKey: recipientPublicKey,
@@ -38,6 +49,9 @@ class SecureChatMessagePayload {
       'body': null,
       'security': encryptedBody.toJson(),
     };
+    if (signingIdentity != null) {
+      await const MessageAuthenticationService().sign(payload, signingIdentity);
+    }
     final hash = _hashMap(payload);
     return PreparedRelayPayload(
       payloadJson: jsonEncode({...payload, 'message_hash': hash}),
@@ -52,7 +66,7 @@ class SecureChatMessagePayload {
     required DeviceCryptoIdentity localIdentity,
   }) async {
     if (payload['payload_type'] != ChatMessagePayload.payloadType ||
-        payload['schema_version'] != schemaVersion) {
+        !supportsVersion(payload['schema_version'])) {
       throw const FormatException('Unsupported secure chat payload.');
     }
     final hash = payload['message_hash'] as String?;
@@ -95,7 +109,7 @@ class SecureChatMessagePayload {
   static String hashPayload(String payloadJson) {
     final payload = jsonDecode(payloadJson);
     if (payload is! Map<String, Object?> ||
-        payload['schema_version'] != schemaVersion ||
+        !supportsVersion(payload['schema_version']) ||
         payload['payload_type'] != ChatMessagePayload.payloadType) {
       throw const FormatException('Unsupported secure chat payload.');
     }
@@ -132,8 +146,8 @@ class SecureChatMessagePayload {
 
   static String _authenticatedData(Map<String, Object?> payload) {
     final routing = payload['routing']! as Map<String, Object?>;
-    return jsonEncode({
-      'schema_version': schemaVersion,
+    final data = <String, Object?>{
+      'schema_version': payload['schema_version'],
       'payload_type': ChatMessagePayload.payloadType,
       'message_id': payload['message_id'],
       'conversation_id': payload['conversation_id'],
@@ -142,16 +156,30 @@ class SecureChatMessagePayload {
       'timestamp': payload['timestamp'],
       'sender': payload['sender'],
       'recipient': payload['recipient'],
-    });
+    };
+    return payload['schema_version'] == signedSchemaVersion
+        ? canonicalJsonEncode(data)
+        : jsonEncode(data);
   }
 
   static String _hashMap(Map<String, Object?> payload) {
+    if (payload['schema_version'] == signedSchemaVersion) {
+      final normalized = Map<String, Object?>.from(payload)
+        ..remove('message_hash');
+      normalized['routing'] = {
+        ...Map<String, Object?>.from(payload['routing']! as Map),
+        'hop_count': 0,
+      };
+      return sha256
+          .convert(utf8.encode(canonicalJsonEncode(normalized)))
+          .toString();
+    }
     final routing = payload['routing']! as Map<String, Object?>;
     return sha256
         .convert(
           utf8.encode(
             jsonEncode({
-              'schema_version': schemaVersion,
+              'schema_version': payload['schema_version'],
               'payload_type': ChatMessagePayload.payloadType,
               'message_id': payload['message_id'],
               'conversation_id': payload['conversation_id'],
