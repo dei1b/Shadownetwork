@@ -33,6 +33,26 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Local project guidance and capstone documentation are kept outside the app repo.
+/.agents/
+/AGENTS.md
+/APP_CHECKPOINT_*.txt
+/CURRENT_STATE.md
+/IMPLEMENTATION_PLAN.md
+/docs/
+
+# Generated documentation diagrams and schema exports.
+/capstone_erd_*
+/shadow_network_*
+
+# Generated or local-only outputs.
+/screenshots/
+/artifacts/
+*.drawio.png
+*.drawio.svg
+*.generated.png
+*.generated.svg
+
 # Symbolication related
 app.*.symbols
 

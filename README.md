@@ -1,4 +1,4 @@
-# Shadow Network
+# Shadow Network App
 
 Shadow Network is an Android-first Flutter capstone app for offline disaster coordination.  
 It supports SOS/chat message creation, local SQLite persistence, and Store-Carry-Forward relay over BLE and Wi-Fi Direct when internet connectivity is unavailable.
@@ -13,13 +13,12 @@ It supports SOS/chat message creation, local SQLite persistence, and Store-Carry
 - Mobile trust-bundle QR/JSON import with approved/unknown/revoked trust enforcement
 - Validation session capture with exportable JSON/CSV metrics
 
-## Repository Layout
+## App Repository Layout
 
 - `lib/main.dart`: Android/mobile entry point
 - `lib/admin_web_main.dart`: browser admin entry point
 - `lib/features/`: feature modules (`data`, `domain`, `presentation`)
 - `test/`: unit and widget tests
-- `docs/`: protocol and security reference documents
 - `.github/workflows/android-release.yml`: CI/release workflow
 
 ## Prerequisites
@@ -68,10 +67,10 @@ The workflow at `.github/workflows/android-release.yml`:
 - builds a release APK with `flutter build apk --release`
 - publishes a GitHub Release with tag format `v<pubspec version>+<run number>`
 
-## Notes
+## App Configuration
 
 - `lib/main.dart` attempts Firebase initialization, but startup continues if Firebase is unavailable.
-- Keep trust/security behavior aligned with:
-  - `docs/SECURITY_TRUST_CONTRACT.md`
-  - `docs/PHASE_1_ENCRYPTION.md`
-  - `docs/PROTOCOL_COMPATIBILITY.md`
+- Runtime assets under `assets/` include the offline Panabo map tiles, styles,
+  fonts, sprites, and app images required by the app. Keep these tracked.
+- Do not commit generated documentation diagrams, reports, local planning
+  files, build output, or credentials to this app repository.
