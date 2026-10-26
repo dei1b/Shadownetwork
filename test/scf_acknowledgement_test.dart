@@ -282,6 +282,7 @@ Future<_Fixture> _fixture({
   addTearDown(dbB.close);
   final metrics = SqliteValidationMetricsRepository(database: dbA);
   final session = await metrics.startSession(
+    testRunId: 'FIXTURE-RUN',
     name: 'ACK test',
     environment: 'Mock',
     deviceId: sender.id,

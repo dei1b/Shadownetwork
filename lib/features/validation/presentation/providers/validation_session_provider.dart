@@ -76,6 +76,7 @@ class ValidationSessionController
     required String environment,
     required String deviceId,
     required String deviceRole,
+    required String testRunId,
     String? notes,
   }) async {
     final repository = await ref.read(
@@ -88,6 +89,7 @@ class ValidationSessionController
         environment: environment,
         deviceId: deviceId,
         deviceRole: deviceRole,
+        testRunId: testRunId,
         notes: notes,
       );
       await repository.captureEvent(
@@ -115,6 +117,21 @@ class ValidationSessionController
     await repository.stopActiveSession();
     _cancelTimers();
     state = AsyncData(await _loadState());
+  }
+
+  Future<String?> lastLocalRunCode(String deviceId) async {
+    final repository = await ref.read(
+      validationMetricsRepositoryProvider.future,
+    );
+    final sessions =
+        (await repository.getSessions())
+            .where(
+              (session) =>
+                  session.deviceId == deviceId && session.testRunId != null,
+            )
+            .toList()
+          ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+    return sessions.firstOrNull?.testRunId;
   }
 
   Future<void> recordRuntimeMode(String runtimeMode) async {

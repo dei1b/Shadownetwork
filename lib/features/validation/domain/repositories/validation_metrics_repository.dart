@@ -8,6 +8,7 @@ abstract interface class ValidationMetricsRepository {
     required String environment,
     required String deviceId,
     required String deviceRole,
+    required String testRunId,
     String? notes,
     DateTime? startedAt,
   });
