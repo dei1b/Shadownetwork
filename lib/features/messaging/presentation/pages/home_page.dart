@@ -2072,6 +2072,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                           attributionButtonPosition:
                               ml.AttributionButtonPosition.bottomLeft,
                           onMapCreated: (controller) {
+                            // MapLibre otherwise suspends HTTP while Android is
+                            // offline, including our bundled map's loopback URL.
+                            // This enables local requests; it does not turn on
+                            // Wi-Fi or mobile data.
+                            unawaited(controller.forceOnlineMode());
                             _mapController = controller;
                             if (mounted) {
                               setState(() {});
