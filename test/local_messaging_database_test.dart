@@ -185,6 +185,7 @@ void main() {
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
       await _removeReceiptColumns(original);
+      await _removeRunIdentity(original);
       await _removeTransferEventColumn(original);
       await original.execute(
         'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
@@ -346,6 +347,7 @@ void main() {
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
       await _removeTransferEventColumn(original);
+      await _removeRunIdentity(original);
       await original.execute(
         'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
       );
@@ -423,6 +425,7 @@ void main() {
       final harness = await DatabaseMigrationTestHarness.create();
       addTearDown(harness.dispose);
       final original = await harness.openCurrentDatabase();
+      await _removeRunIdentity(original);
       await original.execute(
         'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
       );
@@ -475,6 +478,7 @@ void main() {
     addTearDown(harness.dispose);
     final original = await harness.openCurrentDatabase();
     await _removeReceiptColumns(original);
+    await _removeRunIdentity(original);
     await _removeTransferEventColumn(original);
     await original.execute(
       'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
@@ -526,7 +530,7 @@ void main() {
     expect(await upgraded.getVersion(), LocalMessagingDatabase.databaseVersion);
     expect(
       await upgraded.query(LocalMessagingDatabase.validationSessionsTable),
-      sessions,
+      sessions.map((row) => {...row, 'test_run_id': null}).toList(),
     );
     expect(
       await upgraded.query(LocalMessagingDatabase.messageEventsTable),
@@ -546,6 +550,13 @@ void main() {
     expect(message.transferId, isNull);
     expect(message.propagationDuration, isNull);
   });
+}
+
+Future<void> _removeRunIdentity(Database database) async {
+  await database.execute('DROP INDEX idx_validation_sessions_test_run');
+  await database.execute(
+    'ALTER TABLE validation_sessions DROP COLUMN test_run_id',
+  );
 }
 
 Future<void> _removeReceiptColumns(Database database) async {

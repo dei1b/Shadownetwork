@@ -28,6 +28,7 @@ void main() {
     final repository = SqliteValidationMetricsRepository(database: database);
     final startedAt = DateTime.utc(2026, 8, 15, 8);
     final session = await repository.startSession(
+      testRunId: 'FIXTURE-RUN',
       name: 'Three-device field test',
       environment: 'Outdoor field test',
       deviceId: 'responder-1',
@@ -52,6 +53,7 @@ void main() {
     final db = await harness.openCurrentDatabase();
     final metrics = SqliteValidationMetricsRepository(database: db);
     final session = await metrics.startSession(
+      testRunId: 'FIXTURE-RUN',
       name: 'ACK persistence',
       environment: 'Mock',
       deviceId: 'sender',
@@ -132,6 +134,7 @@ void main() {
     addTearDown(database.close);
     final repository = SqliteValidationMetricsRepository(database: database);
     final session = await repository.startSession(
+      testRunId: 'FIXTURE-RUN',
       name: 'Deduplication test',
       environment: 'Laboratory simulation',
       deviceId: 'relay-1',
@@ -265,6 +268,7 @@ void main() {
     addTearDown(database.close);
     final metrics = SqliteValidationMetricsRepository(database: database);
     final session = await metrics.startSession(
+      testRunId: 'FIXTURE-RUN',
       name: 'Relay instrumentation',
       environment: 'Laboratory simulation',
       deviceId: 'sender-1',

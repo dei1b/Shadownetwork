@@ -10,7 +10,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 12;
+  static const databaseVersion = 13;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -42,7 +42,17 @@ class LocalMessagingDatabase {
     10: _addSosReceiptMetadata,
     11: _addTransferEventMetadata,
     12: _addSenderSigningKeys,
+    13: _addValidationRunIdentity,
   };
+
+  static Future<void> _addValidationRunIdentity(Database database) async {
+    await database.execute(
+      'ALTER TABLE $validationSessionsTable ADD COLUMN test_run_id TEXT',
+    );
+    await database.execute(
+      'CREATE INDEX idx_validation_sessions_test_run ON $validationSessionsTable (test_run_id)',
+    );
+  }
 
   static Future<void> _addSenderSigningKeys(Database database) async {
     await database.execute(

@@ -35,8 +35,32 @@ class ValidationExportService {
         'value',
         'detail',
         'transfer_id',
+        'test_run_id',
       ],
-      ...data.events.map(_eventRow),
+      [
+        'session',
+        data.session.id,
+        data.session.id,
+        data.session.startedAt.toUtc().toIso8601String(),
+        'validation_session',
+        null,
+        data.session.deviceId,
+        null,
+        null,
+        null,
+        null,
+        null,
+        jsonEncode({
+          'name': data.session.name,
+          'environment': data.session.environment,
+          'status': data.session.status.name,
+        }),
+        null,
+        data.session.testRunId,
+      ],
+      ...data.events.map(
+        (event) => [..._eventRow(event), data.session.testRunId],
+      ),
       ...data.discoveryAttempts.map(
         (attempt) => [
           'discovery_attempt',
@@ -53,6 +77,7 @@ class ValidationExportService {
           attempt.discoveredCount,
           attempt.error,
           null,
+          data.session.testRunId,
         ],
       ),
       ...data.batterySamples.map(
@@ -71,6 +96,7 @@ class ValidationExportService {
           sample.batteryPercent,
           '${sample.runtimeMode}; charging=${sample.isCharging}',
           null,
+          data.session.testRunId,
         ],
       ),
     ];

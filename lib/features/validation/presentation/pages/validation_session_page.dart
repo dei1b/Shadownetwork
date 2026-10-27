@@ -8,6 +8,8 @@ import '../../domain/entities/validation_session.dart';
 import '../../domain/entities/validation_session_data.dart';
 import '../../domain/entities/validation_summary.dart';
 import '../providers/validation_session_provider.dart';
+import '../widgets/validation_session_start_dialog.dart';
+import '../widgets/validation_run_qr_dialog.dart';
 
 const _validationRed = Color(0xFFE83C3D);
 const _validationDark = Color(0xFF231F20);
@@ -127,98 +129,28 @@ class ValidationSessionPage extends ConsumerWidget {
   }
 
   Future<void> _startSession(BuildContext context, WidgetRef ref) async {
-    final nameController = TextEditingController();
-    final notesController = TextEditingController();
-    var environment = 'Outdoor field test';
-    final result = await showDialog<_NewSessionInput>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Start validation session'),
-          content: SizedBox(
-            width: 440,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    autofocus: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Session name',
-                      hintText: 'Example: Three-device outdoor test',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: environment,
-                    decoration: const InputDecoration(
-                      labelText: 'Test environment',
-                    ),
-                    items:
-                        const [
-                              'Outdoor field test',
-                              'Indoor field test',
-                              'Mixed indoor/outdoor',
-                              'Laboratory simulation',
-                            ]
-                            .map(
-                              (item) => DropdownMenuItem(
-                                value: item,
-                                child: Text(item),
-                              ),
-                            )
-                            .toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setDialogState(() => environment = value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: notesController,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Notes (optional)',
-                      hintText:
-                          'Route, weather, phone placement, or test setup',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: _validationRed),
-              onPressed: () {
-                if (nameController.text.trim().isEmpty) return;
-                Navigator.of(context).pop(
-                  _NewSessionInput(
-                    name: nameController.text.trim(),
-                    environment: environment,
-                    notes: notesController.text.trim(),
-                  ),
-                );
-              },
-              child: const Text('Start recording'),
-            ),
-          ],
-        ),
-      ),
-    );
-    nameController.dispose();
-    notesController.dispose();
-    if (result == null || !context.mounted) return;
-
     final localPeer = await ref.read(localPeerProvider.future);
+    final recentCode = await ref
+        .read(validationSessionProvider.notifier)
+        .lastLocalRunCode(localPeer.id);
+    if (!context.mounted) return;
+    final result = await showValidationSessionStartDialog(
+      context,
+      initialRunCode: recentCode,
+    );
+    if (result == null || !context.mounted) return;
     final profile = await ref.read(deviceAccessProfileProvider.future);
+    if (!context.mounted) return;
+    if (!profile.canAccessResponderInterface) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Current responder approval is required to start recording.',
+          ),
+        ),
+      );
+      return;
+    }
     await ref
         .read(validationSessionProvider.notifier)
         .startSession(
@@ -226,6 +158,7 @@ class ValidationSessionPage extends ConsumerWidget {
           environment: result.environment,
           deviceId: localPeer.id,
           deviceRole: profile.roleLabel.toLowerCase(),
+          testRunId: result.testRunId,
           notes: result.notes,
         );
   }
@@ -454,6 +387,7 @@ class _ActiveSessionCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
+          ValidationRunIdentityPanel(testRunId: session.testRunId),
           Text(
             '${session.deviceRole.toUpperCase()}  |  ${session.deviceId}',
             style: const TextStyle(
@@ -621,6 +555,10 @@ class _SessionHistoryCard extends StatelessWidget {
                       style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 3),
+                    ValidationRunIdentityPanel(
+                      testRunId: session.testRunId,
+                      share: false,
+                    ),
                     Text(
                       '${session.environment}  |  ${_duration(session.elapsedAt(now))}',
                       style: const TextStyle(
@@ -685,6 +623,7 @@ class _SessionDetailsSheet extends StatelessWidget {
             style: const TextStyle(color: _validationMuted),
           ),
           const SizedBox(height: 18),
+          ValidationRunIdentityPanel(testRunId: data.session.testRunId),
           _MetricsGrid(summary: summary),
           const SizedBox(height: 16),
           Row(
@@ -837,18 +776,6 @@ class _ValidationError extends StatelessWidget {
       ),
     );
   }
-}
-
-class _NewSessionInput {
-  const _NewSessionInput({
-    required this.name,
-    required this.environment,
-    required this.notes,
-  });
-
-  final String name;
-  final String environment;
-  final String notes;
 }
 
 class _MetricItem {

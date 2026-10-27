@@ -7,6 +7,7 @@ import '../../../messaging/data/datasources/local_messaging_database.dart';
 import '../../domain/entities/validation_event.dart';
 import '../../domain/entities/validation_session.dart';
 import '../../domain/entities/validation_session_data.dart';
+import '../../domain/services/validation_run_identity.dart';
 import '../../domain/repositories/validation_metrics_repository.dart';
 
 class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
@@ -23,6 +24,7 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
     required String environment,
     required String deviceId,
     required String deviceRole,
+    required String testRunId,
     String? notes,
     DateTime? startedAt,
   }) async {
@@ -40,6 +42,7 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
       environment: normalizedEnvironment,
       deviceId: deviceId.trim(),
       deviceRole: deviceRole.trim(),
+      testRunId: ValidationRunIdentity.normalizeCode(testRunId),
       startedAt: timestamp,
       status: ValidationSessionStatus.active,
       notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
@@ -105,6 +108,7 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
       endedAt: safeEnd,
       status: ValidationSessionStatus.completed,
       notes: active.notes,
+      testRunId: active.testRunId,
     );
   }
 
@@ -298,10 +302,35 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
 
   @override
   Future<void> importSessionData(ValidationSessionData data) async {
+    final owners = [
+      ...data.events.map((event) => event.sessionId),
+      ...data.discoveryAttempts.map((attempt) => attempt.sessionId),
+      ...data.batterySamples.map((sample) => sample.sessionId),
+      ...data.exportRecords.map((record) => record.sessionId),
+    ];
+    if (owners.any((owner) => owner != data.session.id)) {
+      throw const FormatException(
+        'Every imported record must belong to the exported session.',
+      );
+    }
     await _database.transaction((transaction) async {
+      final sessionMap = _sessionMap(data.session);
+      final existing = await transaction.query(
+        LocalMessagingDatabase.validationSessionsTable,
+        columns: ['test_run_id'],
+        where: 'id = ?',
+        whereArgs: [data.session.id],
+        limit: 1,
+      );
+      if (existing.isNotEmpty &&
+          existing.single['test_run_id'] != sessionMap['test_run_id']) {
+        throw const FormatException(
+          'Session already belongs to a different test run.',
+        );
+      }
       await transaction.insert(
         LocalMessagingDatabase.validationSessionsTable,
-        _sessionMap(data.session),
+        sessionMap,
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
       for (final event in data.events) {
@@ -351,6 +380,9 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
     'ended_at': session.endedAt?.toUtc().toIso8601String(),
     'status': session.status.name,
     'notes': session.notes,
+    'test_run_id': session.testRunId == null
+        ? null
+        : ValidationRunIdentity.normalizeCode(session.testRunId!),
   };
 
   ValidationSession _sessionFromMap(Map<String, Object?> row) =>
@@ -366,6 +398,7 @@ class SqliteValidationMetricsRepository implements ValidationMetricsRepository {
             : DateTime.parse(row['ended_at']! as String).toUtc(),
         status: ValidationSessionStatus.values.byName(row['status']! as String),
         notes: row['notes'] as String?,
+        testRunId: row['test_run_id'] as String?,
       );
 
   Map<String, Object?> _eventMap(ValidationMessageEvent event) => {
