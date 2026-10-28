@@ -6,7 +6,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-import 'core/theme/app_theme.dart';
+import 'features/admin/presentation/theme/admin_theme.dart';
 import 'features/admin/data/admin_signing_key_store.dart';
 import 'features/admin/data/desktop_admin_registry_database.dart';
 import 'features/admin/data/desktop_admin_registry_repository.dart';
@@ -58,7 +58,7 @@ Future<void> _start() async {
     await registryDatabase?.close();
     runApp(
       MaterialApp(
-        theme: AppTheme.lightTheme,
+        theme: AdminTheme.light,
         home: Scaffold(
           body: Center(
             child: Padding(
@@ -90,7 +90,7 @@ class ShadowNetworkAdminDesktopApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'Shadow Network Admin',
     debugShowCheckedModeBanner: false,
-    theme: AppTheme.lightTheme,
+    theme: AdminTheme.light,
     home: const DesktopAdminShell(),
   );
 }

@@ -7,6 +7,7 @@ import '../../../admin_validation/presentation/providers/validation_import_provi
 import '../providers/admin_recovery_provider.dart';
 import '../widgets/admin_recovery_panel.dart';
 import 'browser_admin_dashboard_page.dart';
+import '../theme/admin_theme.dart';
 
 class DesktopAdminShell extends ConsumerStatefulWidget {
   const DesktopAdminShell({super.key});
@@ -35,58 +36,91 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
           'Unable to open the administrator registry. Restart the app to retry. Saved data was not reset.',
         ),
       ),
-      data: (repository) => switch (_selected) {
-        1 => DesktopValidationImportPanel(
-          onChooseFiles: _files.chooseValidationFiles,
-        ),
-        2 => AdminRecoveryPanel(
-          onReadBackup: _files.readBackup,
-          onSaveBackup: _files.saveBackup,
-        ),
-        _ => BrowserAdminDashboardPage(
-          key: ValueKey(
-            '${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
-          ),
-          registry: repository,
-          desktopMode: true,
-          validationPanel: Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Validation data',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    imports.when(
-                      data: (state) =>
-                          '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
-                      loading: () => 'Loading imported datasets…',
-                      error: (_, _) => 'Unable to load imported datasets.',
+      data: (repository) => IndexedStack(
+        index: _selected,
+        children: [
+          BrowserAdminDashboardPage(
+            key: ValueKey(
+              '${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
+            ),
+            registry: repository,
+            desktopMode: true,
+            validationPanel: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Validation data',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                  ),
-                  const Text(
-                    'Import phone exports to review run evidence and data completeness.',
-                  ),
-                  TextButton(
-                    onPressed: () => _select(1),
-                    child: const Text('Open validation data'),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Text(
+                      imports.when(
+                        data: (state) =>
+                            '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
+                        loading: () => 'Loading imported datasets…',
+                        error: (_, _) => 'Unable to load imported datasets.',
+                      ),
+                    ),
+                    const Text(
+                      'Import phone exports to review run evidence and data completeness.',
+                    ),
+                    TextButton(
+                      onPressed: () => _select(1),
+                      child: const Text('Open validation data'),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      },
+          DesktopValidationImportPanel(
+            onChooseFiles: _files.chooseValidationFiles,
+          ),
+          AdminRecoveryPanel(
+            onReadBackup: _files.readBackup,
+            onSaveBackup: _files.saveBackup,
+          ),
+        ],
+      ),
     );
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 760;
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final wide = constraints.maxWidth >= 760 && textScale <= 1.5;
         return Scaffold(
-          appBar: AppBar(title: const Text('Shadow Network Admin')),
+          appBar: AppBar(
+            toolbarHeight: 76,
+            title: Row(
+              children: [
+                const Icon(
+                  Icons.shield_outlined,
+                  color: AdminTheme.action,
+                  size: 30,
+                ),
+                const SizedBox(width: 12),
+                const Flexible(
+                  child: Text(
+                    'Shadow Network',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if (constraints.maxWidth >= 1000 && textScale <= 1.5) ...[
+                  const SizedBox(width: 16),
+                  const Text(
+                    'Administration',
+                    style: TextStyle(fontSize: 16, color: AdminTheme.muted),
+                  ),
+                ],
+              ],
+            ),
+            bottom: const PreferredSize(
+              preferredSize: Size.fromHeight(1),
+              child: Divider(height: 1, color: AdminTheme.border),
+            ),
+          ),
           body: Column(
             children: [
               if (_selected != 2 && identity.valueOrNull?.hasIdentity != true)
@@ -97,9 +131,13 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
                       horizontal: 20,
                       vertical: 8,
                     ),
-                    child: Row(
+                    child: Wrap(
+                      spacing: 16,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        const Expanded(
+                        const SizedBox(
+                          width: 640,
                           child: Text(
                             'Administrator setup or recovery is required before publishing trust bundles.',
                           ),
@@ -119,7 +157,12 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
                       NavigationRail(
                         selectedIndex: _selected,
                         onDestinationSelected: _select,
-                        extended: constraints.maxWidth >= 1040,
+                        extended: constraints.maxWidth >= 1200,
+                        labelType: constraints.maxWidth >= 1200
+                            ? NavigationRailLabelType.none
+                            : NavigationRailLabelType.all,
+                        minExtendedWidth: 230,
+                        groupAlignment: -0.9,
                         destinations: const [
                           NavigationRailDestination(
                             icon: Icon(Icons.devices_outlined),

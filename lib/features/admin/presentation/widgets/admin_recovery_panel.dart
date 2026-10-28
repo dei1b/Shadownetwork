@@ -249,24 +249,31 @@ class _PasswordDialogState extends State<_PasswordDialog> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Backup password',
                 helperText: 'At least 12 characters',
+                errorText: _error == 'The passwords do not match.'
+                    ? null
+                    : _error,
+                errorMaxLines: 3,
               ),
             ),
-            if (widget.confirm)
+            if (widget.confirm) ...[
+              const SizedBox(height: 24),
               TextField(
                 controller: _repeat,
                 obscureText: true,
                 enableSuggestions: false,
                 autocorrect: false,
-                decoration: const InputDecoration(labelText: 'Repeat password'),
+                decoration: InputDecoration(
+                  labelText: 'Repeat password',
+                  errorText: _error == 'The passwords do not match.'
+                      ? _error
+                      : null,
+                  errorMaxLines: 3,
+                ),
               ),
-            if (_error != null)
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
+            ],
           ],
         ),
       ),

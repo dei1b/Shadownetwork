@@ -4,16 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:shadownetwork/features/auth/presentation/widgets/auth_background.dart';
 
 import '../../data/services/admin_device_registry_store.dart';
 import '../../domain/entities/registered_device.dart';
 import '../../domain/repositories/admin_registry_repository.dart';
 import '../widgets/registration_json_dialog.dart';
+import '../widgets/admin_device_registry_panel.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
 
-const _mobileRed = Color(0xFFE83C3D);
+const _mobileRed = Color(0xFFB52B32);
 const _mobileRedDark = Color(0xFF861A1A);
 const _mobileMuted = Color(0xFF666666);
 const _mobileField = Color(0xFFE1E1E1);
@@ -91,7 +91,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 
   Future<bool> _saveDevices(List<RegisteredDevice> devices) async {
     if (_isSavingRegistry) return false;
-    _isSavingRegistry = true;
+    setState(() => _isSavingRegistry = true);
     try {
       await _registryStore.saveDevices(devices);
       if (!mounted) return false;
@@ -103,7 +103,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       );
       return false;
     } finally {
-      _isSavingRegistry = false;
+      if (mounted) setState(() => _isSavingRegistry = false);
     }
   }
 
@@ -252,7 +252,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                   status: status,
                   updatedAt: now,
                   lastSeenLabel: status == RegisteredDeviceStatus.approved
-                      ? 'Approved for next sync'
+                      ? 'Approved locally - share updated trust bundle'
                       : status == RegisteredDeviceStatus.revoked
                       ? 'Revoked by admin'
                       : item.lastSeenLabel,
@@ -262,7 +262,10 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         .toList(growable: false);
 
     if (!await _saveDevices(nextDevices)) return;
-    _showSnackBar('${device.deviceId} marked ${status.label.toLowerCase()}.');
+    _showSnackBar(
+      '${device.deviceId} marked ${status.label.toLowerCase()}. '
+      'Export a new trust bundle and import it on each phone.',
+    );
   }
 
   Future<void> _editDevice(RegisteredDevice device) async {
@@ -339,7 +342,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                             : 'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
                         style: TextStyle(
                           color: _mobileMuted,
-                          fontSize: 12,
+                          fontSize: 14,
                           height: 1.35,
                         ),
                       ),
@@ -559,6 +562,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         : _registryError != null
         ? _RegistryError(message: _registryError!, onRetry: _loadRegistry)
         : _AdminDashboardBody(
+            isSaving: _isSavingRegistry,
             desktopMode: widget.desktopMode,
             validationPanel: widget.validationPanel,
             devices: _devices,
@@ -581,8 +585,32 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
           );
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: AuthBackground(child: body),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: body,
+      bottomSheet: _isSavingRegistry
+          ? Material(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: Semantics(
+                        liveRegion: true,
+                        child: const Text('Saving registry changes...'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          : null,
     );
   }
 }
@@ -590,6 +618,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 class _AdminDashboardBody extends StatelessWidget {
   const _AdminDashboardBody({
     this.desktopMode = false,
+    this.isSaving = false,
     this.validationPanel,
     required this.devices,
     required this.selectedRole,
@@ -610,6 +639,7 @@ class _AdminDashboardBody extends StatelessWidget {
 
   final List<RegisteredDevice> devices;
   final bool desktopMode;
+  final bool isSaving;
   final Widget? validationPanel;
   final RegisteredDeviceRole selectedRole;
   final TextEditingController deviceIdController;
@@ -642,35 +672,68 @@ class _AdminDashboardBody extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _MetricsRow(devices: devices),
-                    const SizedBox(height: 22),
+                    if (devices.isNotEmpty) ...[
+                      _MetricsRow(devices: devices),
+                      const SizedBox(height: 22),
+                    ],
                     _ResponsiveSplit(
-                      left: _RegisterDeviceCard(
-                        desktopMode: desktopMode,
-                        deviceIdController: deviceIdController,
-                        ownerController: ownerController,
-                        publicKeyController: publicKeyController,
-                        signingKeyController: signingKeyController,
-                        selectedRole: selectedRole,
-                        onRoleChanged: onRoleChanged,
-                        onRegister: onRegister,
-                        onScanRegistrationQr: onScanRegistrationQr,
+                      left: devices.isEmpty
+                          ? _Panel(
+                              title: 'Add your first phone',
+                              subtitle:
+                                  'On the phone, open Trust Bundle and copy its registration JSON. Paste it here to check the signature, then enter the name and role.',
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  FilledButton.icon(
+                                    key: const ValueKey(
+                                      'admin-first-registration',
+                                    ),
+                                    onPressed: isSaving
+                                        ? null
+                                        : onScanRegistrationQr,
+                                    icon: const Icon(Icons.add_circle_outline),
+                                    label: const Text('Register a phone'),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  const Text(
+                                    'You can also enter registration details in the form below.',
+                                  ),
+                                ],
+                              ),
+                            )
+                          : AdminDeviceRegistryPanel(
+                              busy: isSaving,
+                              devices: devices,
+                              onApprove: onApprove,
+                              onRevoke: onRevoke,
+                              onEdit: onEdit,
+                              onDelete: onDelete,
+                            ),
+                      right: Column(
+                        children: [
+                          _RegisterDeviceCard(
+                            busy: isSaving,
+                            desktopMode: desktopMode,
+                            deviceIdController: deviceIdController,
+                            ownerController: ownerController,
+                            publicKeyController: publicKeyController,
+                            signingKeyController: signingKeyController,
+                            selectedRole: selectedRole,
+                            onRoleChanged: onRoleChanged,
+                            onRegister: onRegister,
+                            onScanRegistrationQr: onScanRegistrationQr,
+                          ),
+                          const SizedBox(height: 22),
+                          _SecurityModelCard(
+                            busy: isSaving,
+                            onCopyTrustBundle: onCopyTrustBundle,
+                            onShowTrustBundleQr: onShowTrustBundleQr,
+                          ),
+                          const SizedBox(height: 22),
+                          validationPanel ?? const _ValidationMetricsCard(),
+                        ],
                       ),
-                      right: _SecurityModelCard(
-                        onCopyTrustBundle: onCopyTrustBundle,
-                        onShowTrustBundleQr: onShowTrustBundleQr,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    _ResponsiveSplit(
-                      left: _DeviceTableCard(
-                        devices: devices,
-                        onApprove: onApprove,
-                        onRevoke: onRevoke,
-                        onEdit: onEdit,
-                        onDelete: onDelete,
-                      ),
-                      right: validationPanel ?? const _ValidationMetricsCard(),
                     ),
                   ],
                 ),
@@ -731,96 +794,36 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-      padding: const EdgeInsets.all(30),
-      decoration: BoxDecoration(
-        color: _mobileRed,
-        borderRadius: BorderRadius.circular(19),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1260),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Image.asset(
-                      'assets/home/shadownetwork_logo.png',
-                      width: 112,
-                      fit: BoxFit.contain,
+          constraints: const BoxConstraints(maxWidth: 1272),
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Semantics(
+                  header: true,
+                  child: Text(
+                    desktopMode ? 'Devices' : 'Shadow Network Admin',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF222222),
                     ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Shadow Network Admin Dashboard',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 34,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      desktopMode
-                          ? 'Device approval, trust control and validation data saved on this computer.'
-                          : 'Persistent browser registry for device approval, trust control, and validation metrics.',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.78),
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        _Pill(
-                          icon: Icons.devices_other_rounded,
-                          label: '$deviceCount tracked devices',
-                        ),
-                        _Pill(
-                          icon: Icons.verified_user_rounded,
-                          label: desktopMode
-                              ? 'Saved on this computer'
-                              : 'Saved in browser storage',
-                        ),
-                        const _Pill(
-                          icon: Icons.download_for_offline_rounded,
-                          label: 'Trust bundle export',
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 24),
-              Container(
-                width: 170,
-                height: 170,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.72),
-                    width: 3,
                   ),
                 ),
-                child: const Icon(
-                  Icons.admin_panel_settings_rounded,
-                  color: Colors.white,
-                  size: 86,
+                const SizedBox(height: 8),
+                Text(
+                  desktopMode
+                      ? 'Manage phone approvals and share trust updates. Your registry is saved on this computer.'
+                      : 'Manage phone approvals and share trust updates. Your registry is saved in this browser.',
+                  style: const TextStyle(color: _mobileMuted, fontSize: 16),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -850,22 +853,21 @@ class _MetricsRow extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 980 ? 4 : 2;
-        return GridView(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: columns,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
-            mainAxisExtent: 210 * MediaQuery.textScalerOf(context).scale(1),
-          ),
+        final columns = constraints.maxWidth >= 850
+            ? 4
+            : constraints.maxWidth >= 460
+            ? 2
+            : 1;
+        final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
           children: [
             _MetricCard(
               icon: Icons.verified_rounded,
               label: 'Approved devices',
               value: '$approved',
-              detail: 'Allowed to send verified packets',
+              detail: 'Included in trust exports',
             ),
             _MetricCard(
               icon: Icons.pending_actions_rounded,
@@ -883,9 +885,9 @@ class _MetricsRow extends StatelessWidget {
               icon: Icons.health_and_safety_rounded,
               label: 'Responder endpoints',
               value: '$responders',
-              detail: 'Can prioritize incoming SOS',
+              detail: 'Registered with this role',
             ),
-          ],
+          ].map((child) => SizedBox(width: width, child: child)).toList(),
         );
       },
     );
@@ -895,6 +897,7 @@ class _MetricsRow extends StatelessWidget {
 class _RegisterDeviceCard extends StatelessWidget {
   const _RegisterDeviceCard({
     this.desktopMode = false,
+    this.busy = false,
     required this.deviceIdController,
     required this.ownerController,
     required this.publicKeyController,
@@ -915,10 +918,12 @@ class _RegisterDeviceCard extends StatelessWidget {
   final VoidCallback onRegister;
   final VoidCallback onScanRegistrationQr;
 
+  final bool busy;
+
   @override
   Widget build(BuildContext context) {
     return _Panel(
-      title: 'Register User',
+      title: 'Register a phone',
       subtitle:
           'Register a user and their phone, then approve their role for offline use.',
       child: Column(
@@ -926,7 +931,7 @@ class _RegisterDeviceCard extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: onScanRegistrationQr,
+              onPressed: busy ? null : onScanRegistrationQr,
               style: OutlinedButton.styleFrom(
                 foregroundColor: _mobileRed,
                 minimumSize: const Size(double.infinity, 52),
@@ -944,91 +949,114 @@ class _RegisterDeviceCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: deviceIdController,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(
-              labelText: 'Device ID',
-              hintText: 'Example: SN-CIVILIAN-104',
-              prefixIcon: Icon(Icons.qr_code_2_rounded),
-              border: OutlineInputBorder(),
+          ExpansionTile(
+            key: ValueKey(
+              'registration-details-${deviceIdController.text.isNotEmpty}',
             ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: ownerController,
-            decoration: const InputDecoration(
-              labelText: 'User full name / Unit name',
-              hintText: 'Example: Barangay Health Responder',
-              prefixIcon: Icon(Icons.badge_rounded),
-              border: OutlineInputBorder(),
+            initiallyExpanded: deviceIdController.text.isNotEmpty,
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: 12),
+            title: const Text('Registration details'),
+            subtitle: const Text(
+              'Enter or review the phone keys, name and role',
             ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: publicKeyController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'X25519 public key',
-              hintText: 'Paste from the phone Trust Bundle screen',
-              prefixIcon: Icon(Icons.key_rounded),
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: signingKeyController,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Ed25519 signing public key',
-              hintText: 'Filled from the phone registration QR',
-              prefixIcon: Icon(Icons.verified_user_outlined),
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 14),
-          DropdownButtonFormField<RegisteredDeviceRole>(
-            initialValue: selectedRole,
-            decoration: const InputDecoration(
-              labelText: 'Role',
-              prefixIcon: Icon(Icons.supervised_user_circle_rounded),
-              border: OutlineInputBorder(),
-            ),
-            items: RegisteredDeviceRole.values
-                .map(
-                  (role) =>
-                      DropdownMenuItem(value: role, child: Text(role.label)),
-                )
-                .toList(growable: false),
-            onChanged: (value) {
-              if (value != null) {
-                onRoleChanged(value);
-              }
-            },
-          ),
-          const SizedBox(height: 18),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: _mobileRed,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 54),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
+            maintainState: true,
+            children: [
+              TextField(
+                enabled: !busy,
+                controller: deviceIdController,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Device ID',
+                  hintText: 'Example: SN-CIVILIAN-104',
+                  prefixIcon: Icon(Icons.qr_code_2_rounded),
+                  border: OutlineInputBorder(),
                 ),
               ),
-              onPressed: onRegister,
-              icon: const Icon(Icons.app_registration_rounded),
-              label: const Text('Add to Registry'),
-            ),
+              const SizedBox(height: 14),
+              TextField(
+                enabled: !busy,
+                controller: ownerController,
+                decoration: const InputDecoration(
+                  labelText: 'User full name / Unit name',
+                  hintText: 'Example: Barangay Health Responder',
+                  prefixIcon: Icon(Icons.badge_rounded),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                enabled: !busy,
+                controller: publicKeyController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'X25519 public key',
+                  hintText: 'Paste from the phone Trust Bundle screen',
+                  prefixIcon: Icon(Icons.key_rounded),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                enabled: !busy,
+                controller: signingKeyController,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Ed25519 signing public key',
+                  hintText: 'Filled from the phone registration QR',
+                  prefixIcon: Icon(Icons.verified_user_outlined),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<RegisteredDeviceRole>(
+                initialValue: selectedRole,
+                decoration: const InputDecoration(
+                  labelText: 'Role',
+                  prefixIcon: Icon(Icons.supervised_user_circle_rounded),
+                  border: OutlineInputBorder(),
+                ),
+                items: RegisteredDeviceRole.values
+                    .map(
+                      (role) => DropdownMenuItem(
+                        value: role,
+                        child: Text(role.label),
+                      ),
+                    )
+                    .toList(growable: false),
+                onChanged: busy
+                    ? null
+                    : (value) {
+                        if (value != null) {
+                          onRoleChanged(value);
+                        }
+                      },
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _mobileRed,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 54),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                  ),
+                  onPressed: busy ? null : onRegister,
+                  icon: const Icon(Icons.app_registration_rounded),
+                  label: const Text('Add to registry'),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
           Text(
             desktopMode
                 ? 'Saved on this computer. Use Backup & recovery to protect your registry and administrator identity.'
                 : 'Saved locally in this browser. During testing, run with the same web port so registrations remain available.',
-            style: TextStyle(color: _mobileMuted, fontSize: 12),
+            style: TextStyle(color: _mobileMuted, fontSize: 14),
           ),
         ],
       ),
@@ -1114,6 +1142,7 @@ class _DeviceRegistrationScannerPageState
 
 class _SecurityModelCard extends StatelessWidget {
   const _SecurityModelCard({
+    this.busy = false,
     required this.onCopyTrustBundle,
     required this.onShowTrustBundleQr,
   });
@@ -1121,37 +1150,20 @@ class _SecurityModelCard extends StatelessWidget {
   final VoidCallback onCopyTrustBundle;
   final VoidCallback onShowTrustBundleQr;
 
+  final bool busy;
+
   @override
   Widget build(BuildContext context) {
     return _Panel(
-      title: 'Anti-Troll Security Model',
-      subtitle:
-          'The admin dashboard protects the mesh without blocking real victims.',
+      title: 'Share trust updates',
+      subtitle: 'Export a signed trust bundle after changing phone approvals.',
       child: Column(
         children: [
           const _InfoRow(
-            icon: Icons.key_rounded,
-            title: 'Signed device certificates',
+            icon: Icons.phonelink_setup_outlined,
+            title: 'Update every participating phone',
             detail:
-                'Approved phones can later receive credentials that other nodes verify offline.',
-          ),
-          const _InfoRow(
-            icon: Icons.download_for_offline_rounded,
-            title: 'Offline trust bundle',
-            detail:
-                'Phones cache approved and revoked device lists before disaster mode.',
-          ),
-          const _InfoRow(
-            icon: Icons.warning_amber_rounded,
-            title: 'Unverified SOS remains visible',
-            detail:
-                'Unknown devices are labeled unverified instead of fully blocked.',
-          ),
-          const _InfoRow(
-            icon: Icons.block_rounded,
-            title: 'Revoke lost devices',
-            detail:
-                'Admins can mark compromised phones as revoked for future syncs.',
+                'Import the new bundle on each phone. Approval and revocation changes do not sync automatically.',
           ),
           const SizedBox(height: 4),
           SizedBox(
@@ -1165,7 +1177,7 @@ class _SecurityModelCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
-              onPressed: onShowTrustBundleQr,
+              onPressed: busy ? null : onShowTrustBundleQr,
               icon: const Icon(Icons.qr_code_2_rounded),
               label: const Text('Show QR for Phone Scan'),
             ),
@@ -1182,7 +1194,7 @@ class _SecurityModelCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(15),
                 ),
               ),
-              onPressed: onCopyTrustBundle,
+              onPressed: busy ? null : onCopyTrustBundle,
               icon: const Icon(Icons.content_copy_rounded),
               label: const Text('Copy Trust Bundle JSON'),
             ),
@@ -1190,213 +1202,6 @@ class _SecurityModelCard extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _DeviceTableCard extends StatelessWidget {
-  const _DeviceTableCard({
-    required this.devices,
-    required this.onApprove,
-    required this.onRevoke,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final List<RegisteredDevice> devices;
-  final ValueChanged<RegisteredDevice> onApprove;
-  final ValueChanged<RegisteredDevice> onRevoke;
-  final ValueChanged<RegisteredDevice> onEdit;
-  final ValueChanged<RegisteredDevice> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'Registered users and phones',
-      subtitle:
-          'Verified messages require a valid sender signature matching the approved phone signing key.',
-      child: devices.isEmpty
-          ? const _RegistryEmptyState()
-          : Column(
-              children: devices
-                  .map(
-                    (device) => _DeviceRegistryTile(
-                      device: device,
-                      onApprove: onApprove,
-                      onRevoke: onRevoke,
-                      onEdit: onEdit,
-                      onDelete: onDelete,
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-    );
-  }
-}
-
-class _RegistryEmptyState extends StatelessWidget {
-  const _RegistryEmptyState();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF7F7),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _mobileField),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.app_registration_rounded, color: _mobileRed),
-          SizedBox(height: 10),
-          Text(
-            'No devices registered yet.',
-            style: TextStyle(fontWeight: FontWeight.w900),
-          ),
-          SizedBox(height: 4),
-          Text(
-            'Get the phone Device ID from the mobile Trust Bundle screen, then add it using Register Device.',
-            style: TextStyle(color: _mobileMuted),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DeviceRegistryTile extends StatelessWidget {
-  const _DeviceRegistryTile({
-    required this.device,
-    required this.onApprove,
-    required this.onRevoke,
-    required this.onEdit,
-    required this.onDelete,
-  });
-
-  final RegisteredDevice device;
-  final ValueChanged<RegisteredDevice> onApprove;
-  final ValueChanged<RegisteredDevice> onRevoke;
-  final ValueChanged<RegisteredDevice> onEdit;
-  final ValueChanged<RegisteredDevice> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _mobileField),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 10,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SelectableText(
-                device.deviceId,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 15,
-                ),
-              ),
-              _StatusBadge(status: device.status),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            device.ownerName,
-            style: const TextStyle(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${device.role.label} - ${device.lastSeenLabel}',
-            style: const TextStyle(color: _mobileMuted),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              if (device.status != RegisteredDeviceStatus.approved)
-                FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _mobileRed,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: () => onApprove(device),
-                  icon: const Icon(Icons.check_circle_rounded, size: 18),
-                  label: const Text('Approve'),
-                ),
-              if (device.status != RegisteredDeviceStatus.revoked)
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _mobileRedDark,
-                    side: const BorderSide(color: _mobileRed),
-                  ),
-                  onPressed: () => _confirmRevoke(context),
-                  icon: const Icon(Icons.block_rounded, size: 18),
-                  label: const Text('Revoke'),
-                ),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF333333),
-                  side: const BorderSide(color: Color(0xFFBDBDBD)),
-                ),
-                onPressed: () => onEdit(device),
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('Edit'),
-              ),
-              TextButton.icon(
-                style: TextButton.styleFrom(foregroundColor: _mobileRedDark),
-                onPressed: () => onDelete(device),
-                icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                label: const Text('Delete'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _confirmRevoke(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Revoke device?'),
-          content: Text(
-            '${device.deviceId} will be added to the revoked list in the next trust bundle.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: _mobileRed,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Revoke'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed == true) {
-      onRevoke(device);
-    }
   }
 }
 
@@ -1413,7 +1218,7 @@ class _ValidationMetricsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const _Panel(
-      title: 'Validation Metrics',
+      title: 'Validation metrics',
       subtitle: 'Real metrics will appear after SOS and relay logs are synced.',
       child: Column(
         children: [
@@ -1463,16 +1268,17 @@ class _ResponsiveSplit extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 960) {
+        if (constraints.maxWidth < 1000 ||
+            MediaQuery.textScalerOf(context).scale(1) > 1.5) {
           return Column(children: [left, const SizedBox(height: 22), right]);
         }
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(child: left),
+            Expanded(flex: 3, child: left),
             const SizedBox(width: 22),
-            Expanded(child: right),
+            Expanded(flex: 2, child: right),
           ],
         );
       },
@@ -1500,20 +1306,13 @@ class _Panel extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(19),
         border: Border.all(color: _mobileField),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.13),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
+            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 6),
           Text(subtitle, style: const TextStyle(color: _mobileMuted)),
@@ -1541,37 +1340,35 @@ class _MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _mobileField),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Icon(icon, color: _mobileRed, size: 30),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 30,
-                  fontWeight: FontWeight.w900,
+          Text(
+            value,
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-              ),
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
-              Text(detail, style: const TextStyle(color: _mobileMuted)),
-            ],
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: const TextStyle(color: _mobileMuted, fontSize: 14),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1605,7 +1402,7 @@ class _InfoRow extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(fontWeight: FontWeight.w900),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 Text(detail, style: const TextStyle(color: _mobileMuted)),
               ],
@@ -1641,7 +1438,7 @@ class _MetricLine extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(fontWeight: FontWeight.w900),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 Text(detail, style: const TextStyle(color: _mobileMuted)),
               ],
@@ -1652,79 +1449,10 @@ class _MetricLine extends StatelessWidget {
             value,
             style: const TextStyle(
               color: _mobileRed,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.24)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
-
-  final RegisteredDeviceStatus status;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (status) {
-      RegisteredDeviceStatus.approved => _mobileRedDark,
-      RegisteredDeviceStatus.pending => const Color(0xFF9A5A00),
-      RegisteredDeviceStatus.revoked => const Color(0xFF6B6B6B),
-    };
-    final background = switch (status) {
-      RegisteredDeviceStatus.approved => _mobileRed.withValues(alpha: 0.1),
-      RegisteredDeviceStatus.pending => const Color(0xFFFFF5E6),
-      RegisteredDeviceStatus.revoked => const Color(0xFFEDEDED),
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        status.label.toUpperCase(),
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w900,
-        ),
       ),
     );
   }

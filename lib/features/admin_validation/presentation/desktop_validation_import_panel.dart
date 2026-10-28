@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/validation_import.dart';
 import 'providers/validation_import_provider.dart';
 
-const _red = Color(0xFFE83C3D);
+const _red = Color(0xFFB52B32);
 const _darkRed = Color(0xFF861A1A);
 
 class DesktopValidationImportPanel extends ConsumerWidget {
