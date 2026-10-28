@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'core/theme/app_theme.dart';
+import 'features/admin/presentation/theme/admin_theme.dart';
 import 'features/admin/presentation/pages/browser_admin_dashboard_page.dart';
 
 void main() {
@@ -16,7 +16,7 @@ class ShadowNetworkAdminWebApp extends StatelessWidget {
     return MaterialApp(
       title: 'Shadow Network Admin',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
+      theme: AdminTheme.light,
       home: const BrowserAdminDashboardPage(),
     );
   }

@@ -10,6 +10,7 @@ import '../../domain/entities/validation_summary.dart';
 import '../providers/validation_session_provider.dart';
 import '../widgets/validation_session_start_dialog.dart';
 import '../widgets/validation_run_qr_dialog.dart';
+import '../widgets/validation_bundle_share_button.dart';
 
 const _validationRed = Color(0xFFE83C3D);
 const _validationDark = Color(0xFF231F20);
@@ -398,8 +399,13 @@ class _ActiveSessionCard extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            state.activeData?.exportRecords.isNotEmpty == true
-                ? 'SYNC STATE: MANUAL BACKUP EXPORTED'
+            state.activeData?.exportRecords.any(
+                      (record) => record.result == 'file_created',
+                    ) ==
+                    true
+                ? 'SYNC STATE: FILE SAVED ON THIS PHONE'
+                : state.activeData?.exportRecords.isNotEmpty == true
+                ? 'SYNC STATE: CLIPBOARD EXPORT PREPARED'
                 : 'SYNC STATE: LOCAL ONLY',
             style: const TextStyle(
               color: _validationRed,
@@ -413,6 +419,8 @@ class _ActiveSessionCard extends StatelessWidget {
             Text(session.notes!, style: const TextStyle(fontSize: 12)),
           ],
           const SizedBox(height: 15),
+          ValidationBundleShareButton(session: session),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -626,6 +634,8 @@ class _SessionDetailsSheet extends StatelessWidget {
           ValidationRunIdentityPanel(testRunId: data.session.testRunId),
           _MetricsGrid(summary: summary),
           const SizedBox(height: 16),
+          ValidationBundleShareButton(session: data.session),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(

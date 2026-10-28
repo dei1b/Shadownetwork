@@ -5,10 +5,11 @@ import 'package:cryptography/cryptography.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/entities/registered_device.dart';
+import '../../domain/repositories/admin_registry_repository.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
 import '../../../trust/domain/services/canonical_json.dart';
 
-class AdminDeviceRegistryStore {
+class AdminDeviceRegistryStore implements AdminRegistryRepository {
   static const _devicesKey = 'shadow_network_admin_devices_v1';
   static const _signingPrivateKey = 'shadow_network_admin_ed25519_private_v1';
   static const _signingPublicKey = 'shadow_network_admin_ed25519_public_v1';
@@ -20,6 +21,7 @@ class AdminDeviceRegistryStore {
     'SN-CIVILIAN-073',
   };
 
+  @override
   Future<List<RegisteredDevice>> loadDevices() async {
     final preferences = await SharedPreferences.getInstance();
     final rawDevices = preferences.getString(_devicesKey);
@@ -48,6 +50,7 @@ class AdminDeviceRegistryStore {
     return devices;
   }
 
+  @override
   Future<void> saveDevices(List<RegisteredDevice> devices) async {
     final preferences = await SharedPreferences.getInstance();
     final encoded = jsonEncode(
@@ -56,6 +59,7 @@ class AdminDeviceRegistryStore {
     await preferences.setString(_devicesKey, encoded);
   }
 
+  @override
   Future<String> buildTrustBundleJson(List<RegisteredDevice> devices) async {
     _validatePublishableDevices(devices);
     final preferences = await SharedPreferences.getInstance();

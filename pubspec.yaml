@@ -19,6 +19,8 @@ dependencies:
   latlong2: ^0.9.1
   geolocator: ^14.0.2
   sqflite: ^2.4.2+1
+  sqflite_common_ffi: ^2.4.0+3
+  file_selector: ^1.1.0
   path: ^1.9.1
   crypto: ^3.0.7
   dio_cache_interceptor: 4.0.6
@@ -37,7 +39,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  sqflite_common_ffi: ^2.4.0+3
 
 flutter:
   uses-material-design: true
