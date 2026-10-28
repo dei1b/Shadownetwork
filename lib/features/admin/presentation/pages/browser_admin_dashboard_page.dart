@@ -8,6 +8,8 @@ import 'package:shadownetwork/features/auth/presentation/widgets/auth_background
 
 import '../../data/services/admin_device_registry_store.dart';
 import '../../domain/entities/registered_device.dart';
+import '../../domain/repositories/admin_registry_repository.dart';
+import '../widgets/registration_json_dialog.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
 
@@ -17,7 +19,16 @@ const _mobileMuted = Color(0xFF666666);
 const _mobileField = Color(0xFFE1E1E1);
 
 class BrowserAdminDashboardPage extends StatefulWidget {
-  const BrowserAdminDashboardPage({super.key});
+  const BrowserAdminDashboardPage({
+    super.key,
+    this.registry,
+    this.desktopMode = false,
+    this.validationPanel,
+  });
+
+  final AdminRegistryRepository? registry;
+  final bool desktopMode;
+  final Widget? validationPanel;
 
   @override
   State<BrowserAdminDashboardPage> createState() =>
@@ -25,7 +36,9 @@ class BrowserAdminDashboardPage extends StatefulWidget {
 }
 
 class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
-  final AdminDeviceRegistryStore _registryStore = AdminDeviceRegistryStore();
+  final AdminDeviceRegistryStore _browserRegistry = AdminDeviceRegistryStore();
+  AdminRegistryRepository get _registryStore =>
+      widget.registry ?? _browserRegistry;
   final TextEditingController _deviceIdController = TextEditingController();
   final TextEditingController _ownerController = TextEditingController();
   final TextEditingController _publicKeyController = TextEditingController();
@@ -35,6 +48,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   RegisteredDeviceRole _selectedRole = RegisteredDeviceRole.civilian;
   int _registrationKeyVersion = 1;
   bool _isLoadingRegistry = true;
+  bool _isSavingRegistry = false;
   String? _registryError;
 
   @override
@@ -69,17 +83,28 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       }
       setState(() {
         _isLoadingRegistry = false;
-        _registryError = 'Unable to load device registry: $error';
+        _registryError =
+            'Unable to load the device registry. Check available storage and try again.';
       });
     }
   }
 
-  Future<void> _saveDevices(List<RegisteredDevice> devices) async {
-    await _registryStore.saveDevices(devices);
-    if (!mounted) {
-      return;
+  Future<bool> _saveDevices(List<RegisteredDevice> devices) async {
+    if (_isSavingRegistry) return false;
+    _isSavingRegistry = true;
+    try {
+      await _registryStore.saveDevices(devices);
+      if (!mounted) return false;
+      setState(() => _devices = devices);
+      return true;
+    } catch (_) {
+      _showSnackBar(
+        'Unable to save the registry. Check available storage and try again.',
+      );
+      return false;
+    } finally {
+      _isSavingRegistry = false;
     }
-    setState(() => _devices = devices);
   }
 
   Future<void> _registerDevice() async {
@@ -151,7 +176,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       ),
     ];
 
-    await _saveDevices(nextDevices);
+    if (!await _saveDevices(nextDevices) || !mounted) return;
     _deviceIdController.clear();
     _ownerController.clear();
     _publicKeyController.clear();
@@ -164,9 +189,19 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   }
 
   Future<void> _scanDeviceRegistrationQr() async {
-    final source = await Navigator.of(context).push<String>(
-      MaterialPageRoute(builder: (_) => const _DeviceRegistrationScannerPage()),
-    );
+    final String? source;
+    if (widget.desktopMode) {
+      source = await showDialog<String>(
+        context: context,
+        builder: (_) => const RegistrationJsonDialog(),
+      );
+    } else {
+      source = await Navigator.of(context).push<String>(
+        MaterialPageRoute(
+          builder: (_) => const _DeviceRegistrationScannerPage(),
+        ),
+      );
+    }
     if (source == null || source.trim().isEmpty || !mounted) {
       return;
     }
@@ -226,7 +261,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         )
         .toList(growable: false);
 
-    await _saveDevices(nextDevices);
+    if (!await _saveDevices(nextDevices)) return;
     _showSnackBar('${device.deviceId} marked ${status.label.toLowerCase()}.');
   }
 
@@ -298,8 +333,10 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                         },
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
+                      Text(
+                        widget.desktopMode
+                            ? 'To replace phone keys, paste the new registration JSON and register the same device ID again. The replacement requires approval.'
+                            : 'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
                         style: TextStyle(
                           color: _mobileMuted,
                           fontSize: 12,
@@ -359,7 +396,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
               : item,
         )
         .toList(growable: false);
-    await _saveDevices(nextDevices);
+    if (!await _saveDevices(nextDevices)) return;
     _showSnackBar('${device.deviceId} updated. Export a new trust bundle.');
   }
 
@@ -402,7 +439,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     final nextDevices = _devices
         .where((item) => item.deviceId != device.deviceId)
         .toList(growable: false);
-    await _saveDevices(nextDevices);
+    if (!await _saveDevices(nextDevices)) return;
     _showSnackBar('${device.deviceId} deleted from the registry.');
   }
 
@@ -416,6 +453,12 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       );
     } on FormatException catch (error) {
       _showSnackBar(error.message);
+    } on StateError catch (error) {
+      _showSnackBar(error.message.toString());
+    } catch (_) {
+      _showSnackBar(
+        'Unable to publish the trust bundle. Check Backup & recovery and available storage.',
+      );
     }
   }
 
@@ -425,6 +468,14 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       bundle = await _registryStore.buildTrustBundleJson(_devices);
     } on FormatException catch (error) {
       _showSnackBar(error.message);
+      return;
+    } on StateError catch (error) {
+      _showSnackBar(error.message.toString());
+      return;
+    } catch (_) {
+      _showSnackBar(
+        'Unable to publish the trust bundle. Check Backup & recovery and available storage.',
+      );
       return;
     }
     final parsed = TrustBundle.fromJsonString(bundle);
@@ -495,6 +546,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   }
 
   void _showSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
@@ -507,6 +559,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         : _registryError != null
         ? _RegistryError(message: _registryError!, onRetry: _loadRegistry)
         : _AdminDashboardBody(
+            desktopMode: widget.desktopMode,
+            validationPanel: widget.validationPanel,
             devices: _devices,
             selectedRole: _selectedRole,
             deviceIdController: _deviceIdController,
@@ -535,6 +589,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 
 class _AdminDashboardBody extends StatelessWidget {
   const _AdminDashboardBody({
+    this.desktopMode = false,
+    this.validationPanel,
     required this.devices,
     required this.selectedRole,
     required this.deviceIdController,
@@ -553,6 +609,8 @@ class _AdminDashboardBody extends StatelessWidget {
   });
 
   final List<RegisteredDevice> devices;
+  final bool desktopMode;
+  final Widget? validationPanel;
   final RegisteredDeviceRole selectedRole;
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
@@ -572,7 +630,9 @@ class _AdminDashboardBody extends StatelessWidget {
   Widget build(BuildContext context) {
     return CustomScrollView(
       slivers: [
-        SliverToBoxAdapter(child: _Header(deviceCount: devices.length)),
+        SliverToBoxAdapter(
+          child: _Header(deviceCount: devices.length, desktopMode: desktopMode),
+        ),
         SliverToBoxAdapter(
           child: Center(
             child: ConstrainedBox(
@@ -586,6 +646,7 @@ class _AdminDashboardBody extends StatelessWidget {
                     const SizedBox(height: 22),
                     _ResponsiveSplit(
                       left: _RegisterDeviceCard(
+                        desktopMode: desktopMode,
                         deviceIdController: deviceIdController,
                         ownerController: ownerController,
                         publicKeyController: publicKeyController,
@@ -609,7 +670,7 @@ class _AdminDashboardBody extends StatelessWidget {
                         onEdit: onEdit,
                         onDelete: onDelete,
                       ),
-                      right: const _ValidationMetricsCard(),
+                      right: validationPanel ?? const _ValidationMetricsCard(),
                     ),
                   ],
                 ),
@@ -663,9 +724,10 @@ class _RegistryError extends StatelessWidget {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.deviceCount});
+  const _Header({required this.deviceCount, this.desktopMode = false});
 
   final int deviceCount;
+  final bool desktopMode;
 
   @override
   Widget build(BuildContext context) {
@@ -708,7 +770,9 @@ class _Header extends StatelessWidget {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      'Persistent browser registry for device approval, trust control, and validation metrics.',
+                      desktopMode
+                          ? 'Device approval, trust control and validation data saved on this computer.'
+                          : 'Persistent browser registry for device approval, trust control, and validation metrics.',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.78),
                         fontSize: 16,
@@ -723,9 +787,11 @@ class _Header extends StatelessWidget {
                           icon: Icons.devices_other_rounded,
                           label: '$deviceCount tracked devices',
                         ),
-                        const _Pill(
+                        _Pill(
                           icon: Icons.verified_user_rounded,
-                          label: 'Saved in browser storage',
+                          label: desktopMode
+                              ? 'Saved on this computer'
+                              : 'Saved in browser storage',
                         ),
                         const _Pill(
                           icon: Icons.download_for_offline_rounded,
@@ -785,13 +851,15 @@ class _MetricsRow extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 980 ? 4 : 2;
-        return GridView.count(
+        return GridView(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: columns,
-          crossAxisSpacing: 14,
-          mainAxisSpacing: 14,
-          childAspectRatio: constraints.maxWidth >= 980 ? 1.9 : 2.4,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            mainAxisExtent: 210 * MediaQuery.textScalerOf(context).scale(1),
+          ),
           children: [
             _MetricCard(
               icon: Icons.verified_rounded,
@@ -826,6 +894,7 @@ class _MetricsRow extends StatelessWidget {
 
 class _RegisterDeviceCard extends StatelessWidget {
   const _RegisterDeviceCard({
+    this.desktopMode = false,
     required this.deviceIdController,
     required this.ownerController,
     required this.publicKeyController,
@@ -837,6 +906,7 @@ class _RegisterDeviceCard extends StatelessWidget {
   });
 
   final TextEditingController deviceIdController;
+  final bool desktopMode;
   final TextEditingController ownerController;
   final TextEditingController publicKeyController;
   final TextEditingController signingKeyController;
@@ -866,7 +936,11 @@ class _RegisterDeviceCard extends StatelessWidget {
                 ),
               ),
               icon: const Icon(Icons.qr_code_scanner_rounded),
-              label: const Text('Scan Phone QR with PC Camera'),
+              label: Text(
+                desktopMode
+                    ? 'Paste Phone Registration JSON'
+                    : 'Scan Phone QR with PC Camera',
+              ),
             ),
           ),
           const SizedBox(height: 14),
@@ -950,8 +1024,10 @@ class _RegisterDeviceCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          const Text(
-            'Saved locally in this browser. During testing, run with the same web port so registrations remain available.',
+          Text(
+            desktopMode
+                ? 'Saved on this computer. Use Backup & recovery to protect your registry and administrator identity.'
+                : 'Saved locally in this browser. During testing, run with the same web port so registrations remain available.',
             style: TextStyle(color: _mobileMuted, fontSize: 12),
           ),
         ],

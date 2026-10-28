@@ -10,6 +10,7 @@ import io.flutter.plugin.common.MethodChannel
 internal object RelayEngineHost {
     private var engine: FlutterEngine? = null
     private var transport: AndroidTransportBridge? = null
+    private var validationSharing: ValidationBundleShareBridge? = null
 
     fun getOrCreate(context: Context): FlutterEngine {
         engine?.let { return it }
@@ -20,11 +21,16 @@ internal object RelayEngineHost {
         val channel = MethodChannel(created.dartExecutor.binaryMessenger, AndroidTransportBridge.CHANNEL_NAME)
         bridge.attachChannel(channel)
         channel.setMethodCallHandler(bridge::handle)
+        val sharing = ValidationBundleShareBridge(context.applicationContext)
+        validationSharing = sharing
+        MethodChannel(created.dartExecutor.binaryMessenger, "shadow_network/validation_exports")
+            .setMethodCallHandler(sharing::handle)
         created.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         return created
     }
 
     fun attachActivity(activity: FlutterActivity?) {
         transport?.attachActivity(activity)
+        validationSharing?.activity = activity
     }
 }
