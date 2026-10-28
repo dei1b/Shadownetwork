@@ -9,6 +9,17 @@ final desktopAdminRegistryProvider =
       );
     });
 
+// Identity can remain unchanged while a restore replaces every device record.
+final adminRegistryRevisionProvider =
+    NotifierProvider<AdminRegistryRevision, int>(AdminRegistryRevision.new);
+
+class AdminRegistryRevision extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void didRestore() => state++;
+}
+
 final adminRecoveryProvider =
     AsyncNotifierProvider<AdminRecoveryController, AdminIdentityStatus>(
       AdminRecoveryController.new,
@@ -40,6 +51,7 @@ class AdminRecoveryController extends AsyncNotifier<AdminIdentityStatus> {
   Future<void> restoreBackup(String source, String password) async {
     final repository = await ref.read(desktopAdminRegistryProvider.future);
     await repository.restoreEncryptedBackup(source, password);
+    ref.read(adminRegistryRevisionProvider.notifier).didRestore();
     await refresh();
   }
 }

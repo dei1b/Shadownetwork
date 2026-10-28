@@ -27,6 +27,7 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
   Widget build(BuildContext context) {
     final registry = ref.watch(desktopAdminRegistryProvider);
     final identity = ref.watch(adminRecoveryProvider);
+    final registryRevision = ref.watch(adminRegistryRevisionProvider);
     // Keep imported counts alive while navigating between pages.
     final imports = ref.watch(validationImportControllerProvider);
     final content = registry.when(
@@ -41,7 +42,7 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
         children: [
           BrowserAdminDashboardPage(
             key: ValueKey(
-              '${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
+              '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
             ),
             registry: repository,
             desktopMode: true,

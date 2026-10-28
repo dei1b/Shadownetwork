@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -57,6 +58,52 @@ class _Registry implements DesktopAdminRegistryRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _RestoringRegistry extends _Registry {
+  _RestoringRegistry({this.failRestore = false}) : super(empty: true);
+  final bool failRestore;
+  List<RegisteredDevice> saved = [];
+  List<String> publicationIds = [];
+  int loads = 0;
+  @override
+  Future<AdminIdentityStatus> identityStatus() async =>
+      const AdminIdentityStatus(
+        fingerprint: 'same-test-administrator',
+        bundleVersion: 0,
+        hasIdentity: true,
+      );
+  @override
+  Future<List<RegisteredDevice>> loadDevices() async {
+    loads++;
+    return List.of(saved);
+  }
+
+  @override
+  Future<void> restoreEncryptedBackup(String source, String password) async {
+    if (failRestore) throw StateError('Restore rejected');
+    saved = [
+      RegisteredDevice(
+        deviceId: 'RESTORED-PHONE',
+        ownerName: 'Recovered responder',
+        role: RegisteredDeviceRole.responder,
+        status: RegisteredDeviceStatus.approved,
+        registeredAt: DateTime.utc(2026),
+        updatedAt: DateTime.utc(2026),
+        lastSeenLabel: 'Restored registration',
+      ),
+    ];
+  }
+
+  @override
+  Future<void> saveDevices(List<RegisteredDevice> devices) async =>
+      saved = List.of(devices);
+  @override
+  Future<String> buildTrustBundleJson(List<RegisteredDevice> devices) async {
+    publicationIds = devices.map((device) => device.deviceId).toList();
+    // Capture the publication boundary without producing a fake signed bundle.
+    throw StateError('Publication captured by test');
+  }
+}
+
 class _Imports implements ValidationImportRepository {
   @override
   Future<List<ValidationImportedDataset>> listDatasets() async => [];
@@ -98,6 +145,105 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  for (final failRestore in [false, true]) {
+    testWidgets(
+      'same-identity restore ${failRestore ? 'failure retains draft' : 'reloads before publication and registration'}',
+      (tester) async {
+        final repository = _RestoringRegistry(failRestore: failRestore);
+        final container = ProviderContainer(
+          overrides: [
+            desktopAdminRegistryProvider.overrideWith(
+              (ref) async => repository,
+            ),
+            validationImportRepositoryProvider.overrideWithValue(_Imports()),
+          ],
+        );
+        addTearDown(container.dispose);
+        await tester.binding.setSurfaceSize(const Size(1440, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: MaterialApp(
+              theme: AdminTheme.light,
+              home: const DesktopAdminShell(),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Add your first phone'), findsOneWidget);
+        final initialLoads = repository.loads;
+        final identity = container.read(adminRecoveryProvider).requireValue;
+        if (failRestore) {
+          await tester.ensureVisible(find.text('Registration details'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Registration details'));
+          await tester.pumpAndSettle();
+          final owner = find.widgetWithText(
+            TextField,
+            'User full name / Unit name',
+          );
+          await tester.enterText(owner, 'Keep unfinished registration');
+          await expectLater(
+            container
+                .read(adminRecoveryProvider.notifier)
+                .restoreBackup('fixture', 'password'),
+            throwsStateError,
+          );
+          await tester.pumpAndSettle();
+          expect(repository.loads, initialLoads);
+          expect(
+            tester.widget<TextField>(owner).controller!.text,
+            'Keep unfinished registration',
+          );
+        } else {
+          await tester.tap(find.text('Backup & recovery').first);
+          await tester.pumpAndSettle();
+          await container
+              .read(adminRecoveryProvider.notifier)
+              .restoreBackup('fixture', 'password');
+          await tester.pumpAndSettle();
+          expect(
+            container.read(adminRecoveryProvider).requireValue.fingerprint,
+            identity.fingerprint,
+          );
+          await tester.tap(find.text('Devices').first);
+          await tester.pumpAndSettle();
+          expect(find.text('Recovered responder'), findsOneWidget);
+          await tester.ensureVisible(find.text('Copy Trust Bundle JSON'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Copy Trust Bundle JSON'));
+          await tester.pumpAndSettle();
+          expect(repository.publicationIds, ['RESTORED-PHONE']);
+          await tester.ensureVisible(find.text('Registration details'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Registration details'));
+          await tester.pumpAndSettle();
+          for (final (label, value) in [
+            ('Device ID', 'NEW-PHONE'),
+            ('User full name / Unit name', 'New registration'),
+            ('X25519 public key', base64UrlEncode(List.filled(32, 1))),
+            ('Ed25519 signing public key', base64UrlEncode(List.filled(32, 2))),
+          ]) {
+            final field = find.widgetWithText(TextField, label);
+            await tester.ensureVisible(field);
+            await tester.pumpAndSettle();
+            await tester.enterText(field, value);
+          }
+          await tester.ensureVisible(find.text('Add to registry'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Add to registry'));
+          await tester.pumpAndSettle();
+          expect(
+            repository.saved.map((device) => device.deviceId),
+            containsAll(['RESTORED-PHONE', 'NEW-PHONE']),
+          );
+        }
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 
   testWidgets(
