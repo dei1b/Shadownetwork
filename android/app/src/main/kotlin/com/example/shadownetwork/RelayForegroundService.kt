@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.os.Build
 import android.os.IBinder
 
@@ -68,7 +70,9 @@ class RelayForegroundService : Service() {
         }
 
         return builder
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_shadow_network)
+            .setLargeIcon(BitmapFactory.decodeResource(resources, R.drawable.ic_notification_logo))
+            .setColor(Color.rgb(181, 43, 50))
             .setContentTitle("Shadow Network relay active")
             .setContentText("Listening for nearby peers and queued messages.")
             .setContentIntent(pendingIntent)
