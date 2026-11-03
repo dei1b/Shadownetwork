@@ -87,7 +87,12 @@ void main() {
     'SQLite restart preserves devices, issuer and phone-verifiable versions',
     () async {
       await repository.initializeIdentity();
-      await repository.saveDevices([device()]);
+      await repository.saveDevices([
+        device().copyWith(
+          phoneNumber: '+63 912 345 6789',
+          address: 'Purok 2, Panabo City',
+        ),
+      ]);
       final first = await TrustBundleStore().importBundleJson(
         await repository.buildTrustBundleJson(await repository.loadDevices()),
       );
@@ -101,6 +106,8 @@ void main() {
       );
       final loaded = await repository.loadDevices();
       expect(loaded.single.ownerName, 'Synthetic responder');
+      expect(loaded.single.phoneNumber, '+63 912 345 6789');
+      expect(loaded.single.address, 'Purok 2, Panabo City');
       final second = await TrustBundleStore().importBundleJson(
         await repository.buildTrustBundleJson(loaded),
       );
@@ -355,7 +362,12 @@ void main() {
     'backup restores registry, key and next version without plaintext identity',
     () async {
       await repository.initializeIdentity();
-      await repository.saveDevices([device()]);
+      await repository.saveDevices([
+        device().copyWith(
+          phoneNumber: 'PRIVATE-PHONE',
+          address: 'PRIVATE-ADDRESS',
+        ),
+      ]);
       await repository.buildTrustBundleJson([device()]);
       final status = await repository.identityStatus();
       final backup = await repository.createEncryptedBackup(password);
@@ -373,6 +385,12 @@ void main() {
           keyStore: MemorySigningKeyStore(),
         );
         await restored.restoreEncryptedBackup(backup, password);
+        final user = (await restored.loadDevices()).single;
+        expect(user.phoneNumber, 'PRIVATE-PHONE');
+        expect(user.address, 'PRIVATE-ADDRESS');
+        final bundleSource = await restored.buildTrustBundleJson([user]);
+        expect(bundleSource, isNot(contains('PRIVATE-PHONE')));
+        expect(bundleSource, isNot(contains('PRIVATE-ADDRESS')));
         expect(
           (await restored.identityStatus()).fingerprint,
           status.fingerprint,
@@ -384,7 +402,7 @@ void main() {
         final verified = await TrustBundleStore().importBundleJson(
           await restored.buildTrustBundleJson(await restored.loadDevices()),
         );
-        expect(verified.bundleVersion, 2);
+        expect(verified.bundleVersion, 3);
       } finally {
         await destination.close();
       }

@@ -271,6 +271,14 @@ class _DeviceRegistryTile extends StatelessWidget {
             '${device.role.label} - $note',
             style: const TextStyle(color: _mobileMuted),
           ),
+          if (device.phoneNumber.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('Phone: ${device.phoneNumber}'),
+          ],
+          if (device.address.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text('Address: ${device.address}'),
+          ],
           const SizedBox(height: 12),
           Wrap(
             spacing: 10,

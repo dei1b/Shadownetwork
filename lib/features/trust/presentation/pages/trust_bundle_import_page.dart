@@ -11,6 +11,8 @@ import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../data/services/trust_bundle_store.dart';
 import '../../domain/entities/trust_bundle.dart';
 import '../providers/device_access_provider.dart';
+import '../widgets/user_information_form.dart';
+import '../../../security/data/services/user_information_store.dart';
 
 const _trustRed = Color(0xFFE83C3D);
 const _trustRedDark = Color(0xFF861A1A);
@@ -106,6 +108,23 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     Peer peer,
     DeviceCryptoIdentity identity,
   ) async {
+    final information = await UserInformationStore().load().catchError((
+      Object error,
+    ) {
+      if (mounted) {
+        _showSnackBar(
+          'Unable to load user information. Save your details again.',
+        );
+      }
+      return null;
+    });
+    if (!mounted) return;
+    if (information == null) {
+      _showSnackBar(
+        'Save your user information before showing the registration QR.',
+      );
+      return;
+    }
     final signingIdentity = await ref.read(
       deviceSigningIdentityProvider.future,
     );
@@ -114,6 +133,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       deviceId: peer.id,
       identity: identity,
       signingIdentity: signingIdentity,
+      userInformation: information,
     );
     if (!mounted) return;
     await showDialog<void>(
@@ -241,6 +261,8 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                   children: [
                     _TrustHeader(bundle: _bundle),
                     const SizedBox(height: 18),
+                    const UserInformationForm(),
+                    const SizedBox(height: 24),
                     _DeviceIdentityCard(
                       localPeer: localPeer,
                       cryptoIdentity: cryptoIdentity,
@@ -663,48 +685,60 @@ class _DeviceRegistrationQrDialog extends StatelessWidget {
         'Device Registration QR',
         style: TextStyle(fontWeight: FontWeight.w900),
       ),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 340),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              color: Colors.white,
-              child: SizedBox.square(
-                dimension: 232,
-                child: CustomPaint(
-                  painter: QrPainter(
-                    data: payload,
-                    version: QrVersions.auto,
-                    eyeStyle: const QrEyeStyle(
-                      eyeShape: QrEyeShape.square,
-                      color: Colors.black,
-                    ),
-                    dataModuleStyle: const QrDataModuleStyle(
-                      dataModuleShape: QrDataModuleShape.square,
-                      color: Colors.black,
+      content: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 340),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                color: Colors.white,
+                child: SizedBox.square(
+                  dimension: 232,
+                  child: CustomPaint(
+                    painter: QrPainter(
+                      data: payload,
+                      version: QrVersions.auto,
+                      eyeStyle: const QrEyeStyle(
+                        eyeShape: QrEyeShape.square,
+                        color: Colors.black,
+                      ),
+                      dataModuleStyle: const QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.square,
+                        color: Colors.black,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              registration.deviceId,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: _trustRedDark,
-                fontWeight: FontWeight.w900,
+              const SizedBox(height: 12),
+              Text(
+                registration.deviceId,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _trustRedDark,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'On the PC admin dashboard, select Scan Phone QR and point the PC camera at this code.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: _trustMuted, fontSize: 12),
-            ),
-          ],
+              const SizedBox(height: 6),
+              if (registration.userInformation case final information?) ...[
+                Text(information.fullName, textAlign: TextAlign.center),
+                Text(information.phoneNumber, textAlign: TextAlign.center),
+                Text(information.address, textAlign: TextAlign.center),
+                const SizedBox(height: 8),
+                const Text(
+                  'This code shares your contact information with the administrator.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              const Text(
+                'On the PC admin dashboard, select Scan Phone QR and point the PC camera at this code.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: _trustMuted, fontSize: 12),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [

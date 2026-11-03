@@ -62,6 +62,8 @@ class RegisteredDevice {
     this.signingPublicKey,
     this.keyVersion = 1,
     this.notes,
+    this.phoneNumber = '',
+    this.address = '',
   });
 
   final String deviceId;
@@ -75,6 +77,8 @@ class RegisteredDevice {
   final String? signingPublicKey;
   final int keyVersion;
   final String? notes;
+  final String phoneNumber;
+  final String address;
 
   RegisteredDevice copyWith({
     String? deviceId,
@@ -88,6 +92,8 @@ class RegisteredDevice {
     String? signingPublicKey,
     int? keyVersion,
     String? notes,
+    String? phoneNumber,
+    String? address,
   }) {
     return RegisteredDevice(
       deviceId: deviceId ?? this.deviceId,
@@ -101,6 +107,8 @@ class RegisteredDevice {
       signingPublicKey: signingPublicKey ?? this.signingPublicKey,
       keyVersion: keyVersion ?? this.keyVersion,
       notes: notes ?? this.notes,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      address: address ?? this.address,
     );
   }
 
@@ -108,6 +116,8 @@ class RegisteredDevice {
     return {
       'device_id': deviceId,
       'owner_name': ownerName,
+      'phone_number': phoneNumber,
+      'address': address,
       'role': role.name,
       'status': status.name,
       'registered_at': registeredAt.toUtc().toIso8601String(),
@@ -124,6 +134,8 @@ class RegisteredDevice {
     return RegisteredDevice(
       deviceId: json['device_id'] as String? ?? '',
       ownerName: json['owner_name'] as String? ?? 'Unknown owner',
+      phoneNumber: json['phone_number'] as String? ?? '',
+      address: json['address'] as String? ?? '',
       role: RegisteredDeviceRole.fromCode(json['role'] as String?),
       status: RegisteredDeviceStatus.fromCode(json['status'] as String?),
       registeredAt: _parseDate(json['registered_at'] as String?),

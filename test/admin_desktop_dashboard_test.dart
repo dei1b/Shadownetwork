@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
+import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
+import 'package:shadownetwork/features/security/domain/entities/device_registration_qr.dart';
+import 'package:shadownetwork/features/security/domain/entities/user_information.dart';
 import 'package:shadownetwork/features/admin/presentation/theme/admin_theme.dart';
 import 'package:shadownetwork/features/admin/domain/entities/registered_device.dart';
 import 'package:shadownetwork/features/admin/domain/repositories/admin_registry_repository.dart';
@@ -52,6 +56,110 @@ class _Registry implements AdminRegistryRepository {
 }
 
 void main() {
+  testWidgets(
+    'verified phone registration fills contact fields and clears old draft',
+    (tester) async {
+      final identity = await DeviceIdentityStore(
+        secretStore: InMemorySecretValueStore(),
+      ).loadOrCreate();
+      final signing = await DeviceSigningIdentityStore(
+        secretStore: InMemorySecretValueStore(),
+      ).loadOrCreate();
+      final registration = await DeviceRegistrationQr.createSigned(
+        deviceId: 'NEW-PHONE',
+        identity: identity,
+        signingIdentity: signing,
+        userInformation: const UserInformation(
+          fullName: 'Maria Santos',
+          phoneNumber: '09123456789',
+          address: 'Purok 2, Panabo City',
+        ),
+      );
+      final legacy = await DeviceRegistrationQr.createSigned(
+        deviceId: 'OTHER-PHONE',
+        identity: identity,
+        signingIdentity: signing,
+      );
+      await tester.binding.setSurfaceSize(const Size(1440, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.light,
+          home: BrowserAdminDashboardPage(
+            desktopMode: true,
+            registry: _Registry(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> scan(DeviceRegistrationQr qr) async {
+        await tester.ensureVisible(find.text('Paste Phone Registration JSON'));
+        await tester.tap(find.text('Paste Phone Registration JSON'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('desktop-registration-json')),
+          qr.toJsonString(),
+        );
+        await tester.tap(find.text('Read registration'));
+        await tester.pumpAndSettle();
+      }
+
+      await scan(registration);
+      expect(find.text('Maria Santos'), findsOneWidget);
+      expect(find.text('09123456789'), findsOneWidget);
+      expect(find.text('Purok 2, Panabo City'), findsOneWidget);
+      await scan(legacy);
+      expect(find.text('Maria Santos'), findsNothing);
+      expect(find.text('09123456789'), findsNothing);
+      expect(find.text('Purok 2, Panabo City'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('user contact details can be edited and cleared', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.light,
+        home: BrowserAdminDashboardPage(
+          desktopMode: true,
+          registry: _Registry(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Phone number (optional)'),
+      '+63 912 345 6789',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Address (optional)'),
+      'Purok 2, Panabo City',
+    );
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phone: +63 912 345 6789'), findsOneWidget);
+    expect(find.text('Address: Purok 2, Panabo City'), findsOneWidget);
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Phone number (optional)'),
+      '',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Address (optional)'),
+      '',
+    );
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Phone: +63 912 345 6789'), findsNothing);
+    expect(find.text('Address: Purok 2, Panabo City'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('legacy approval labels explain manual distribution', (
     tester,
   ) async {

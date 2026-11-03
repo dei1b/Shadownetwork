@@ -5,6 +5,7 @@ import 'package:cryptography/cryptography.dart';
 import 'device_signing_identity.dart';
 import '../../../trust/domain/services/canonical_json.dart';
 import 'device_crypto_identity.dart';
+import 'user_information.dart';
 
 class DeviceRegistrationQr {
   const DeviceRegistrationQr({
@@ -14,6 +15,7 @@ class DeviceRegistrationQr {
     required this.keyVersion,
     this.signingPublicKey,
     this.registrationSignature,
+    this.userInformation,
   });
 
   static const schemaVersion = 1;
@@ -25,6 +27,7 @@ class DeviceRegistrationQr {
   final int keyVersion;
   final String? signingPublicKey;
   final String? registrationSignature;
+  final UserInformation? userInformation;
 
   factory DeviceRegistrationQr.fromIdentity({
     required String deviceId,
@@ -42,6 +45,7 @@ class DeviceRegistrationQr {
     required String deviceId,
     required DeviceCryptoIdentity identity,
     required DeviceSigningIdentity signingIdentity,
+    UserInformation? userInformation,
   }) async {
     final draft = DeviceRegistrationQr(
       deviceId: deviceId,
@@ -49,6 +53,9 @@ class DeviceRegistrationQr {
       keyId: identity.keyId,
       keyVersion: identity.keyVersion,
       signingPublicKey: signingIdentity.encodedPublicKey,
+      userInformation: userInformation == null
+          ? null
+          : UserInformation.fromJson(userInformation.toJson()),
     );
     final signature = await Ed25519().sign(
       utf8.encode(draft._signingData()),
@@ -61,12 +68,14 @@ class DeviceRegistrationQr {
       keyVersion: draft.keyVersion,
       signingPublicKey: draft.signingPublicKey,
       registrationSignature: base64UrlEncode(signature.bytes),
+      userInformation: draft.userInformation,
     );
   }
 
   String _signingData() {
     final payload = toJson()..remove('registration_signature');
-    return 'shadow-network-registration-v2\n${canonicalJsonEncode(payload)}';
+    final version = userInformation == null ? 2 : 3;
+    return 'shadow-network-registration-v$version\n${canonicalJsonEncode(payload)}';
   }
 
   Future<void> verifySignature() async {
@@ -98,11 +107,16 @@ class DeviceRegistrationQr {
 
   Map<String, Object?> toJson() => {
     'registration_type': registrationType,
-    'schema_version': signingPublicKey == null ? schemaVersion : 2,
+    'schema_version': userInformation != null
+        ? 3
+        : signingPublicKey == null
+        ? schemaVersion
+        : 2,
     'device_id': deviceId,
     'public_key': publicKey,
     'key_id': keyId,
     'key_version': keyVersion,
+    if (userInformation != null) 'user_information': userInformation!.toJson(),
     if (signingPublicKey != null) 'signing_public_key': signingPublicKey,
     if (registrationSignature != null)
       'registration_signature': registrationSignature,
@@ -121,13 +135,28 @@ class DeviceRegistrationQr {
   factory DeviceRegistrationQr.fromJson(Map<String, Object?> json) {
     if (json['registration_type'] != registrationType ||
         (json['schema_version'] != schemaVersion &&
-            json['schema_version'] != 2)) {
+            json['schema_version'] != 2 &&
+            json['schema_version'] != 3)) {
       throw const FormatException('Unsupported device registration QR.');
     }
     if (json.containsKey('private_key') ||
         json.containsKey('signing_private_key')) {
       throw const FormatException(
         'Registration QR must never contain a private key.',
+      );
+    }
+    UserInformation? information;
+    if (json['schema_version'] == 3) {
+      final raw = json['user_information'];
+      if (raw is! Map) {
+        throw const FormatException(
+          'Registration is missing user information.',
+        );
+      }
+      information = UserInformation.fromJson(Map<String, Object?>.from(raw));
+    } else if (json.containsKey('user_information')) {
+      throw const FormatException(
+        'User information requires registration version 3.',
       );
     }
     final deviceId = (json['device_id'] as String? ?? '').trim();
@@ -165,6 +194,7 @@ class DeviceRegistrationQr {
       keyVersion: keyVersion,
       signingPublicKey: json['signing_public_key'] as String?,
       registrationSignature: json['registration_signature'] as String?,
+      userInformation: information,
     );
   }
 }

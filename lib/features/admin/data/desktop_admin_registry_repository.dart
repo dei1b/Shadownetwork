@@ -376,7 +376,14 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       'last_seen_label',
       'key_version',
     };
-    const allowed = {...required, 'public_key', 'signing_public_key', 'notes'};
+    const allowed = {
+      ...required,
+      'public_key',
+      'signing_public_key',
+      'notes',
+      'phone_number',
+      'address',
+    };
     for (final value in raw) {
       if (value is! Map ||
           !value.keys.every(allowed.contains) ||
@@ -384,6 +391,12 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         throw const FormatException('Invalid device record fields.');
       }
       final map = Map<String, Object?>.from(value);
+      for (final field in ['phone_number', 'address']) {
+        final contact = map[field];
+        if (contact != null && (contact is! String || contact.length > 4096)) {
+          throw const FormatException('Invalid user contact field.');
+        }
+      }
       for (final field in [
         'device_id',
         'owner_name',

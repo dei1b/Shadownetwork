@@ -27,6 +27,8 @@ void main() {
     final device = RegisteredDevice(
       deviceId: 'SN-CIVILIAN-999',
       ownerName: 'Test Resident',
+      phoneNumber: '+63 912 345 6789',
+      address: 'Purok 2, Panabo City',
       role: RegisteredDeviceRole.civilian,
       status: RegisteredDeviceStatus.pending,
       registeredAt: now,
@@ -40,6 +42,12 @@ void main() {
     expect(devices, hasLength(1));
     expect(devices.single.deviceId, 'SN-CIVILIAN-999');
     expect(devices.single.status, RegisteredDeviceStatus.pending);
+    expect(devices.single.phoneNumber, '+63 912 345 6789');
+    expect(devices.single.address, 'Purok 2, Panabo City');
+    final cleared = devices.single.copyWith(phoneNumber: '', address: '');
+    await store.saveDevices([cleared]);
+    expect((await store.loadDevices()).single.phoneNumber, isEmpty);
+    expect((await store.loadDevices()).single.address, isEmpty);
   });
 
   test(
@@ -50,6 +58,8 @@ void main() {
       final user = RegisteredDevice(
         deviceId: 'user-phone',
         ownerName: 'Registered Resident',
+        phoneNumber: 'PRIVATE-PHONE',
+        address: 'PRIVATE-ADDRESS',
         role: RegisteredDeviceRole.civilian,
         status: RegisteredDeviceStatus.approved,
         registeredAt: DateTime.now(),
@@ -65,6 +75,8 @@ void main() {
         signingKey,
       );
       final source = await store.buildTrustBundleJson(records);
+      expect(source, isNot(contains('PRIVATE-PHONE')));
+      expect(source, isNot(contains('PRIVATE-ADDRESS')));
       final imported = await TrustBundleStore().importBundleJson(source);
       expect(imported.approvedDevices.single.signingPublicKey, signingKey);
       final tampered = jsonDecode(source) as Map<String, Object?>;

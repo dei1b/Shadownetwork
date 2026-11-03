@@ -41,6 +41,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       widget.registry ?? _browserRegistry;
   final TextEditingController _deviceIdController = TextEditingController();
   final TextEditingController _ownerController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController();
   final TextEditingController _publicKeyController = TextEditingController();
   final TextEditingController _signingKeyController = TextEditingController();
 
@@ -61,6 +63,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
   void dispose() {
     _deviceIdController.dispose();
     _ownerController.dispose();
+    _phoneController.dispose();
+    _addressController.dispose();
     _publicKeyController.dispose();
     _signingKeyController.dispose();
     super.dispose();
@@ -161,6 +165,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       RegisteredDevice(
         deviceId: deviceId,
         ownerName: owner,
+        phoneNumber: _phoneController.text.trim(),
+        address: _addressController.text.trim(),
         role: _selectedRole,
         status: RegisteredDeviceStatus.pending,
         registeredAt: now,
@@ -179,6 +185,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     if (!await _saveDevices(nextDevices) || !mounted) return;
     _deviceIdController.clear();
     _ownerController.clear();
+    _phoneController.clear();
+    _addressController.clear();
     _publicKeyController.clear();
     _signingKeyController.clear();
     setState(() {
@@ -215,17 +223,26 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         _publicKeyController.text = registration.publicKey;
         _registrationKeyVersion = registration.keyVersion;
         _signingKeyController.text = registration.signingPublicKey!;
+        final information = registration.userInformation;
+        _ownerController.text = information?.fullName ?? '';
+        _phoneController.text = information?.phoneNumber ?? '';
+        _addressController.text = information?.address ?? '';
+        _selectedRole = RegisteredDeviceRole.civilian;
         for (final device in _devices) {
           if (device.deviceId.toLowerCase() ==
               registration.deviceId.toLowerCase()) {
-            _ownerController.text = device.ownerName;
+            if (information == null) {
+              _ownerController.text = device.ownerName;
+              _phoneController.text = device.phoneNumber;
+              _addressController.text = device.address;
+            }
             _selectedRole = device.role;
             break;
           }
         }
       });
       _showSnackBar(
-        'Phone registration signature checked. Enter the user name and role.',
+        'Phone registration signature checked. Review user information and choose the role.',
       );
     } on FormatException catch (error) {
       _showSnackBar(error.message);
@@ -270,10 +287,12 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 
   Future<void> _editDevice(RegisteredDevice device) async {
     final ownerController = TextEditingController(text: device.ownerName);
+    final phoneController = TextEditingController(text: device.phoneNumber);
+    final addressController = TextEditingController(text: device.address);
     final formKey = GlobalKey<FormState>();
     var selectedRole = device.role;
 
-    final result = await showDialog<_DeviceEditResult>(
+    final route = DialogRoute<_DeviceEditResult>(
       context: context,
       builder: (context) {
         return StatefulBuilder(
@@ -284,69 +303,76 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                 width: 440,
                 child: Form(
                   key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'DEVICE ID',
-                        style: TextStyle(
-                          color: _mobileMuted,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.7,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'DEVICE ID',
+                          style: TextStyle(
+                            color: _mobileMuted,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.7,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 5),
-                      SelectableText(
-                        device.deviceId,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(height: 18),
-                      TextFormField(
-                        controller: ownerController,
-                        decoration: const InputDecoration(
-                          labelText: 'User full name / Unit name',
-                          prefixIcon: Icon(Icons.person_outline_rounded),
+                        const SizedBox(height: 5),
+                        SelectableText(
+                          device.deviceId,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
                         ),
-                        validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? 'User full name or unit name is required.'
-                            : null,
-                      ),
-                      const SizedBox(height: 16),
-                      DropdownButtonFormField<RegisteredDeviceRole>(
-                        initialValue: selectedRole,
-                        decoration: const InputDecoration(
-                          labelText: 'Device role',
-                          prefixIcon: Icon(Icons.badge_outlined),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: ownerController,
+                          decoration: const InputDecoration(
+                            labelText: 'User full name / Unit name',
+                            prefixIcon: Icon(Icons.person_outline_rounded),
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'User full name or unit name is required.'
+                              : null,
                         ),
-                        items: RegisteredDeviceRole.values
-                            .map(
-                              (role) => DropdownMenuItem(
-                                value: role,
-                                child: Text(role.label),
-                              ),
-                            )
-                            .toList(growable: false),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setDialogState(() => selectedRole = value);
-                          }
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        widget.desktopMode
-                            ? 'To replace phone keys, paste the new registration JSON and register the same device ID again. The replacement requires approval.'
-                            : 'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
-                        style: TextStyle(
-                          color: _mobileMuted,
-                          fontSize: 14,
-                          height: 1.35,
+                        const SizedBox(height: 16),
+                        DropdownButtonFormField<RegisteredDeviceRole>(
+                          initialValue: selectedRole,
+                          decoration: const InputDecoration(
+                            labelText: 'Device role',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                          ),
+                          items: RegisteredDeviceRole.values
+                              .map(
+                                (role) => DropdownMenuItem(
+                                  value: role,
+                                  child: Text(role.label),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value != null) {
+                              setDialogState(() => selectedRole = value);
+                            }
+                          },
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        _UserContactFields(
+                          phoneController: phoneController,
+                          addressController: addressController,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          widget.desktopMode
+                              ? 'To replace phone keys, paste the new registration JSON and register the same device ID again. The replacement requires approval.'
+                              : 'To replace phone keys, scan the new registration QR and register the same device ID again. The replacement requires approval.',
+                          style: TextStyle(
+                            color: _mobileMuted,
+                            fontSize: 14,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -367,6 +393,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                     Navigator.of(context).pop(
                       _DeviceEditResult(
                         ownerName: ownerController.text.trim(),
+                        phoneNumber: phoneController.text.trim(),
+                        address: addressController.text.trim(),
                         role: selectedRole,
                       ),
                     );
@@ -380,7 +408,11 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         );
       },
     );
+    final result = await Navigator.of(context).push(route);
+    await route.completed;
     ownerController.dispose();
+    phoneController.dispose();
+    addressController.dispose();
 
     if (result == null || !mounted) {
       return;
@@ -392,6 +424,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
           (item) => item.deviceId == device.deviceId
               ? item.copyWith(
                   ownerName: result.ownerName,
+                  phoneNumber: result.phoneNumber,
+                  address: result.address,
                   role: result.role,
                   updatedAt: now,
                   lastSeenLabel: 'Edited by admin',
@@ -569,6 +603,8 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
             selectedRole: _selectedRole,
             deviceIdController: _deviceIdController,
             ownerController: _ownerController,
+            phoneController: _phoneController,
+            addressController: _addressController,
             publicKeyController: _publicKeyController,
             signingKeyController: _signingKeyController,
             onRoleChanged: (value) => setState(() => _selectedRole = value),
@@ -624,6 +660,8 @@ class _AdminDashboardBody extends StatelessWidget {
     required this.selectedRole,
     required this.deviceIdController,
     required this.ownerController,
+    required this.phoneController,
+    required this.addressController,
     required this.publicKeyController,
     required this.signingKeyController,
     required this.onRoleChanged,
@@ -644,6 +682,8 @@ class _AdminDashboardBody extends StatelessWidget {
   final RegisteredDeviceRole selectedRole;
   final TextEditingController deviceIdController;
   final TextEditingController ownerController;
+  final TextEditingController phoneController;
+  final TextEditingController addressController;
   final TextEditingController publicKeyController;
   final TextEditingController signingKeyController;
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
@@ -717,6 +757,8 @@ class _AdminDashboardBody extends StatelessWidget {
                             desktopMode: desktopMode,
                             deviceIdController: deviceIdController,
                             ownerController: ownerController,
+                            phoneController: phoneController,
+                            addressController: addressController,
                             publicKeyController: publicKeyController,
                             signingKeyController: signingKeyController,
                             selectedRole: selectedRole,
@@ -900,6 +942,8 @@ class _RegisterDeviceCard extends StatelessWidget {
     this.busy = false,
     required this.deviceIdController,
     required this.ownerController,
+    required this.phoneController,
+    required this.addressController,
     required this.publicKeyController,
     required this.signingKeyController,
     required this.selectedRole,
@@ -911,6 +955,8 @@ class _RegisterDeviceCard extends StatelessWidget {
   final TextEditingController deviceIdController;
   final bool desktopMode;
   final TextEditingController ownerController;
+  final TextEditingController phoneController;
+  final TextEditingController addressController;
   final TextEditingController publicKeyController;
   final TextEditingController signingKeyController;
   final RegisteredDeviceRole selectedRole;
@@ -995,6 +1041,12 @@ class _RegisterDeviceCard extends StatelessWidget {
                   prefixIcon: Icon(Icons.key_rounded),
                   border: OutlineInputBorder(),
                 ),
+              ),
+              const SizedBox(height: 14),
+              _UserContactFields(
+                phoneController: phoneController,
+                addressController: addressController,
+                enabled: !busy,
               ),
               const SizedBox(height: 14),
               TextField(
@@ -1206,10 +1258,62 @@ class _SecurityModelCard extends StatelessWidget {
 }
 
 class _DeviceEditResult {
-  const _DeviceEditResult({required this.ownerName, required this.role});
+  const _DeviceEditResult({
+    required this.ownerName,
+    required this.role,
+    required this.phoneNumber,
+    required this.address,
+  });
 
   final String ownerName;
   final RegisteredDeviceRole role;
+  final String phoneNumber;
+  final String address;
+}
+
+class _UserContactFields extends StatelessWidget {
+  const _UserContactFields({
+    required this.phoneController,
+    required this.addressController,
+    this.enabled = true,
+  });
+
+  final TextEditingController phoneController;
+  final TextEditingController addressController;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      TextField(
+        controller: phoneController,
+        enabled: enabled,
+        keyboardType: TextInputType.phone,
+        maxLength: 50,
+        decoration: const InputDecoration(
+          labelText: 'Phone number (optional)',
+          prefixIcon: Icon(Icons.phone_outlined),
+          counterText: '',
+        ),
+      ),
+      const SizedBox(height: 14),
+      TextField(
+        controller: addressController,
+        enabled: enabled,
+        keyboardType: TextInputType.streetAddress,
+        textCapitalization: TextCapitalization.sentences,
+        minLines: 2,
+        maxLines: 4,
+        maxLength: 1000,
+        decoration: const InputDecoration(
+          labelText: 'Address (optional)',
+          prefixIcon: Icon(Icons.location_on_outlined),
+          counterText: '',
+        ),
+      ),
+    ],
+  );
 }
 
 class _ValidationMetricsCard extends StatelessWidget {
