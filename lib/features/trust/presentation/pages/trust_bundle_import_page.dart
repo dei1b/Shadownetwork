@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -84,7 +85,10 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
     final text = clipboardData?.text;
     if (text == null || text.trim().isEmpty) {
-      _showSnackBar('Clipboard does not contain a trust bundle.');
+      _showSnackBar(
+        'Clipboard does not contain a trust bundle.',
+        kind: FeedbackKind.warning,
+      );
       return;
     }
     await _importBundle(text);
@@ -95,13 +99,15 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
   }
 
   Future<void> _copyDeviceId(String deviceId) async {
-    await Clipboard.setData(ClipboardData(text: deviceId));
-    _showSnackBar('Device ID copied.');
+    await ActionFeedback.copy(context, deviceId, message: 'Device ID copied.');
   }
 
   Future<void> _copyPublicKey(String publicKey) async {
-    await Clipboard.setData(ClipboardData(text: publicKey));
-    _showSnackBar('X25519 public key copied.');
+    await ActionFeedback.copy(
+      context,
+      publicKey,
+      message: 'X25519 public key copied.',
+    );
   }
 
   Future<void> _showDeviceRegistrationQr(
@@ -114,6 +120,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       if (mounted) {
         _showSnackBar(
           'Unable to load user information. Save your details again.',
+          kind: FeedbackKind.error,
         );
       }
       return null;
@@ -122,6 +129,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     if (information == null) {
       _showSnackBar(
         'Save your user information before showing the registration QR.',
+        kind: FeedbackKind.warning,
       );
       return;
     }
@@ -182,13 +190,19 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         return;
       }
       setState(() => _error = error.message);
-      _showSnackBar('Invalid trust bundle.');
+      _showSnackBar(
+        'The trust bundle was not imported. ${error.message}',
+        kind: FeedbackKind.error,
+      );
     } catch (error) {
       if (!mounted) {
         return;
       }
       setState(() => _error = 'Import failed: $error');
-      _showSnackBar('Import failed.');
+      _showSnackBar(
+        'The trust bundle was not imported. Check the file and try again.',
+        kind: FeedbackKind.error,
+      );
     } finally {
       if (mounted) {
         setState(() => _isImporting = false);
@@ -221,21 +235,29 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
   }
 
   Future<void> _clearBundle() async {
-    await _store.clearBundle();
-    final repository = await ref.read(trustRepositoryProvider.future);
-    await repository.clear();
-    if (!mounted) {
-      return;
+    try {
+      await _store.clearBundle();
+      final repository = await ref.read(trustRepositoryProvider.future);
+      await repository.clear();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _bundle = null);
+      ref.invalidate(deviceAccessProfileProvider);
+      _showSnackBar('Trust bundle removed from this phone.');
+    } catch (_) {
+      _showSnackBar(
+        'Unable to complete removing the trust bundle. Reopen this screen to check its status.',
+        kind: FeedbackKind.error,
+      );
     }
-    setState(() => _bundle = null);
-    ref.invalidate(deviceAccessProfileProvider);
-    _showSnackBar('Trust bundle removed from this phone.');
   }
 
-  void _showSnackBar(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  void _showSnackBar(
+    String message, {
+    FeedbackKind kind = FeedbackKind.success,
+  }) {
+    ActionFeedback.show(context, message, kind: kind);
   }
 
   @override
@@ -598,18 +620,11 @@ class _DeviceIdentityCard extends ConsumerWidget {
                             ),
                             TextButton.icon(
                               onPressed: () async {
-                                await Clipboard.setData(
-                                  ClipboardData(text: signing.encodedPublicKey),
+                                await ActionFeedback.copy(
+                                  context,
+                                  signing.encodedPublicKey,
+                                  message: 'Signing public key copied.',
                                 );
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Signing public key copied.',
-                                      ),
-                                    ),
-                                  );
-                                }
                               },
                               icon: const Icon(Icons.copy),
                               label: const Text('Copy signing key'),
@@ -671,13 +686,25 @@ class _DeviceIdentityCard extends ConsumerWidget {
   }
 }
 
-class _DeviceRegistrationQrDialog extends StatelessWidget {
+class _DeviceRegistrationQrDialog extends StatefulWidget {
   const _DeviceRegistrationQrDialog({required this.registration});
 
   final DeviceRegistrationQr registration;
 
   @override
+  State<_DeviceRegistrationQrDialog> createState() =>
+      _DeviceRegistrationQrDialogState();
+}
+
+class _DeviceRegistrationQrDialogState
+    extends State<_DeviceRegistrationQrDialog> {
+  String? _copyMessage;
+  FeedbackKind _copyKind = FeedbackKind.success;
+  bool _copying = false;
+
+  @override
   Widget build(BuildContext context) {
+    final registration = widget.registration;
     final payload = registration.toJsonString();
     return AlertDialog(
       backgroundColor: Colors.white,
@@ -737,20 +764,40 @@ class _DeviceRegistrationQrDialog extends StatelessWidget {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _trustMuted, fontSize: 12),
               ),
+              if (_copyMessage != null) ...[
+                const SizedBox(height: 12),
+                ActionStatus(message: _copyMessage!, kind: _copyKind),
+              ],
             ],
           ),
         ),
       ),
       actions: [
         TextButton.icon(
-          onPressed: () async {
-            await Clipboard.setData(ClipboardData(text: payload));
-            if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Registration JSON copied.')),
-              );
-            }
-          },
+          onPressed: _copying
+              ? null
+              : () async {
+                  setState(() => _copying = true);
+                  try {
+                    await Clipboard.setData(ClipboardData(text: payload));
+                    if (mounted) {
+                      setState(() {
+                        _copyMessage = 'Registration JSON copied.';
+                        _copyKind = FeedbackKind.success;
+                      });
+                    }
+                  } catch (_) {
+                    if (mounted) {
+                      setState(() {
+                        _copyMessage =
+                            'Unable to copy registration JSON. Try again.';
+                        _copyKind = FeedbackKind.error;
+                      });
+                    }
+                  } finally {
+                    if (mounted) setState(() => _copying = false);
+                  }
+                },
           icon: const Icon(Icons.copy_rounded),
           label: const Text('Copy JSON'),
         ),

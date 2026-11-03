@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/validation_import.dart';
@@ -101,8 +102,23 @@ class _ImportContents extends ConsumerWidget {
               semanticsLabel: 'Processing validation files',
             ),
           ),
-        if (state.error != null) _Notice(text: state.error!, error: true),
-        if (state.message != null) _Notice(text: state.message!),
+        if (state.error != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: ActionStatus(
+              message: state.error!,
+              kind: FeedbackKind.error,
+            ),
+          ),
+        if (state.message != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: ActionStatus(
+              message: state.message!,
+              kind: FeedbackKind.info,
+              title: 'Import result',
+            ),
+          ),
         const SizedBox(height: 16),
         const _Notice(
           text:

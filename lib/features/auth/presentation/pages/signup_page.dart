@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/auth_error_mapper.dart';
@@ -121,9 +122,7 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
       return;
     }
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ActionFeedback.show(context, message, kind: FeedbackKind.error);
   }
 
   @override

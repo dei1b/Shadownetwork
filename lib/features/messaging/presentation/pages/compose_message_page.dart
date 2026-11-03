@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_colors.dart';
 import '../../../../core/constants/app_sizes.dart';
@@ -40,8 +41,11 @@ class _ComposeMessagePageState extends ConsumerState<ComposeMessagePage> {
     }
 
     _controller.clear();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Message queued for offline delivery.')),
+    ActionFeedback.show(
+      context,
+      'Message queued for offline delivery. Delivery is still pending.',
+      kind: FeedbackKind.success,
+      title: 'Saved on this phone',
     );
     widget.onMessageSent?.call();
   }

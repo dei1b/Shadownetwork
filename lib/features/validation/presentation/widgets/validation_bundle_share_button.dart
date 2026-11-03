@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -44,12 +45,14 @@ class ValidationBundleShareButton extends ConsumerWidget {
 
   Future<void> _share(BuildContext context, WidgetRef ref) async {
     String? message;
+    var kind = FeedbackKind.success;
     try {
       final bundle = await ref
           .read(validationBundleExportProvider.notifier)
           .shareSession(session.id);
       if (bundle != null) message = 'Validation file created.';
     } catch (error) {
+      kind = FeedbackKind.error;
       message = switch (error) {
         StateError() => error.message.toString(),
         ValidationBundleShareException() =>
@@ -62,9 +65,7 @@ class ValidationBundleShareButton extends ConsumerWidget {
       };
     }
     if (context.mounted && message != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      ActionFeedback.show(context, message, kind: kind);
     }
   }
 }

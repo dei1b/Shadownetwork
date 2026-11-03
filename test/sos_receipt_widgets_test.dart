@@ -86,9 +86,15 @@ void main() {
           find.descendant(
             of: find.byType(SosDetailSheet),
             matching: find.text(
-              fails ? 'Unable to copy message hash' : 'Message hash copied',
+              fails
+                  ? 'Unable to copy message hash. Try again.'
+                  : 'Message hash copied',
             ),
           ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(fails ? 'Action failed' : 'Completed'),
           findsOneWidget,
         );
       },

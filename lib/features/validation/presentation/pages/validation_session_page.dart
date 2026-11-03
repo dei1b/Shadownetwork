@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -130,38 +131,56 @@ class ValidationSessionPage extends ConsumerWidget {
   }
 
   Future<void> _startSession(BuildContext context, WidgetRef ref) async {
-    final localPeer = await ref.read(localPeerProvider.future);
-    final recentCode = await ref
-        .read(validationSessionProvider.notifier)
-        .lastLocalRunCode(localPeer.id);
-    if (!context.mounted) return;
-    final result = await showValidationSessionStartDialog(
-      context,
-      initialRunCode: recentCode,
-    );
-    if (result == null || !context.mounted) return;
-    final profile = await ref.read(deviceAccessProfileProvider.future);
-    if (!context.mounted) return;
-    if (!profile.canAccessResponderInterface) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Current responder approval is required to start recording.',
-          ),
-        ),
+    try {
+      final localPeer = await ref.read(localPeerProvider.future);
+      final recentCode = await ref
+          .read(validationSessionProvider.notifier)
+          .lastLocalRunCode(localPeer.id);
+      if (!context.mounted) return;
+      final result = await showValidationSessionStartDialog(
+        context,
+        initialRunCode: recentCode,
       );
-      return;
-    }
-    await ref
-        .read(validationSessionProvider.notifier)
-        .startSession(
-          name: result.name,
-          environment: result.environment,
-          deviceId: localPeer.id,
-          deviceRole: profile.roleLabel.toLowerCase(),
-          testRunId: result.testRunId,
-          notes: result.notes,
+      if (result == null || !context.mounted) return;
+      final profile = await ref.read(deviceAccessProfileProvider.future);
+      if (!context.mounted) return;
+      if (!profile.canAccessResponderInterface) {
+        ActionFeedback.show(
+          context,
+          'Current responder approval is required to start recording.',
+          kind: FeedbackKind.warning,
         );
+        return;
+      }
+      await ref
+          .read(validationSessionProvider.notifier)
+          .startSession(
+            name: result.name,
+            environment: result.environment,
+            deviceId: localPeer.id,
+            deviceRole: profile.roleLabel.toLowerCase(),
+            testRunId: result.testRunId,
+            notes: result.notes,
+          );
+      if (context.mounted) {
+        final failed = ref.read(validationSessionProvider).hasError;
+        ActionFeedback.show(
+          context,
+          failed
+              ? 'Unable to start recording. Review the session status and try again.'
+              : 'Validation session started. Recording is active.',
+          kind: failed ? FeedbackKind.error : FeedbackKind.success,
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ActionFeedback.show(
+          context,
+          'Unable to start recording. Review the session status and try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    }
   }
 
   Future<void> _stopSession(BuildContext context, WidgetRef ref) async {
@@ -186,7 +205,24 @@ class ValidationSessionPage extends ConsumerWidget {
       ),
     );
     if (confirmed == true) {
-      await ref.read(validationSessionProvider.notifier).stopSession();
+      try {
+        await ref.read(validationSessionProvider.notifier).stopSession();
+        if (context.mounted) {
+          ActionFeedback.show(
+            context,
+            'Validation session stopped and saved on this phone.',
+            kind: FeedbackKind.success,
+          );
+        }
+      } catch (_) {
+        if (context.mounted) {
+          ActionFeedback.show(
+            context,
+            'Unable to complete stopping the session. Check the session status before trying again.',
+            kind: FeedbackKind.error,
+          );
+        }
+      }
     }
   }
 
@@ -196,18 +232,27 @@ class ValidationSessionPage extends ConsumerWidget {
     String sessionId, {
     required String format,
   }) async {
-    final controller = ref.read(validationSessionProvider.notifier);
-    final source = format == 'JSON'
-        ? await controller.exportJson(sessionId)
-        : await controller.exportCsv(sessionId);
-    await Clipboard.setData(ClipboardData(text: source));
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('$format validation export copied to clipboard.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    try {
+      final controller = ref.read(validationSessionProvider.notifier);
+      final source = format == 'JSON'
+          ? await controller.exportJson(sessionId)
+          : await controller.exportCsv(sessionId);
+      await Clipboard.setData(ClipboardData(text: source));
+      if (context.mounted) {
+        ActionFeedback.show(
+          context,
+          '$format validation export copied to clipboard.',
+          kind: FeedbackKind.success,
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ActionFeedback.show(
+          context,
+          'Unable to copy the validation export. Try again.',
+          kind: FeedbackKind.error,
+        );
+      }
     }
   }
 

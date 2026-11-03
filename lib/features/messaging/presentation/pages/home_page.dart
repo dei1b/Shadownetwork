@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
@@ -52,6 +53,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _showMapPeers = true;
   bool _showMapLocation = true;
   bool _isCheckingAppUpdate = false;
+  bool _isSyncingRelay = false;
 
   bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
 
@@ -237,14 +239,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
   }
 
-  void _showMessage(String message) {
+  void _showMessage(String message, {FeedbackKind kind = FeedbackKind.error}) {
     if (!mounted) {
       return;
     }
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ActionFeedback.show(context, message, kind: kind);
   }
 
   Future<void> _checkForAppUpdate() async {
@@ -351,6 +351,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _syncRelayNow() async {
+    if (_isSyncingRelay) return;
+    setState(() => _isSyncingRelay = true);
     try {
       await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
       if (!mounted) {
@@ -360,15 +362,21 @@ class _HomePageState extends ConsumerState<HomePage> {
       _showMessage(
         'Relay sync complete. ${status.connectedPeers} peer(s), '
         '${status.lastReceivedCount} received, ${status.lastRelayedCount} relayed.',
+        kind: FeedbackKind.success,
       );
     } catch (_) {
       _showMessage('Relay sync failed.');
+    } finally {
+      if (mounted) setState(() => _isSyncingRelay = false);
     }
   }
 
   Future<void> _connectToPeer(messaging.Peer peer) async {
     if (peer.isConnected) {
-      _showMessage('${peer.name} is already connected.');
+      _showMessage(
+        '${peer.name} is already connected.',
+        kind: FeedbackKind.info,
+      );
       return;
     }
     final connected = await ref
@@ -381,6 +389,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       connected
           ? 'Connected to nearby peer.'
           : 'Unable to connect to ${peer.name}. Keep both apps open.',
+      kind: connected ? FeedbackKind.success : FeedbackKind.error,
     );
   }
 
@@ -432,7 +441,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (created == true && mounted) {
       await _showTaskCompletionPopup(
         title: 'SOS Created',
-        message: 'Saved locally and queued for relay.',
+        message:
+            'Saved on this phone and queued for relay. Delivery to a responder is still pending.',
         icon: Icons.check_rounded,
       );
     }
@@ -1227,7 +1237,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         const SizedBox(height: 6),
         Align(
           alignment: Alignment.centerRight,
-          child: _PeerScanButton(onTap: _syncRelayNow),
+          child: _PeerScanButton(onTap: _syncRelayNow, busy: _isSyncingRelay),
         ),
         const SizedBox(height: 16),
       ],
@@ -3558,6 +3568,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
   TrustedDevice? _selectedRecipient;
   bool _updatingLocation = false;
   bool _sending = false;
+  String? _sendError;
 
   @override
   void initState() {
@@ -3882,6 +3893,10 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                   ],
                 ),
               ),
+              if (_sendError != null) ...[
+                ActionStatus(message: _sendError!, kind: FeedbackKind.error),
+                const SizedBox(height: 12),
+              ],
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -3913,21 +3928,20 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                       onPressed: _sending
                           ? null
                           : () async {
-                              final messenger = ScaffoldMessenger.of(context);
                               final navigator = Navigator.of(context);
                               final body = _messageController.text.trim();
                               if (body.isEmpty) {
-                                messenger.showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
+                                setState(
+                                  () => _sendError =
                                       'Describe the emergency before sending.',
-                                    ),
-                                  ),
                                 );
                                 return;
                               }
 
-                              setState(() => _sending = true);
+                              setState(() {
+                                _sending = true;
+                                _sendError = null;
+                              });
                               try {
                                 await widget.onSend(
                                   body,
@@ -3939,23 +3953,20 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 }
                               } catch (error) {
                                 if (mounted) {
-                                  setState(() => _sending = false);
-                                  messenger.showSnackBar(
-                                    SnackBar(
-                                      content: Text(
+                                  setState(() {
+                                    _sending = false;
+                                    _sendError =
                                         error is MessageEncryptionException
-                                            ? error.message
-                                            : 'Unable to queue SOS.',
-                                      ),
-                                    ),
-                                  );
+                                        ? error.message
+                                        : 'Unable to complete the SOS action. Check Alerts before sending again. Your draft is still here.';
+                                  });
                                 }
                               }
                             },
                       icon: const Icon(Icons.near_me, color: Colors.white),
-                      label: const Text(
-                        'SEND SOS',
-                        style: TextStyle(
+                      label: Text(
+                        _sending ? 'SAVING SOS...' : 'SEND SOS',
+                        style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w800,
                           fontSize: 20,
@@ -4566,9 +4577,10 @@ class _SignalBars extends StatelessWidget {
 }
 
 class _PeerScanButton extends StatelessWidget {
-  const _PeerScanButton({required this.onTap});
+  const _PeerScanButton({required this.onTap, this.busy = false});
 
   final VoidCallback onTap;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -4579,7 +4591,7 @@ class _PeerScanButton extends StatelessWidget {
       shadowColor: Colors.black.withValues(alpha: 0.28),
       child: InkWell(
         customBorder: const CircleBorder(),
-        onTap: onTap,
+        onTap: busy ? null : onTap,
         child: Container(
           width: 64,
           height: 64,
@@ -4587,7 +4599,16 @@ class _PeerScanButton extends StatelessWidget {
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 3),
           ),
-          child: const Icon(Icons.radar_rounded, color: Colors.white, size: 34),
+          child: busy
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 3,
+                    semanticsLabel: 'Synchronizing nearby peers',
+                  ),
+                )
+              : const Icon(Icons.radar_rounded, color: Colors.white, size: 34),
         ),
       ),
     );

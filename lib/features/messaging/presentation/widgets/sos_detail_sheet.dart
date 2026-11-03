@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -219,14 +220,18 @@ class _CopyHashButton extends StatelessWidget {
     try {
       await Clipboard.setData(ClipboardData(text: hash));
       if (context.mounted) {
-        ScaffoldMessenger.of(
+        ActionFeedback.show(
           context,
-        ).showSnackBar(const SnackBar(content: Text('Message hash copied')));
+          'Message hash copied',
+          kind: FeedbackKind.success,
+        );
       }
     } catch (_) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to copy message hash')),
+        ActionFeedback.show(
+          context,
+          'Unable to copy message hash. Try again.',
+          kind: FeedbackKind.error,
         );
       }
     }

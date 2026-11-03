@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/admin_recovery_provider.dart';
@@ -91,9 +92,8 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
         .createBackup(password);
     if (!mounted) return null;
     final saved = await widget.onSaveBackup(source);
-    return saved
-        ? 'Encrypted administrator backup saved.'
-        : 'Backup was not saved.';
+    if (!saved) return null;
+    return 'Encrypted administrator backup saved.';
   });
 
   Future<void> _restore() => _perform(() async {
@@ -179,11 +179,9 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
         if (_message != null)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Text(
-              _message!,
-              style: TextStyle(
-                color: _error ? Theme.of(context).colorScheme.error : null,
-              ),
+            child: ActionStatus(
+              message: _message!,
+              kind: _error ? FeedbackKind.error : FeedbackKind.success,
             ),
           ),
         const SizedBox(height: 24),

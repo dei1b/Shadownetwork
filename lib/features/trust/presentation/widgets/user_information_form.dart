@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 
 import '../../../security/data/services/user_information_store.dart';
 import '../../../security/domain/entities/user_information.dart';
@@ -56,12 +57,18 @@ class _UserInformationFormState extends State<UserInformationForm> {
       );
       if (!mounted) return;
       FocusScope.of(context).unfocus();
-      ScaffoldMessenger.of(
+      ActionFeedback.show(
         context,
-      ).showSnackBar(const SnackBar(content: Text('User information saved.')));
+        'User information saved on this phone. You can now show your registration QR.',
+        kind: FeedbackKind.success,
+      );
     } catch (_) {
       if (mounted) {
-        setState(() => _error = 'Unable to save user information. Try again.');
+        setState(
+          () => _error =
+              'Unable to save user information. Your entries are still here; try saving again.',
+        );
+        ActionFeedback.show(context, _error!, kind: FeedbackKind.error);
       }
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -133,10 +140,7 @@ class _UserInformationFormState extends State<UserInformationForm> {
               : null,
         ),
         if (_error != null)
-          Text(
-            _error!,
-            style: TextStyle(color: Theme.of(context).colorScheme.error),
-          ),
+          ActionStatus(message: _error!, kind: FeedbackKind.error),
         const SizedBox(height: 8),
         FilledButton.icon(
           onPressed: _loading || _saving ? null : _save,

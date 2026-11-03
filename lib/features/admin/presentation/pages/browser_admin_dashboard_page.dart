@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -104,6 +105,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     } catch (_) {
       _showSnackBar(
         'Unable to save the registry. Check available storage and try again.',
+        kind: FeedbackKind.error,
       );
       return false;
     } finally {
@@ -122,6 +124,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         signingPublicKey.isEmpty) {
       _showSnackBar(
         'User name, device ID, encryption key, and signing key are required.',
+        kind: FeedbackKind.warning,
       );
       return;
     }
@@ -129,6 +132,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         !_isValidX25519PublicKey(signingPublicKey)) {
       _showSnackBar(
         'Encryption and signing public keys must each contain 32 bytes.',
+        kind: FeedbackKind.warning,
       );
       return;
     }
@@ -245,7 +249,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         'Phone registration signature checked. Review user information and choose the role.',
       );
     } on FormatException catch (error) {
-      _showSnackBar(error.message);
+      _showSnackBar(error.message, kind: FeedbackKind.error);
     }
   }
 
@@ -489,12 +493,13 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
         'Signed trust bundle v${parsed.bundleVersion} copied to clipboard.',
       );
     } on FormatException catch (error) {
-      _showSnackBar(error.message);
+      _showSnackBar(error.message, kind: FeedbackKind.error);
     } on StateError catch (error) {
-      _showSnackBar(error.message.toString());
+      _showSnackBar(error.message.toString(), kind: FeedbackKind.error);
     } catch (_) {
       _showSnackBar(
         'Unable to publish the trust bundle. Check Backup & recovery and available storage.',
+        kind: FeedbackKind.error,
       );
     }
   }
@@ -504,14 +509,15 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     try {
       bundle = await _registryStore.buildTrustBundleJson(_devices);
     } on FormatException catch (error) {
-      _showSnackBar(error.message);
+      _showSnackBar(error.message, kind: FeedbackKind.error);
       return;
     } on StateError catch (error) {
-      _showSnackBar(error.message.toString());
+      _showSnackBar(error.message.toString(), kind: FeedbackKind.error);
       return;
     } catch (_) {
       _showSnackBar(
         'Unable to publish the trust bundle. Check Backup & recovery and available storage.',
+        kind: FeedbackKind.error,
       );
       return;
     }
@@ -582,11 +588,12 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     );
   }
 
-  void _showSnackBar(String message) {
+  void _showSnackBar(
+    String message, {
+    FeedbackKind kind = FeedbackKind.success,
+  }) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-    );
+    ActionFeedback.show(context, message, kind: kind);
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -70,12 +71,15 @@ class ValidationRunCopyButton extends ConsumerStatefulWidget {
 class _ValidationRunCopyButtonState
     extends ConsumerState<ValidationRunCopyButton> {
   String? _feedback;
+  var _feedbackKind = FeedbackKind.success;
   Future<void> _copy() async {
     String message;
     try {
       await Clipboard.setData(ClipboardData(text: widget.testRunId));
+      _feedbackKind = FeedbackKind.success;
       message = 'Run code copied';
     } catch (_) {
+      _feedbackKind = FeedbackKind.error;
       message = 'Unable to copy run code';
     }
     if (mounted) setState(() => _feedback = message);
@@ -90,7 +94,8 @@ class _ValidationRunCopyButtonState
         icon: const Icon(Icons.copy_outlined),
         label: const Text('Copy run code'),
       ),
-      if (_feedback != null) Text(_feedback!, semanticsLabel: _feedback),
+      if (_feedback != null)
+        ActionStatus(message: _feedback!, kind: _feedbackKind),
     ],
   );
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/entities/conversation.dart';
@@ -54,9 +55,15 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
       ref.invalidate(chatMessagesProvider(widget.conversation.id));
     } on MessageEncryptionException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
+        ActionFeedback.show(context, error.message, kind: FeedbackKind.error);
+      }
+    } catch (_) {
+      if (mounted) {
+        ActionFeedback.show(
           context,
-        ).showSnackBar(SnackBar(content: Text(error.message)));
+          'Unable to complete the send action. Check the message status before trying again.',
+          kind: FeedbackKind.error,
+        );
       }
     } finally {
       if (mounted) {
