@@ -11,7 +11,6 @@ import '../widgets/auth_background.dart';
 import '../widgets/auth_button.dart';
 import '../widgets/auth_card.dart';
 import '../widgets/auth_field.dart';
-import '../widgets/auth_logo.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -118,18 +117,8 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             child: Stack(
               children: [
                 Positioned(
-                  left: 112 * scaleX,
-                  top: 95 * scaleY,
-                  width: AuthTokens.logoWidthLogin * scaleX,
-                  height: AuthTokens.logoHeightLogin * scaleY,
-                  child: const AuthLogo(
-                    width: AuthTokens.logoWidthLogin,
-                    height: AuthTokens.logoHeightLogin,
-                  ),
-                ),
-                Positioned(
                   left: 24 * scaleX,
-                  top: 220 * scaleY,
+                  top: 155 * scaleY,
                   width: 327 * scaleX,
                   height: 398 * scaleY,
                   child: AuthCard(

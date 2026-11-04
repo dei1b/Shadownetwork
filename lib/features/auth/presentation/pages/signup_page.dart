@@ -11,7 +11,6 @@ import '../widgets/auth_background.dart';
 import '../widgets/auth_button.dart';
 import '../widgets/auth_card.dart';
 import '../widgets/auth_field.dart';
-import '../widgets/auth_logo.dart';
 
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
@@ -138,18 +137,8 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             child: Stack(
               children: [
                 Positioned(
-                  left: 121 * scaleX,
-                  top: 51 * scaleY,
-                  width: AuthTokens.logoWidthSignup * scaleX,
-                  height: AuthTokens.logoHeightSignup * scaleY,
-                  child: const AuthLogo(
-                    width: AuthTokens.logoWidthSignup,
-                    height: AuthTokens.logoHeightSignup,
-                  ),
-                ),
-                Positioned(
                   left: 19 * scaleX,
-                  top: 155 * scaleY,
+                  top: 105 * scaleY,
                   width: 327 * scaleX,
                   height: 523 * scaleY,
                   child: AuthCard(

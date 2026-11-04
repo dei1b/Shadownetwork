@@ -46,6 +46,8 @@ void main() {
   testWidgets('home and full map enable loopback requests on every new view', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(320, 568));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final originalFactory = ml.MapLibrePlatform.createInstance;
     ml.MapLibrePlatform.createInstance = _MapPlatform.new;
     addTearDown(() => ml.MapLibrePlatform.createInstance = originalFactory);
@@ -67,8 +69,14 @@ void main() {
             (ref) async => MemCacheStore(),
           ),
         ],
-        child: const MaterialApp(
-          home: HomePage(
+        child: MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(1.5)),
+            child: child!,
+          ),
+          home: const HomePage(
             accessProfile: DeviceAccessProfile.unregistered(deviceId: 'test'),
           ),
         ),
@@ -84,6 +92,30 @@ void main() {
     }
 
     final cardMap = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    final locate = find.byKey(const ValueKey('locate-me-action'));
+    final messages = find.byKey(const ValueKey('messages-action'));
+    expect(tester.getSize(locate), tester.getSize(messages));
+    expect(tester.getTopLeft(locate).dy, tester.getTopLeft(messages).dy);
+    final nearby = find.byKey(const ValueKey('nearby-phones-section'));
+    expect(find.text('Nearby phones'), findsOneWidget);
+    expect(find.text('SCANNING...'), findsOneWidget);
+    expect(
+      tester.getBottomLeft(nearby).dy,
+      lessThan(tester.getTopLeft(find.byType(ml.MapLibreMap)).dy),
+    );
+    final sosButton = find.byKey(const ValueKey('open-sos-composer'));
+    await tester.ensureVisible(sosButton);
+    await tester.pump();
+    expect(sosButton.hitTestable(), findsOneWidget);
+    expect(
+      tester.getTopLeft(sosButton).dy,
+      greaterThan(tester.getBottomLeft(find.byType(ml.MapLibreMap)).dy),
+    );
+    expect(tester.getSize(sosButton).height, greaterThanOrEqualTo(70));
+    expect(
+      find.descendant(of: sosButton, matching: find.text('SEND SOS MESSAGE')),
+      findsOneWidget,
+    );
     expect(Uri.parse(cardMap.styleString).host, '127.0.0.1');
     final cardController = _MapController();
     cardMap.onMapCreated!(cardController);
@@ -92,11 +124,49 @@ void main() {
 
     await tester.tap(find.text('Maps'));
     await tester.pump();
+    expect(find.text('MAP'), findsOneWidget);
+    expect(find.text('See nearby phones and SOS alerts'), findsOneWidget);
     final fullMap = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    expect(nearby, findsNothing);
+    await tester.ensureVisible(sosButton);
+    await tester.pump();
+    expect(sosButton.hitTestable(), findsOneWidget);
+    expect(
+      tester.getTopLeft(sosButton).dy,
+      greaterThan(tester.getBottomLeft(find.byType(ml.MapLibreMap)).dy),
+    );
     final fullController = _MapController();
     fullMap.onMapCreated!(fullController);
     await tester.pump();
     expect(fullController.localRequestsEnabled, isTrue);
+
+    final homeContext = tester.element(find.byType(HomePage));
+    showDialog<void>(
+      context: homeContext,
+      builder: (_) => const AlertDialog(title: Text('Example dialog')),
+    );
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Example dialog'), findsNothing);
+    expect(find.text('MAP'), findsOneWidget);
+
+    // Revisiting Home still lets Back return to the last visited tab.
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    expect(find.text('MAP'), findsNothing);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.text('MAP'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.text('MAP'), findsNothing);
+    expect(
+      tester.widget<PopScope<Object?>>(find.byType(PopScope<Object?>)).canPop,
+      isTrue,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));

@@ -16,10 +16,6 @@ abstract final class AuthTokens {
   static const double eyeStrokeWidth = 1.30769;
   static const double shadowBlur = 29.719;
   static const double shadowSpread = 1.785;
-  static const double logoWidthLogin = 151;
-  static const double logoHeightLogin = 151;
-  static const double logoWidthSignup = 124;
-  static const double logoHeightSignup = 124;
   static const double designWidth = 375;
   static const double designHeight = 812;
 }

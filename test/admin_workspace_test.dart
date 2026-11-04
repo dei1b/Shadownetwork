@@ -281,13 +281,12 @@ void main() {
       expect(action.hitTestable(), findsOneWidget);
       expect(find.text('Search devices'), findsNothing);
       await tester.tap(action);
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('desktop-registration-json')),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Scan phone QR'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(tester.takeException(), isNull);
     },
   );

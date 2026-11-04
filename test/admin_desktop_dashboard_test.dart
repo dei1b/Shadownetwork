@@ -245,9 +245,9 @@ void main() {
         );
         expect(
           tester
-              .widget<OutlinedButton>(
+              .widget<TextButton>(
                 find.widgetWithText(
-                  OutlinedButton,
+                  TextButton,
                   'Paste Phone Registration JSON',
                 ),
               )
@@ -432,36 +432,35 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
-  testWidgets(
-    'desktop uses injected registry and pasted registration instead of camera',
-    (tester) async {
-      await tester.binding.setSurfaceSize(const Size(1440, 1000));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AdminTheme.light,
-          home: BrowserAdminDashboardPage(
-            registry: _Registry(),
-            desktopMode: true,
-            validationPanel: const Text('Open desktop validation imports'),
-          ),
+  testWidgets('desktop offers webcam scanning and a separate paste fallback', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.light,
+        home: BrowserAdminDashboardPage(
+          registry: _Registry(),
+          desktopMode: true,
+          validationPanel: const Text('Open desktop validation imports'),
         ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Stored desktop resident'), findsOneWidget);
-      expect(find.text('Open desktop validation imports'), findsOneWidget);
-      expect(find.text('Scan Phone QR with PC Camera'), findsNothing);
-      await tester.ensureVisible(find.text('Paste Phone Registration JSON'));
-      await tester.tap(find.text('Paste Phone Registration JSON'));
-      await tester.pumpAndSettle();
-      expect(
-        find.byKey(const ValueKey('desktop-registration-json')),
-        findsOneWidget,
-      );
-      expect(find.byType(MobileScanner), findsNothing);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Stored desktop resident'), findsOneWidget);
+    expect(find.text('Open desktop validation imports'), findsOneWidget);
+    expect(find.text('Scan Phone QR with PC Camera'), findsOneWidget);
+    await tester.ensureVisible(find.text('Paste Phone Registration JSON'));
+    await tester.tap(find.text('Paste Phone Registration JSON'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('desktop-registration-json')),
+      findsOneWidget,
+    );
+    expect(find.byType(MobileScanner), findsNothing);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 }

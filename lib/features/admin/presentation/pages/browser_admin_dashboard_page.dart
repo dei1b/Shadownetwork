@@ -10,6 +10,7 @@ import '../../data/services/admin_device_registry_store.dart';
 import '../../domain/entities/registered_device.dart';
 import '../../domain/repositories/admin_registry_repository.dart';
 import '../widgets/registration_json_dialog.dart';
+import '../widgets/windows_registration_scanner.dart';
 import '../widgets/admin_device_registry_panel.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
@@ -200,12 +201,18 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     _showSnackBar('$deviceId saved as pending approval.');
   }
 
-  Future<void> _scanDeviceRegistrationQr() async {
+  Future<void> _scanDeviceRegistrationQr({bool paste = false}) async {
+    if (_isSavingRegistry) return;
     final String? source;
-    if (widget.desktopMode) {
+    if (paste) {
       source = await showDialog<String>(
         context: context,
         builder: (_) => const RegistrationJsonDialog(),
+      );
+    } else if (widget.desktopMode) {
+      source = await showDialog<String>(
+        context: context,
+        builder: (_) => const WindowsRegistrationScanner(),
       );
     } else {
       source = await Navigator.of(context).push<String>(
@@ -250,6 +257,11 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       );
     } on FormatException catch (error) {
       _showSnackBar(error.message, kind: FeedbackKind.error);
+    } catch (_) {
+      _showSnackBar(
+        'Could not read the phone registration. Show a new code and try again.',
+        kind: FeedbackKind.error,
+      );
     }
   }
 
@@ -617,6 +629,9 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
             onRoleChanged: (value) => setState(() => _selectedRole = value),
             onRegister: _registerDevice,
             onScanRegistrationQr: _scanDeviceRegistrationQr,
+            onPasteRegistration: widget.desktopMode
+                ? () => _scanDeviceRegistrationQr(paste: true)
+                : null,
             onApprove: (device) =>
                 _changeStatus(device, RegisteredDeviceStatus.approved),
             onRevoke: (device) =>
@@ -674,6 +689,7 @@ class _AdminDashboardBody extends StatelessWidget {
     required this.onRoleChanged,
     required this.onRegister,
     required this.onScanRegistrationQr,
+    this.onPasteRegistration,
     required this.onApprove,
     required this.onRevoke,
     required this.onEdit,
@@ -696,6 +712,7 @@ class _AdminDashboardBody extends StatelessWidget {
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
   final VoidCallback onScanRegistrationQr;
+  final VoidCallback? onPasteRegistration;
   final ValueChanged<RegisteredDevice> onApprove;
   final ValueChanged<RegisteredDevice> onRevoke;
   final ValueChanged<RegisteredDevice> onEdit;
@@ -772,6 +789,7 @@ class _AdminDashboardBody extends StatelessWidget {
                             onRoleChanged: onRoleChanged,
                             onRegister: onRegister,
                             onScanRegistrationQr: onScanRegistrationQr,
+                            onPasteRegistration: onPasteRegistration,
                           ),
                           const SizedBox(height: 22),
                           _SecurityModelCard(
@@ -957,6 +975,7 @@ class _RegisterDeviceCard extends StatelessWidget {
     required this.onRoleChanged,
     required this.onRegister,
     required this.onScanRegistrationQr,
+    this.onPasteRegistration,
   });
 
   final TextEditingController deviceIdController;
@@ -970,6 +989,7 @@ class _RegisterDeviceCard extends StatelessWidget {
   final ValueChanged<RegisteredDeviceRole> onRoleChanged;
   final VoidCallback onRegister;
   final VoidCallback onScanRegistrationQr;
+  final VoidCallback? onPasteRegistration;
 
   final bool busy;
 
@@ -978,29 +998,24 @@ class _RegisterDeviceCard extends StatelessWidget {
     return _Panel(
       title: 'Register a phone',
       subtitle:
-          'Register a user and their phone, then approve their role for offline use.',
+          'Scan the code on the phone to fill in the user details. Review them and choose a role before saving.',
       child: Column(
         children: [
           SizedBox(
             width: double.infinity,
-            child: OutlinedButton.icon(
+            child: FilledButton.icon(
               onPressed: busy ? null : onScanRegistrationQr,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _mobileRed,
-                minimumSize: const Size(double.infinity, 52),
-                side: const BorderSide(color: _mobileRed),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(15),
-                ),
-              ),
+              style: FilledButton.styleFrom(minimumSize: const Size(0, 52)),
               icon: const Icon(Icons.qr_code_scanner_rounded),
-              label: Text(
-                desktopMode
-                    ? 'Paste Phone Registration JSON'
-                    : 'Scan Phone QR with PC Camera',
-              ),
+              label: const Text('Scan Phone QR with PC Camera'),
             ),
           ),
+          if (onPasteRegistration != null)
+            TextButton.icon(
+              onPressed: busy ? null : onPasteRegistration,
+              icon: const Icon(Icons.content_paste_outlined),
+              label: const Text('Paste Phone Registration JSON'),
+            ),
           const SizedBox(height: 14),
           ExpansionTile(
             key: ValueKey(

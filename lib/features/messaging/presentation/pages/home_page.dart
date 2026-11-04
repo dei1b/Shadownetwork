@@ -34,6 +34,20 @@ import '../widgets/sos_detail_sheet.dart';
 import '../widgets/sos_receipt_summary.dart';
 import '../../../auth/presentation/widgets/auth_background.dart';
 
+const _tabTitleStyle = TextStyle(
+  fontSize: 18,
+  height: 1.2,
+  fontWeight: FontWeight.w800,
+  color: Color(0xFF1F1F1F),
+);
+
+const _tabSubtitleStyle = TextStyle(
+  fontSize: 12,
+  height: 1.25,
+  fontWeight: FontWeight.w500,
+  color: Color(0xFF717173),
+);
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key, required this.accessProfile});
 
@@ -45,6 +59,7 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage> {
   int _selectedTab = 0;
+  final List<int> _tabHistory = [];
   int _selectedMessageFilter = 0;
   int _selectedPeerFilter = 0;
   final Set<messaging.Category> _visibleMapCategories = {
@@ -360,12 +375,12 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
       final status = ref.read(relayRuntimeProvider);
       _showMessage(
-        'Relay sync complete. ${status.connectedPeers} peer(s), '
+        'Check complete: ${status.connectedPeers} connected phone(s), '
         '${status.lastReceivedCount} received, ${status.lastRelayedCount} relayed.',
         kind: FeedbackKind.success,
       );
     } catch (_) {
-      _showMessage('Relay sync failed.');
+      _showMessage('Unable to check nearby phones. Try again.');
     } finally {
       if (mounted) setState(() => _isSyncingRelay = false);
     }
@@ -442,7 +457,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       await _showTaskCompletionPopup(
         title: 'SOS Created',
         message:
-            'Saved on this phone and queued for relay. Delivery to a responder is still pending.',
+            'Saved on this phone. It can pass through nearby phones. Delivery is still pending.',
         icon: Icons.check_rounded,
       );
     }
@@ -531,6 +546,17 @@ class _HomePageState extends ConsumerState<HomePage> {
     ref.invalidate(conversationsProvider);
   }
 
+  void _selectTab(int tab, {int? messageFilter}) {
+    if (tab == _selectedTab && messageFilter == null) return;
+    setState(() {
+      if (tab != _selectedTab) {
+        _tabHistory.add(_selectedTab);
+        _selectedTab = tab;
+      }
+      if (messageFilter != null) _selectedMessageFilter = messageFilter;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final peers = ref.watch(nearbyPeersProvider);
@@ -538,43 +564,41 @@ class _HomePageState extends ConsumerState<HomePage> {
     final conversations = ref.watch(conversationsProvider);
     final tileCacheStore = ref.watch(mapTileCacheStoreProvider);
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: AuthBackground(
-        child: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: _selectedTab == 2
-                    ? _buildMapTabContent(peers, messages, tileCacheStore)
-                    : SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _buildLogo(),
-                            Transform.translate(
-                              offset: const Offset(0, -25),
-                              child: _selectedTab == 1
-                                  ? _buildMessagesTabContent(
-                                      messages,
-                                      conversations,
-                                    )
-                                  : _selectedTab == 3
-                                  ? _buildPeersTabContent(peers)
-                                  : _buildHomeTabContent(
-                                      peers,
-                                      messages,
-                                      tileCacheStore,
-                                    ),
-                            ),
-                          ],
+    return PopScope<Object?>(
+      canPop: _tabHistory.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _tabHistory.isEmpty) return;
+        setState(() => _selectedTab = _tabHistory.removeLast());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: AuthBackground(
+          child: SafeArea(
+            child: Column(
+              children: [
+                Expanded(
+                  child: _selectedTab == 2
+                      ? _buildMapTabContent(peers, messages, tileCacheStore)
+                      : SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                          child: _selectedTab == 1
+                              ? _buildMessagesTabContent(
+                                  messages,
+                                  conversations,
+                                )
+                              : _selectedTab == 3
+                              ? _buildPeersTabContent(peers)
+                              : _buildHomeTabContent(
+                                  peers,
+                                  messages,
+                                  tileCacheStore,
+                                ),
                         ),
-                      ),
-              ),
-              _buildBottomBar(),
-            ],
+                ),
+                _buildBottomBar(),
+              ],
+            ),
           ),
         ),
       ),
@@ -589,22 +613,26 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SizedBox(height: 12),
-        _buildDeviceAccessBanner(),
-        const SizedBox(height: 14),
-        if (_isResponder)
-          _buildResponderAlertButton(messages)
-        else
-          _buildSosButton(),
-        const SizedBox(height: 14),
+        if (_isResponder) ...[
+          _buildDeviceAccessBanner(),
+          const SizedBox(height: 14),
+          _buildResponderAlertButton(messages),
+          const SizedBox(height: 14),
+        ],
+        _buildPeersSection(peers),
+        const SizedBox(height: 8),
         _buildMapCard(peers, messages, tileCacheStore),
         const SizedBox(height: 14),
+        if (!_isResponder) ...[
+          _buildSosButton(),
+          const SizedBox(height: 14),
+          _buildDeviceAccessBanner(),
+          const SizedBox(height: 14),
+        ],
         if (_isResponder)
           _buildResponderActionButtons()
         else
           _buildActionButtons(),
-        const SizedBox(height: 20),
-        _buildPeersSection(peers),
         const SizedBox(height: 16),
       ],
     );
@@ -635,29 +663,29 @@ class _HomePageState extends ConsumerState<HomePage> {
       ),
       DeviceAccessLevel.keyMismatch => (
         Icons.key_off_rounded,
-        'DEVICE KEY MISMATCH',
-        'Register this phone key again before responder access can be restored.',
+        'PHONE NEEDS TO BE REGISTERED AGAIN',
+        'Show your registration code to the barangay admin to restore responder access.',
         const Color(0xFFFFE4E1),
         const Color(0xFF8B1E1E),
       ),
       DeviceAccessLevel.unregistered => (
         Icons.app_registration_rounded,
-        'DEVICE NOT APPROVED',
-        'Show the registration QR to an admin, then import the approved bundle.',
+        'REGISTER THIS PHONE',
+        'Show your code to the barangay admin, then scan their approval code.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
       DeviceAccessLevel.outdatedBundle => (
         Icons.update_rounded,
-        'TRUST BUNDLE EXPIRED',
-        'Import a newly signed bundle from the PC admin. Emergency broadcast remains available.',
+        'APPROVAL EXPIRED',
+        'Ask the barangay admin for a new approval code. You can still send an SOS.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
       _ => (
         Icons.verified_rounded,
         'VERIFIED ${profile.roleLabel.toUpperCase()}',
-        '${profile.ownerName ?? 'Approved device'} - identity key matched',
+        profile.ownerName ?? 'This phone is approved',
         const Color(0xFFEAF6EF),
         const Color(0xFF23613D),
       ),
@@ -728,10 +756,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       color: const Color(0xFFE83C3D),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () => setState(() {
-          _selectedMessageFilter = 1;
-          _selectedTab = 1;
-        }),
+        onTap: () => _selectTab(1, messageFilter: 1),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
@@ -794,63 +819,74 @@ class _HomePageState extends ConsumerState<HomePage> {
     AsyncValue<CacheStore> tileCacheStore,
   ) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildLogo(),
-          Expanded(
-            child: Transform.translate(
-              offset: const Offset(0, -25),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final scroll =
+              constraints.maxHeight < 510 ||
+              MediaQuery.textScalerOf(context).scale(16) >= 22;
+          final map = ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: _buildMapStack(
+              peers: peers,
+              messages: messages,
+              tileCacheStore: tileCacheStore,
+              showLegend: true,
+              showStatusBadge: false,
+              markerSize: 58,
+              locationMarkerSize: 42,
+              visibleCategories: _visibleMapCategories,
+              showPeers: _showMapPeers,
+              showMyLocation: _showMapLocation,
+            ),
+          );
+          final content = Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(_isResponder ? 'SOS MAP' : 'MAP', style: _tabTitleStyle),
+              const SizedBox(height: 3),
+              Text(
+                _isResponder
+                    ? 'See where people have asked for help'
+                    : 'See nearby phones and SOS alerts',
+                style: _tabSubtitleStyle,
+              ),
+              const SizedBox(height: 8),
+              if (scroll)
+                SizedBox(
+                  height: (constraints.maxHeight * 0.4)
+                      .clamp(160.0, 320.0)
+                      .toDouble(),
+                  child: map,
+                )
+              else
+                Expanded(child: map),
+              const SizedBox(height: 8),
+              Row(
                 children: [
-                  const SizedBox(height: 12),
-                  Text(
-                    _isResponder ? 'RESPONDER SOS MAP' : 'MAP',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1F1F1F),
-                      letterSpacing: 0.2,
+                  Expanded(child: _buildSosButton()),
+                  const SizedBox(width: 8),
+                  IconButton.outlined(
+                    tooltip: _isLocating
+                        ? 'Finding your location'
+                        : 'Find my location',
+                    onPressed: _isLocating ? null : () => _startFollowing(),
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(56, 56),
                     ),
+                    icon: _isLocating
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location),
                   ),
-                  const SizedBox(height: 3),
-                  Text(
-                    _isResponder
-                        ? 'Triage legitimate emergency markers'
-                        : 'View SOS alerts and peers',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF717173),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: _buildMapStack(
-                        peers: peers,
-                        messages: messages,
-                        tileCacheStore: tileCacheStore,
-                        showLegend: true,
-                        showStatusBadge: false,
-                        markerSize: 58,
-                        locationMarkerSize: 42,
-                        visibleCategories: _visibleMapCategories,
-                        showPeers: _showMapPeers,
-                        showMyLocation: _showMapLocation,
-                        bottomOverlay: _buildMapTabActionButtons(),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
                 ],
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+          return scroll ? SingleChildScrollView(child: content) : content;
+        },
       ),
     );
   }
@@ -883,23 +919,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                 children: [
                   Text(
                     _isResponder ? 'SOS ALERTS & MESSAGES' : 'MESSAGES',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1F1F1F),
-                      letterSpacing: 0.2,
-                    ),
+                    style: _tabTitleStyle,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     _isResponder
                         ? 'Incoming emergency traffic and responder chats'
                         : 'All messages from your peers',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF717173),
-                    ),
+                    style: _tabSubtitleStyle,
                   ),
                 ],
               ),
@@ -1148,24 +1175,15 @@ class _HomePageState extends ConsumerState<HomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    _isResponder ? 'CONNECTION DIAGNOSTICS' : 'PEERS',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF1F1F1F),
-                      letterSpacing: 0.2,
-                    ),
+                    _isResponder ? 'Network status' : 'Nearby phones',
+                    style: _tabTitleStyle,
                   ),
                   const SizedBox(height: 3),
                   Text(
                     _isResponder
-                        ? 'Monitor nearby nodes, links, and relay readiness'
-                        : 'Nearby devices available for message relay',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Color(0xFF717173),
-                    ),
+                        ? 'Check nearby phones and message connections'
+                        : 'Nearby phones that can pass along messages',
+                    style: _tabSubtitleStyle,
                   ),
                 ],
               ),
@@ -1856,7 +1874,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               label: 'Messages',
             ),
             _NavItem(icon: Icons.map_outlined, label: 'Maps'),
-            _NavItem(icon: Icons.people_outline_rounded, label: 'Peers'),
+            _NavItem(icon: Icons.people_outline_rounded, label: 'Nearby'),
           ];
 
     return Container(
@@ -1878,43 +1896,44 @@ class _HomePageState extends ConsumerState<HomePage> {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: List.generate(items.length, (i) {
           final active = _selectedTab == i;
-          return GestureDetector(
-            onTap: () => setState(() => _selectedTab = i),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  items[i].icon,
-                  size: 22,
-                  color: active
-                      ? const Color(0xFFE73F3F)
-                      : const Color(0xFF717173),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  items[i].label,
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w500,
-                    color: active
-                        ? const Color(0xFFE73F3F)
-                        : const Color(0xFF717173),
+          return Expanded(
+            child: Semantics(
+              selected: active,
+              button: true,
+              child: InkWell(
+                onTap: () => _selectTab(i),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        items[i].icon,
+                        size: 22,
+                        color: active
+                            ? const Color(0xFFE73F3F)
+                            : const Color(0xFF717173),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        items[i].label,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w500,
+                          color: active
+                              ? const Color(0xFFE73F3F)
+                              : const Color(0xFF717173),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           );
         }),
-      ),
-    );
-  }
-
-  Widget _buildLogo() {
-    return Center(
-      child: Image.asset(
-        'assets/home/shadownetwork_logo.png',
-        width: 170,
-        fit: BoxFit.contain,
       ),
     );
   }
@@ -1924,11 +1943,13 @@ class _HomePageState extends ConsumerState<HomePage> {
       color: const Color(0xFFE83C3D),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        key: const ValueKey('open-sos-composer'),
         onTap: _openSosComposerModal,
         borderRadius: BorderRadius.circular(16),
-        child: SizedBox(
+        child: Container(
           width: double.infinity,
-          height: 70,
+          constraints: const BoxConstraints(minHeight: 70),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           child: Row(
             children: [
               const SizedBox(width: 16),
@@ -1951,25 +1972,36 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
               const SizedBox(width: 18),
-              const Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'SEND SOS MESSAGE',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.5,
-                    ),
+              const Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'SEND SOS MESSAGE',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          height: 1.2,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Alert your peers in the area',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Alert your peers in the area',
-                    style: TextStyle(color: Colors.white, fontSize: 11),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
@@ -1983,10 +2015,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     AsyncValue<List<messaging.SosMessage>> messages,
     AsyncValue<CacheStore> tileCacheStore,
   ) {
+    final mapHeight = (MediaQuery.sizeOf(context).height * 0.36)
+        .clamp(160.0, 250.0)
+        .toDouble();
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: SizedBox(
-        height: 250,
+        height: mapHeight,
         width: double.infinity,
         child: _buildMapStack(
           peers: peers,
@@ -2012,7 +2047,6 @@ class _HomePageState extends ConsumerState<HomePage> {
     Set<messaging.Category>? visibleCategories,
     bool showPeers = true,
     bool showMyLocation = true,
-    Widget? bottomOverlay,
   }) {
     final isViewingPanaboArea = _isInsidePanabo(_currentCenter);
 
@@ -2149,11 +2183,9 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           Positioned(
             right: 10,
-            bottom: bottomOverlay == null ? 10 : 92,
+            bottom: 10,
             child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
           ),
-          if (bottomOverlay != null)
-            Positioned(left: 8, right: 8, bottom: 10, child: bottomOverlay),
         ],
       ),
     );
@@ -2517,112 +2549,62 @@ class _HomePageState extends ConsumerState<HomePage> {
     return '$_selectedMapMarkerCount selected';
   }
 
-  Widget _buildMapTabActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: _MapActionButton(
-            icon: _isLocating
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
-                      color: Color(0xFFE83C3D),
-                    ),
-                  )
-                : const Icon(
-                    Icons.gps_fixed_rounded,
-                    color: Color(0xFFE83C3D),
-                    size: 34,
-                  ),
-            label: 'LOCATE ME',
-            subtitle: _isLocating
-                ? 'Locating...'
-                : (_isFollowing ? 'Show my location' : 'Find my location'),
-            backgroundColor: Colors.white,
-            foregroundColor: const Color(0xFFE83C3D),
-            subtitleColor: const Color(0xFF7D7D7D),
-            onTap: () => _startFollowing(),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _MapActionButton(
-            icon: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 3),
-              ),
-              alignment: Alignment.center,
-              child: const Text(
-                'SOS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            label: 'SEND SOS',
-            subtitle: 'Alert nearby peers',
-            backgroundColor: const Color(0xFFE83C3D),
-            foregroundColor: Colors.white,
-            subtitleColor: Colors.white,
-            onTap: _openSosComposerModal,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildActionButtons() {
+    const subtitleStyle = TextStyle(fontSize: 9, color: Color(0xFF575757));
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: _ActionCard(
-                icon: _isLocating
-                    ? const SizedBox(
-                        width: 32,
-                        height: 32,
-                        child: Padding(
-                          padding: EdgeInsets.all(6),
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFFE83C3D),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _ActionCard(
+                  key: const ValueKey('locate-me-action'),
+                  icon: _isLocating
+                      ? const SizedBox(
+                          width: 34,
+                          height: 34,
+                          child: Padding(
+                            padding: EdgeInsets.all(6),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFFE83C3D),
+                            ),
                           ),
+                        )
+                      : const Icon(
+                          Icons.gps_fixed_rounded,
+                          color: Color(0xFFE83C3D),
+                          size: 34,
                         ),
-                      )
-                    : const Icon(
-                        Icons.gps_fixed_rounded,
-                        color: Color(0xFFE83C3D),
-                        size: 34,
-                      ),
-                label: 'LOCATE ME',
-                labelColor: const Color(0xFFE83C3D),
-                subtitle: _isLocating
-                    ? 'Locating...'
-                    : (_isFollowing
-                          ? 'Showing my location'
-                          : 'Show my location'),
-                onTap: () => _startFollowing(),
+                  label: 'LOCATE ME',
+                  subtitleStyle: subtitleStyle,
+                  labelColor: const Color(0xFFE83C3D),
+                  subtitle: _isLocating
+                      ? 'Locating...'
+                      : (_isFollowing
+                            ? 'Showing my location'
+                            : 'Show my location'),
+                  onTap: () => _startFollowing(),
+                ),
               ),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: _ActionCard(
-                icon: const _MessageIcon(),
-                label: 'MESSAGES',
-                labelColor: const Color(0xFFE83C3D),
-                subtitle: 'View all messages',
-                onTap: () => setState(() => _selectedTab = 1),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _ActionCard(
+                  key: const ValueKey('messages-action'),
+                  icon: const SizedBox.square(
+                    dimension: 34,
+                    child: Center(child: _MessageIcon()),
+                  ),
+                  label: 'MESSAGES',
+                  subtitleStyle: subtitleStyle,
+                  labelColor: const Color(0xFFE83C3D),
+                  subtitle: 'View all messages',
+                  onTap: () => _selectTab(1),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 14),
         SizedBox(
@@ -2633,9 +2615,9 @@ class _HomePageState extends ConsumerState<HomePage> {
               color: Color(0xFFE83C3D),
               size: 34,
             ),
-            label: 'TRUST BUNDLE',
+            label: 'Phone registration',
             labelColor: const Color(0xFFE83C3D),
-            subtitle: 'Scan admin QR or paste JSON',
+            subtitle: 'Register or update approval',
             onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
           ),
         ),
@@ -2658,7 +2640,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 label: 'SOS MAP',
                 labelColor: const Color(0xFFE83C3D),
                 subtitle: 'View verified markers',
-                onTap: () => setState(() => _selectedTab = 2),
+                onTap: () => _selectTab(2),
               ),
             ),
             const SizedBox(width: 14),
@@ -2668,10 +2650,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 label: 'CHAT FEED',
                 labelColor: const Color(0xFFE83C3D),
                 subtitle: 'Coordinate responses',
-                onTap: () => setState(() {
-                  _selectedMessageFilter = 0;
-                  _selectedTab = 1;
-                }),
+                onTap: () => _selectTab(1, messageFilter: 0),
               ),
             ),
           ],
@@ -2689,7 +2668,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 label: 'DIAGNOSTICS',
                 labelColor: const Color(0xFFE83C3D),
                 subtitle: 'Peers and relay health',
-                onTap: () => setState(() => _selectedTab = 3),
+                onTap: () => _selectTab(3),
               ),
             ),
             const SizedBox(width: 14),
@@ -2744,13 +2723,16 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildPeersSection(AsyncValue<List<messaging.Peer>> peers) {
     return Column(
+      key: const ValueKey('nearby-phones-section'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Text(
-              'NEARBY PEERS',
+              'Nearby phones',
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -2767,7 +2749,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             if (items.isEmpty) {
               return _buildEmptyState(
                 icon: Icons.people_outline_rounded,
-                message: 'No nearby peers stored yet.',
+                message: 'No nearby phones found yet.',
               );
             }
 
@@ -2848,12 +2830,14 @@ class _OfflineMapPreparingView extends StatelessWidget {
                 ),
               ),
               SizedBox(width: 10),
-              Text(
-                'Preparing offline map',
-                style: TextStyle(
-                  color: Color(0xFF2E8B57),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
+              Flexible(
+                child: Text(
+                  'Loading map',
+                  style: TextStyle(
+                    color: Color(0xFF2E8B57),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
             ],
@@ -3344,84 +3328,6 @@ class _MapLegendChoice extends StatelessWidget {
             color: selected ? const Color(0xFFE83C3D) : const Color(0xFF9A9A9A),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _MapActionButton extends StatelessWidget {
-  const _MapActionButton({
-    required this.icon,
-    required this.label,
-    required this.subtitle,
-    required this.backgroundColor,
-    required this.foregroundColor,
-    required this.subtitleColor,
-    required this.onTap,
-  });
-
-  final Widget icon;
-  final String label;
-  final String subtitle;
-  final Color backgroundColor;
-  final Color foregroundColor;
-  final Color subtitleColor;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(17),
-      elevation: 5,
-      shadowColor: Colors.black.withValues(alpha: 0.22),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(17),
-        child: Container(
-          height: 64,
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              icon,
-              const SizedBox(width: 10),
-              Flexible(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        label,
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: foregroundColor,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: subtitleColor,
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -4249,11 +4155,16 @@ class _TaskCompletionPopup extends StatelessWidget {
 
 class _ActionCard extends StatelessWidget {
   const _ActionCard({
+    super.key,
     required this.icon,
     required this.label,
     required this.labelColor,
     required this.subtitle,
     required this.onTap,
+    this.subtitleStyle = const TextStyle(
+      fontSize: 11,
+      color: Color(0xFF575757),
+    ),
   });
 
   final Widget icon;
@@ -4261,6 +4172,7 @@ class _ActionCard extends StatelessWidget {
   final Color labelColor;
   final String subtitle;
   final VoidCallback onTap;
+  final TextStyle subtitleStyle;
 
   @override
   Widget build(BuildContext context) {
@@ -4284,24 +4196,24 @@ class _ActionCard extends StatelessWidget {
           children: [
             icon,
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: labelColor,
-                    letterSpacing: 0.3,
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: labelColor,
+                      letterSpacing: 0.3,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(fontSize: 9, color: Color(0x80000000)),
-                ),
-              ],
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: subtitleStyle),
+                ],
+              ),
             ),
           ],
         ),

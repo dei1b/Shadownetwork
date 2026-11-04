@@ -60,13 +60,13 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         _isLoading = false;
         _error = null;
       });
-    } catch (error) {
+    } catch (_) {
       if (!mounted) {
         return;
       }
       setState(() {
         _isLoading = false;
-        _error = 'Unable to load trust bundle: $error';
+        _error = 'Unable to load the saved approval update.';
       });
     }
   }
@@ -86,7 +86,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     final text = clipboardData?.text;
     if (text == null || text.trim().isEmpty) {
       _showSnackBar(
-        'Clipboard does not contain a trust bundle.',
+        'No approval code found on the clipboard.',
         kind: FeedbackKind.warning,
       );
       return;
@@ -191,16 +191,19 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       }
       setState(() => _error = error.message);
       _showSnackBar(
-        'The trust bundle was not imported. ${error.message}',
+        'Could not save the approval update. Ask the barangay admin for a current code.',
         kind: FeedbackKind.error,
       );
-    } catch (error) {
+    } catch (_) {
       if (!mounted) {
         return;
       }
-      setState(() => _error = 'Import failed: $error');
+      setState(
+        () => _error =
+            'Could not save the approval update. Try scanning the code again.',
+      );
       _showSnackBar(
-        'The trust bundle was not imported. Check the file and try again.',
+        'Could not save the approval update. Check the code and try again.',
         kind: FeedbackKind.error,
       );
     } finally {
@@ -215,9 +218,9 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Trust this PC administrator?'),
+          title: const Text('Is this your barangay admin?'),
           content: Text(
-            'This is the first signed trust bundle on this phone. Confirm that the QR is displayed by your authorized Shadow Network administrator.\n\nSigning key: ${bundle.issuer?.signingKeyId ?? 'missing'}\n\nThis administrator key will be pinned for future updates.',
+            'Only continue if your barangay admin gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${bundle.issuer?.signingKeyId ?? 'unavailable'}',
           ),
           actions: [
             TextButton(
@@ -244,10 +247,10 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       }
       setState(() => _bundle = null);
       ref.invalidate(deviceAccessProfileProvider);
-      _showSnackBar('Trust bundle removed from this phone.');
+      _showSnackBar('Approval update removed from this phone.');
     } catch (_) {
       _showSnackBar(
-        'Unable to complete removing the trust bundle. Reopen this screen to check its status.',
+        'Could not remove the approval update. Reopen this screen to check its status.',
         kind: FeedbackKind.error,
       );
     }
@@ -268,7 +271,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Trust Bundle'),
+        title: const Text('Phone registration'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
@@ -293,16 +296,26 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                       onShowRegistrationQr: _showDeviceRegistrationQr,
                     ),
                     const SizedBox(height: 18),
-                    _ImportActions(
-                      isImporting: _isImporting,
-                      onScanQr: _scanQr,
-                      onImportClipboard: _importFromClipboard,
+                    _TrustPanel(
+                      title: "2. Scan the admin's approval code",
+                      subtitle:
+                          'After registration, scan the code the barangay admin gives you. Use this step again when they give you an updated code.',
+                      child: _ImportActions(
+                        isImporting: _isImporting,
+                        onScanQr: _scanQr,
+                        onImportClipboard: _importFromClipboard,
+                      ),
                     ),
                     const SizedBox(height: 18),
-                    _ManualImportCard(
-                      controller: _jsonController,
-                      isImporting: _isImporting,
-                      onImport: _importFromTextField,
+                    ExpansionTile(
+                      title: const Text('Other ways to enter a code'),
+                      children: [
+                        _ManualImportCard(
+                          controller: _jsonController,
+                          isImporting: _isImporting,
+                          onImport: _importFromTextField,
+                        ),
+                      ],
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 14),
@@ -334,7 +347,7 @@ class _TrustBundleScannerPageState extends State<_TrustBundleScannerPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Scan Admin QR'),
+        title: const Text('Scan approval code'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
@@ -392,107 +405,13 @@ class _TrustHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: _trustRed,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.16),
-            blurRadius: 18,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(
-            Icons.verified_user_rounded,
-            color: Colors.white,
-            size: 42,
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Offline Trust Bundle',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            bundle == null
-                ? 'No trusted device list imported yet.'
-                : '${bundle!.approvedCount} approved, ${bundle!.revokedCount} revoked devices saved.',
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.84),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (bundle != null) ...[
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _HeaderBadge(
-                  icon: Icons.verified_rounded,
-                  label: bundle!.isSignatureVerified
-                      ? 'SIGNATURE VERIFIED'
-                      : 'LEGACY UNSIGNED',
-                ),
-                _HeaderBadge(
-                  icon: Icons.layers_rounded,
-                  label: 'VERSION ${bundle!.bundleVersion}',
-                ),
-                if (bundle!.isExpiredAt(DateTime.now()))
-                  const _HeaderBadge(
-                    icon: Icons.warning_amber_rounded,
-                    label: 'EXPIRED',
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderBadge extends StatelessWidget {
-  const _HeaderBadge({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: Colors.white),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
+    final saved = bundle;
+    final message = saved == null
+        ? 'The barangay admin registers your phone and gives you an approval code. You can still send an SOS before registering.'
+        : saved.isExpiredAt(DateTime.now())
+        ? 'Your saved approval has expired. Ask the barangay admin for a new code.'
+        : 'An approval update from the barangay admin is saved on this phone.';
+    return Text(message, style: Theme.of(context).textTheme.bodyMedium);
   }
 }
 
@@ -514,149 +433,161 @@ class _DeviceIdentityCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return _TrustPanel(
-      title: 'This Phone Device ID',
-      subtitle: 'Register this exact ID in the PC admin dashboard.',
+      title: '1. Show your registration code',
+      subtitle:
+          'Save your information above, then show this code to the barangay admin.',
       child: localPeer.when(
         data: (peer) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF7F7),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _trustField),
-              ),
-              child: SelectableText(
-                peer.id,
-                style: const TextStyle(
-                  color: _trustRedDark,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Name: ${peer.name}',
-                    style: const TextStyle(color: _trustMuted),
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: () => onCopyDeviceId(peer.id),
-                  icon: const Icon(Icons.copy_rounded),
-                  label: const Text('Copy'),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            const Text(
-              'Encryption public key',
-              style: TextStyle(
-                color: _trustRedDark,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
             cryptoIdentity.when(
-              data: (identity) => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SelectableText(
-                    identity.encodedPublicKey,
+              data: (identity) => SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => onShowRegistrationQr(peer, identity),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _trustRed,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  icon: const Icon(Icons.qr_code_2_rounded),
+                  label: const Text('Show my registration code'),
+                ),
+              ),
+              loading: () => const LinearProgressIndicator(),
+              error: (_, _) => const Text(
+                'Unable to prepare your code. Reopen this screen to try again.',
+              ),
+            ),
+            ExpansionTile(
+              title: const Text('Technical details'),
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7F7),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: _trustField),
+                  ),
+                  child: SelectableText(
+                    peer.id,
                     style: const TextStyle(
-                      color: _trustMuted,
-                      fontFamily: 'monospace',
-                      fontSize: 12,
+                      color: _trustRedDark,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.2,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Name: ${peer.name}',
+                        style: const TextStyle(color: _trustMuted),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => onCopyDeviceId(peer.id),
+                      icon: const Icon(Icons.copy_rounded),
+                      label: const Text('Copy'),
+                    ),
+                  ],
+                ),
+                const Divider(height: 24),
+                const Text(
+                  'Encryption public key',
+                  style: TextStyle(
+                    color: _trustRedDark,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                cryptoIdentity.when(
+                  data: (identity) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          'Key ID: ${identity.keyId} (v${identity.keyVersion})',
-                          style: const TextStyle(
-                            color: _trustMuted,
-                            fontSize: 12,
-                          ),
+                      SelectableText(
+                        identity.encodedPublicKey,
+                        style: const TextStyle(
+                          color: _trustMuted,
+                          fontFamily: 'monospace',
+                          fontSize: 12,
                         ),
                       ),
-                      TextButton.icon(
-                        onPressed: () =>
-                            onCopyPublicKey(identity.encodedPublicKey),
-                        icon: const Icon(Icons.key_rounded),
-                        label: const Text('Copy key'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Signing public key',
-                    style: TextStyle(
-                      color: _trustRedDark,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  ref
-                      .watch(deviceSigningIdentityProvider)
-                      .when(
-                        data: (signing) => Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SelectableText(
-                              signing.encodedPublicKey,
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Key ID: ${identity.keyId} (v${identity.keyVersion})',
                               style: const TextStyle(
                                 color: _trustMuted,
-                                fontFamily: 'monospace',
                                 fontSize: 12,
                               ),
                             ),
-                            TextButton.icon(
-                              onPressed: () async {
-                                await ActionFeedback.copy(
-                                  context,
+                          ),
+                          TextButton.icon(
+                            onPressed: () =>
+                                onCopyPublicKey(identity.encodedPublicKey),
+                            icon: const Icon(Icons.key_rounded),
+                            label: const Text('Copy key'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Signing public key',
+                        style: TextStyle(
+                          color: _trustRedDark,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ref
+                          .watch(deviceSigningIdentityProvider)
+                          .when(
+                            data: (signing) => Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SelectableText(
                                   signing.encodedPublicKey,
-                                  message: 'Signing public key copied.',
-                                );
-                              },
-                              icon: const Icon(Icons.copy),
-                              label: const Text('Copy signing key'),
+                                  style: const TextStyle(
+                                    color: _trustMuted,
+                                    fontFamily: 'monospace',
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    await ActionFeedback.copy(
+                                      context,
+                                      signing.encodedPublicKey,
+                                      message: 'Signing public key copied.',
+                                    );
+                                  },
+                                  icon: const Icon(Icons.copy),
+                                  label: const Text('Copy signing key'),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        loading: () => const LinearProgressIndicator(),
-                        error: (_, _) => const Text(
-                          'Unable to load signing key. Reopen this screen to retry.',
-                        ),
-                      ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: () => onShowRegistrationQr(peer, identity),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _trustRed,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size.fromHeight(48),
-                      ),
-                      icon: const Icon(Icons.qr_code_2_rounded),
-                      label: const Text('Show PC Registration QR'),
-                    ),
+                            loading: () => const LinearProgressIndicator(),
+                            error: (_, _) => const Text(
+                              'Unable to load signing key. Reopen this screen to retry.',
+                            ),
+                          ),
+                    ],
                   ),
-                ],
-              ),
-              loading: () => const LinearProgressIndicator(color: _trustRed),
-              error: (error, _) => Text(
-                'Unable to load encryption key: $error',
-                style: const TextStyle(color: Color(0xFF9A5A00)),
-              ),
+                  loading: () =>
+                      const LinearProgressIndicator(color: _trustRed),
+                  error: (error, _) => Text(
+                    'Unable to load encryption key: $error',
+                    style: const TextStyle(color: Color(0xFF9A5A00)),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -709,7 +640,7 @@ class _DeviceRegistrationQrDialogState
     return AlertDialog(
       backgroundColor: Colors.white,
       title: const Text(
-        'Device Registration QR',
+        'Your registration code',
         style: TextStyle(fontWeight: FontWeight.w900),
       ),
       content: SingleChildScrollView(
@@ -760,7 +691,7 @@ class _DeviceRegistrationQrDialogState
                 ),
               ],
               const Text(
-                'On the PC admin dashboard, select Scan Phone QR and point the PC camera at this code.',
+                'Show this code to the barangay admin.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _trustMuted, fontSize: 12),
               ),
@@ -782,7 +713,7 @@ class _DeviceRegistrationQrDialogState
                     await Clipboard.setData(ClipboardData(text: payload));
                     if (mounted) {
                       setState(() {
-                        _copyMessage = 'Registration JSON copied.';
+                        _copyMessage = 'Registration text copied.';
                         _copyKind = FeedbackKind.success;
                       });
                     }
@@ -790,7 +721,7 @@ class _DeviceRegistrationQrDialogState
                     if (mounted) {
                       setState(() {
                         _copyMessage =
-                            'Unable to copy registration JSON. Try again.';
+                            'Could not copy the registration text. Try again.';
                         _copyKind = FeedbackKind.error;
                       });
                     }
@@ -799,7 +730,7 @@ class _DeviceRegistrationQrDialogState
                   }
                 },
           icon: const Icon(Icons.copy_rounded),
-          label: const Text('Copy JSON'),
+          label: const Text('Copy registration text'),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -824,38 +755,25 @@ class _ImportActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: _trustRed,
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(54),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            onPressed: isImporting ? null : onScanQr,
-            icon: const Icon(Icons.qr_code_scanner_rounded),
-            label: const Text('Scan QR'),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: _trustRedDark,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 52),
           ),
+          onPressed: isImporting ? null : onScanQr,
+          icon: const Icon(Icons.qr_code_scanner_rounded),
+          label: Text(isImporting ? 'Checking code...' : 'Scan approval code'),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _trustRedDark,
-              side: const BorderSide(color: _trustRed),
-              minimumSize: const Size.fromHeight(54),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-            ),
-            onPressed: isImporting ? null : onImportClipboard,
-            icon: const Icon(Icons.paste_rounded),
-            label: const Text('Clipboard'),
-          ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+          onPressed: isImporting ? null : onImportClipboard,
+          icon: const Icon(Icons.paste_rounded),
+          label: const Text('Paste copied code'),
         ),
       ],
     );
@@ -876,8 +794,8 @@ class _ManualImportCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TrustPanel(
-      title: 'Manual Import',
-      subtitle: 'Paste the JSON trust bundle if QR scanning is unavailable.',
+      title: 'Enter approval text',
+      subtitle: 'Use the text supplied by the barangay admin.',
       child: Column(
         children: [
           TextField(
@@ -885,7 +803,7 @@ class _ManualImportCard extends StatelessWidget {
             minLines: 5,
             maxLines: 8,
             decoration: const InputDecoration(
-              hintText: 'Paste trust bundle JSON here...',
+              hintText: 'Paste approval text here',
               border: OutlineInputBorder(),
             ),
           ),
@@ -894,7 +812,7 @@ class _ManualImportCard extends StatelessWidget {
             width: double.infinity,
             child: FilledButton(
               onPressed: isImporting ? null : onImport,
-              child: Text(isImporting ? 'Importing...' : 'Import Bundle'),
+              child: Text(isImporting ? 'Checking...' : 'Save approval update'),
             ),
           ),
         ],
@@ -912,11 +830,11 @@ class _BundleSummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _TrustPanel(
-      title: 'Current Phone Trust State',
-      subtitle: 'Signed administrator policy used by messaging and relay.',
+      title: 'Saved approval update',
+      subtitle: 'The latest update from the barangay admin.',
       child: bundle == null
           ? const Text(
-              'No bundle imported. SOS messages from unknown devices should still be shown but labeled unverified.',
+              'No approval update saved. You can still send an SOS.',
               style: TextStyle(color: _trustMuted),
             )
           : Column(
@@ -963,7 +881,7 @@ class _BundleSummaryCard extends StatelessWidget {
                   child: OutlinedButton.icon(
                     onPressed: onClear,
                     icon: const Icon(Icons.delete_outline_rounded),
-                    label: const Text('Clear Imported Bundle'),
+                    label: const Text('Remove saved approval'),
                   ),
                 ),
               ],
