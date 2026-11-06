@@ -48,6 +48,7 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   int _selectedTab = 0;
   final List<int> _tabHistory = [];
+  final Set<int> _visitedTabs = {0};
   int _selectedMessageFilter = 0;
   int _selectedPeerFilter = 0;
   final Set<messaging.Category> _visibleMapCategories = {
@@ -75,7 +76,13 @@ class _HomePageState extends ConsumerState<HomePage> {
   static const double _panaboWest = 125.62;
 
   final OfflinePanaboTileServer _offlineTileServer = OfflinePanaboTileServer();
-  ml.MapLibreMapController? _mapController;
+  ml.MapLibreMapController? _homeMapController;
+  ml.MapLibreMapController? _fullMapController;
+  ml.MapLibreMapController? get _mapController => switch (_selectedTab) {
+    0 => _homeMapController,
+    2 => _fullMapController,
+    _ => null,
+  };
   String? _offlineMapStyle;
   LatLng _currentCenter = _mapCenter;
   double _currentZoom = _defaultZoom;
@@ -550,9 +557,17 @@ class _HomePageState extends ConsumerState<HomePage> {
       if (tab != _selectedTab) {
         _tabHistory.add(_selectedTab);
         _selectedTab = tab;
+        _visitedTabs.add(tab);
       }
       if (messageFilter != null) _selectedMessageFilter = messageFilter;
       if (peerFilter != null) _selectedPeerFilter = peerFilter;
+    });
+    _restoreActiveMapCamera();
+  }
+
+  void _restoreActiveMapCamera() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _moveMap(_currentCenter, _currentZoom);
     });
   }
 
@@ -568,6 +583,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       onPopInvokedWithResult: (didPop, _) {
         if (didPop || _tabHistory.isEmpty) return;
         setState(() => _selectedTab = _tabHistory.removeLast());
+        _restoreActiveMapCamera();
       },
       child: Scaffold(
         backgroundColor: Colors.white,
@@ -576,24 +592,45 @@ class _HomePageState extends ConsumerState<HomePage> {
             child: Column(
               children: [
                 Expanded(
-                  child: _selectedTab == 2
-                      ? _buildMapTabContent(peers, messages, tileCacheStore)
-                      : SingleChildScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
-                          child: _selectedTab == 1
-                              ? _buildMessagesTabContent(
-                                  messages,
-                                  conversations,
-                                )
-                              : _selectedTab == 3
-                              ? _buildPeersTabContent(peers)
-                              : _buildHomeTabContent(
-                                  peers,
-                                  messages,
-                                  tileCacheStore,
+                  child: IndexedStack(
+                    index: _selectedTab,
+                    children: List.generate(
+                      4,
+                      (tab) => TickerMode(
+                        enabled: tab == _selectedTab,
+                        child: !_visitedTabs.contains(tab)
+                            ? const SizedBox.shrink()
+                            : tab == 2
+                            ? _buildMapTabContent(
+                                peers,
+                                messages,
+                                tileCacheStore,
+                              )
+                            : SingleChildScrollView(
+                                key: PageStorageKey('home-tab-$tab'),
+                                physics: const BouncingScrollPhysics(),
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  12,
+                                  16,
+                                  20,
                                 ),
-                        ),
+                                child: tab == 1
+                                    ? _buildMessagesTabContent(
+                                        messages,
+                                        conversations,
+                                      )
+                                    : tab == 3
+                                    ? _buildPeersTabContent(peers)
+                                    : _buildHomeTabContent(
+                                        peers,
+                                        messages,
+                                        tileCacheStore,
+                                      ),
+                              ),
+                      ),
+                    ),
+                  ),
                 ),
                 _buildBottomBar(),
               ],
@@ -2067,13 +2104,20 @@ class _HomePageState extends ConsumerState<HomePage> {
                             // This enables local requests; it does not turn on
                             // Wi-Fi or mobile data.
                             unawaited(controller.forceOnlineMode());
-                            _mapController = controller;
+                            if (showLegend) {
+                              _fullMapController = controller;
+                            } else {
+                              _homeMapController = controller;
+                            }
                             if (mounted) {
                               setState(() {});
                             }
                           },
                           onCameraMove: (cameraPosition) {
-                            if (!mounted) {
+                            final active = showLegend
+                                ? _selectedTab == 2
+                                : _selectedTab == 0;
+                            if (!mounted || !active) {
                               return;
                             }
                             setState(() {

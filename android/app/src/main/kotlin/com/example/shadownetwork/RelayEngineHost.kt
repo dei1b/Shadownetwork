@@ -35,8 +35,15 @@ internal object RelayEngineHost {
         if (activity != null) {
             engine?.let {
                 MethodChannel(it.dartExecutor.binaryMessenger, "shadow_network/app_visibility")
-                    .invokeMethod("opened", null)
+                    .invokeMethod("visible", null)
             }
+        }
+    }
+
+    fun notifyFreshLaunch() {
+        engine?.let {
+            MethodChannel(it.dartExecutor.binaryMessenger, "shadow_network/app_visibility")
+                .invokeMethod("opened", null)
         }
     }
 }

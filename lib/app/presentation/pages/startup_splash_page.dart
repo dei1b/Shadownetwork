@@ -39,6 +39,9 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
         _activityVisible = true;
         setState(() => _showSplash = true);
         _scheduleDismissal();
+      } else if (call.method == 'visible' && mounted) {
+        _activityVisible = true;
+        _scheduleDismissal();
       }
     });
     widget.initialization.whenComplete(() {
@@ -64,13 +67,12 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
     _visibilityRevision++;
     _splashTimer?.cancel();
     if (state == AppLifecycleState.resumed) {
-      setState(() => _showSplash = true);
       _scheduleDismissal();
     }
   }
 
   Future<void> _scheduleDismissal() async {
-    if (!_initialized || _imageReady == null) return;
+    if (!_showSplash || !_initialized || _imageReady == null) return;
     final revision = ++_visibilityRevision;
     await _imageReady;
     if (!mounted || revision != _visibilityRevision) return;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/app/presentation/pages/startup_splash_page.dart';
 
@@ -57,6 +58,22 @@ void main() {
     background();
     await tester.pump(const Duration(seconds: 5));
     foreground();
+    await tester.pumpAndSettle();
+    expect(find.byType(StartupSplashPage), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    ServicesBinding.instance.channelBuffers.push(
+      'shadow_network/app_visibility',
+      const StandardMethodCodec().encodeMethodCall(const MethodCall('visible')),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(StartupSplashPage), findsNothing);
+    ServicesBinding.instance.channelBuffers.push(
+      'shadow_network/app_visibility',
+      const StandardMethodCodec().encodeMethodCall(const MethodCall('opened')),
+      (_) {},
+    );
     await tester.pumpAndSettle();
     expect(find.byType(StartupSplashPage), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1900));

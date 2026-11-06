@@ -43,6 +43,9 @@ class _MapController implements ml.MapLibreMapController {
   bool localRequestsEnabled = false;
 
   @override
+  Future<bool?> moveCamera(ml.CameraUpdate cameraUpdate) async => true;
+
+  @override
   Future<void> forceOnlineMode() async {
     localRequestsEnabled = true;
   }
@@ -200,6 +203,7 @@ void main() {
     }
 
     final cardMap = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    final cardState = tester.state(find.byType(ml.MapLibreMap));
     expect(headerText('ShadowNetwork'), findsOneWidget);
     expect(headerText('Registration available'), findsOneWidget);
     final locate = find.byKey(const ValueKey('locate-me-action'));
@@ -239,6 +243,8 @@ void main() {
     expect(find.text('See nearby phones and SOS alerts'), findsOneWidget);
     expect(headerText('Panabo offline'), findsOneWidget);
     final fullMap = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    final fullState = tester.state(find.byType(ml.MapLibreMap));
+    expect(find.byType(ml.MapLibreMap, skipOffstage: false), findsNWidgets(2));
     expect(nearby, findsNothing);
     await tester.ensureVisible(sosButton);
     await tester.pump();
@@ -266,12 +272,20 @@ void main() {
     // Revisiting Home still lets Back return to the last visited tab.
     await tester.tap(find.text('Home'));
     await tester.pump();
+    expect(
+      identical(tester.state(find.byType(ml.MapLibreMap)), cardState),
+      isTrue,
+    );
     await tester.tap(find.text('Home'));
     await tester.pump();
     expect(find.text('Map'), findsNothing);
     await tester.binding.handlePopRoute();
     await tester.pump();
     expect(find.text('Map'), findsOneWidget);
+    expect(
+      identical(tester.state(find.byType(ml.MapLibreMap)), fullState),
+      isTrue,
+    );
     await tester.binding.handlePopRoute();
     await tester.pump();
     expect(find.text('Map'), findsNothing);
