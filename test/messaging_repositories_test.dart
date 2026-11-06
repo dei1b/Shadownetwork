@@ -2,11 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_peer_repository.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_sos_message_repository.dart';
+import 'package:shadownetwork/features/messaging/data/services/scf_service.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/scf_peer_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/sos_message.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -72,6 +74,28 @@ void main() {
     expect(messages.single.recipient?.id, recipient.id);
     expect(messages.single.isEncrypted, isTrue);
     expect(messages.single.moderationStatus, MessageModerationStatus.normal);
+
+    final scf = ScfService(database: database);
+    final message = messages.single;
+    await scf.storeMessage(message, receivedAt: now);
+    await scf.updatePeerStatus(
+      messageHash: message.messageHash!,
+      peerId: 'intermediate-relay',
+      status: ScfPeerStatus.failed,
+    );
+    expect(
+      (await messageRepository.getMessages()).single.status,
+      MessageStatus.queued,
+    );
+    await scf.updatePeerStatus(
+      messageHash: message.messageHash!,
+      peerId: 'intermediate-relay',
+      status: ScfPeerStatus.sent,
+    );
+    expect(
+      (await messageRepository.getMessages()).single.status,
+      MessageStatus.relayed,
+    );
 
     await messageRepository.saveMessage(
       SosMessage(

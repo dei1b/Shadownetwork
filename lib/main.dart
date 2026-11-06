@@ -11,14 +11,24 @@ import 'features/validation/presentation/providers/validation_session_provider.d
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final container = ProviderContainer();
+  final initialization = _initializeApp(container);
+  runApp(
+    UncontrolledProviderScope(
+      container: container,
+      child: DisasterCommApp(initialization: initialization),
+    ),
+  );
+}
+
+Future<void> _initializeApp(ProviderContainer container) async {
   try {
     await Firebase.initializeApp();
   } catch (error) {
     debugPrint('Firebase init warning: $error');
   }
 
-  final container = ProviderContainer();
-  // Runs without a rendered frame when Android restores the foreground service.
+  // Relay startup is independent of the current screen and its loading state.
   unawaited(
     container.read(relayRuntimeProvider.notifier).start().catchError((
       Object error,
@@ -37,11 +47,5 @@ Future<void> main() async {
         .catchError((Object error) {
           debugPrint('Validation recovery warning: $error');
         }),
-  );
-  runApp(
-    UncontrolledProviderScope(
-      container: container,
-      child: const DisasterCommApp(),
-    ),
   );
 }

@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'startup_splash_page.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadownetwork/features/messaging/presentation/pages/home_page.dart';
@@ -79,40 +81,9 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
     final accessProfile = ref.watch(deviceAccessProfileProvider);
     return accessProfile.when(
       data: (profile) => HomePage(accessProfile: profile),
-      loading: () => const _AccessLoadingPage(),
+      loading: () => const StartupSplashPage(),
       error: (_, _) => const HomePage(
         accessProfile: DeviceAccessProfile.unregistered(deviceId: 'unknown'),
-      ),
-    );
-  }
-}
-
-class _AccessLoadingPage extends StatelessWidget {
-  const _AccessLoadingPage();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Color(0xFFE83C3D)),
-              SizedBox(height: 16),
-              Text(
-                'VERIFYING DEVICE ACCESS',
-                style: TextStyle(
-                  color: Color(0xFF5C5C5C),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }

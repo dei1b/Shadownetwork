@@ -241,6 +241,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('Message sender'), findsOneWidget);
+      expect(
+        tester.getBottomLeft(find.text('Message sender')).dy,
+        lessThan(tester.getTopLeft(find.text('TIMING & ROUTING')).dy),
+      );
     });
   }
 

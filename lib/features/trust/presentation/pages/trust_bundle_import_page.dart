@@ -10,6 +10,7 @@ import '../../../messaging/presentation/providers/local_messaging_providers.dart
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../data/services/trust_bundle_store.dart';
+import '../../domain/entities/device_access_profile.dart';
 import '../../domain/entities/trust_bundle.dart';
 import '../providers/device_access_provider.dart';
 import '../widgets/user_information_form.dart';
@@ -29,7 +30,7 @@ class TrustBundleImportPage extends ConsumerStatefulWidget {
 }
 
 class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
-  final TrustBundleStore _store = TrustBundleStore();
+  TrustBundleStore get _store => ref.read(trustBundleStoreProvider);
   final TextEditingController _jsonController = TextEditingController();
 
   TrustBundle? _bundle;
@@ -152,9 +153,10 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
   }
 
   Future<void> _importBundle(String source) async {
-    if (_isImporting) {
+    if (!mounted || _isImporting) {
       return;
     }
+    final container = ProviderScope.containerOf(context, listen: false);
     setState(() {
       _isImporting = true;
       _error = null;
@@ -172,8 +174,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         }
       }
       final bundle = await _store.importBundleJson(source.trim());
-      final repository = await ref.read(trustRepositoryProvider.future);
-      await repository.replaceFromBundle(bundle);
+      container.invalidate(deviceAccessProfileProvider);
       if (!mounted) {
         return;
       }
@@ -181,10 +182,6 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         _bundle = bundle;
         _jsonController.clear();
       });
-      ref.invalidate(deviceAccessProfileProvider);
-      _showSnackBar(
-        'Verified signed bundle v${bundle.bundleVersion}: ${bundle.approvedCount} approved and ${bundle.revokedCount} revoked devices.',
-      );
     } on FormatException catch (error) {
       if (!mounted) {
         return;
@@ -238,6 +235,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
   }
 
   Future<void> _clearBundle() async {
+    if (_isImporting) return;
     try {
       await _store.clearBundle();
       final repository = await ref.read(trustRepositoryProvider.future);
@@ -263,10 +261,61 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     ActionFeedback.show(context, message, kind: kind);
   }
 
+  Widget _buildApprovalOutcome(AsyncValue<DeviceAccessProfile> access) {
+    return access.when(
+      skipLoadingOnRefresh: false,
+      data: (profile) => switch (profile.level) {
+        DeviceAccessLevel.unregistered => const ActionStatus(
+          title: 'This phone is still unregistered',
+          message:
+              'Show your registration code to the barangay admin and ask them to approve this phone.',
+          kind: FeedbackKind.warning,
+        ),
+        DeviceAccessLevel.revoked => const ActionStatus(
+          title: 'Approval was removed',
+          message:
+              'Contact the barangay admin to check this phone’s registration.',
+          kind: FeedbackKind.warning,
+        ),
+        DeviceAccessLevel.keyMismatch => const ActionStatus(
+          title: 'Register this phone again',
+          message:
+              'Show your current registration code to the barangay admin and ask for a new approval code.',
+          kind: FeedbackKind.warning,
+        ),
+        DeviceAccessLevel.outdatedBundle => const ActionStatus(
+          title: 'Approval code expired',
+          message: 'Ask the barangay admin for a current approval code.',
+          kind: FeedbackKind.warning,
+        ),
+        _ => ActionStatus(
+          title: 'This phone is approved',
+          message: profile.canAccessResponderInterface
+              ? 'Responder tools are ready to use.'
+              : 'This phone is now registered with the barangay.',
+          kind: FeedbackKind.success,
+        ),
+      },
+      loading: () => const ActionStatus(
+        title: 'Checking this phone',
+        message: 'Checking whether the approval code covers this phone.',
+      ),
+      error: (_, _) => const ActionStatus(
+        title: 'Couldn’t check this phone’s approval',
+        message:
+            'The approval code was saved. Scan it again to retry the check.',
+        kind: FeedbackKind.error,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final localPeer = ref.watch(localPeerProvider);
     final cryptoIdentity = ref.watch(deviceCryptoIdentityProvider);
+    final approval = _bundle == null || _isImporting
+        ? null
+        : ref.watch(deviceAccessProfileProvider);
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -300,10 +349,18 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                       title: "2. Scan the admin's approval code",
                       subtitle:
                           'After registration, scan the code the barangay admin gives you. Use this step again when they give you an updated code.',
-                      child: _ImportActions(
-                        isImporting: _isImporting,
-                        onScanQr: _scanQr,
-                        onImportClipboard: _importFromClipboard,
+                      child: Column(
+                        children: [
+                          if (approval != null) ...[
+                            _buildApprovalOutcome(approval),
+                            const SizedBox(height: 12),
+                          ],
+                          _ImportActions(
+                            isImporting: _isImporting,
+                            onScanQr: _scanQr,
+                            onImportClipboard: _importFromClipboard,
+                          ),
+                        ],
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -322,7 +379,10 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                       _ErrorCard(message: _error!),
                     ],
                     const SizedBox(height: 18),
-                    _BundleSummaryCard(bundle: _bundle, onClear: _clearBundle),
+                    _BundleSummaryCard(
+                      bundle: _bundle,
+                      onClear: _isImporting ? null : _clearBundle,
+                    ),
                   ],
                 ),
               ),
@@ -408,8 +468,6 @@ class _TrustHeader extends StatelessWidget {
     final saved = bundle;
     final message = saved == null
         ? 'The barangay admin registers your phone and gives you an approval code. You can still send an SOS before registering.'
-        : saved.isExpiredAt(DateTime.now())
-        ? 'Your saved approval has expired. Ask the barangay admin for a new code.'
         : 'An approval update from the barangay admin is saved on this phone.';
     return Text(message, style: Theme.of(context).textTheme.bodyMedium);
   }
@@ -825,7 +883,7 @@ class _BundleSummaryCard extends StatelessWidget {
   const _BundleSummaryCard({required this.bundle, required this.onClear});
 
   final TrustBundle? bundle;
-  final VoidCallback onClear;
+  final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {

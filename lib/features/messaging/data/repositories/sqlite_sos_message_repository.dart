@@ -1,5 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../domain/entities/message_status.dart';
+import '../../domain/entities/scf_peer_status.dart';
 import '../../domain/entities/sos_message.dart';
 import '../../domain/repositories/sos_message_repository.dart';
 import '../datasources/local_messaging_database.dart';
@@ -17,6 +19,15 @@ class SqliteSosMessageRepository implements SosMessageRepository {
     final rows = await _database.rawQuery('''
       SELECT
         messages.*,
+        CASE WHEN messages.status = '${MessageStatus.queued.name}'
+          AND EXISTS (
+            SELECT 1 FROM ${LocalMessagingDatabase.scfPeerStatusesTable} AS relay
+            WHERE relay.message_hash = messages.message_hash
+              AND relay.status IN ('${ScfPeerStatus.sent.name}', '${ScfPeerStatus.delivered.name}')
+          )
+          THEN '${MessageStatus.relayed.name}'
+          ELSE messages.status
+        END AS feed_status,
         peers.id AS sender_peer_id,
         peers.display_name AS sender_display_name,
         peers.peer_type_code AS sender_peer_type,
@@ -41,7 +52,14 @@ class SqliteSosMessageRepository implements SosMessageRepository {
       ORDER BY messages.created_at DESC
     ''');
 
-    return rows.map(SosMessageModel.fromMap).toList(growable: false);
+    return rows
+        .map((row) {
+          final message = SosMessageModel.fromMap(row);
+          return message.copyWith(
+            status: MessageStatus.values.byName(row['feed_status']! as String),
+          );
+        })
+        .toList(growable: false);
   }
 
   @override

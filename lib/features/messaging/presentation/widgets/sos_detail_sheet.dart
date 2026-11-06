@@ -89,6 +89,15 @@ class SosDetailSheet extends StatelessWidget {
                     message.body,
                     style: const TextStyle(fontSize: 15),
                   ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: onMessageSender,
+                      icon: const Icon(Icons.chat_bubble_outline),
+                      label: const Text('Message sender'),
+                    ),
+                  ),
                   const SizedBox(height: 14),
                   SosReceiptSummary(message: message),
                   const SizedBox(height: 14),
@@ -185,15 +194,6 @@ class SosDetailSheet extends StatelessWidget {
                         : message.recipient != null
                         ? 'Targeted • Plaintext (legacy)'
                         : 'Broadcast • Plaintext',
-                  ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: onMessageSender,
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text('Message sender'),
-                    ),
                   ),
                 ],
               ),

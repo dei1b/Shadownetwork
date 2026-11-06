@@ -6,9 +6,12 @@ import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/trust/presentation/pages/trust_bundle_import_page.dart';
 import '../features/validation/presentation/pages/validation_session_page.dart';
 import 'presentation/pages/app_shell_page.dart';
+import 'presentation/pages/startup_splash_page.dart';
 
 class DisasterCommApp extends StatelessWidget {
-  const DisasterCommApp({super.key});
+  const DisasterCommApp({super.key, this.initialization});
+
+  final Future<void>? initialization;
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +20,9 @@ class DisasterCommApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: const AppShellPage(),
+      builder: (context, child) => initialization == null
+          ? child!
+          : StartupGate(initialization: initialization!, child: child!),
       routes: {
         '/login': (context) => const LoginPage(),
         '/signup': (context) => const SignUpPage(),
