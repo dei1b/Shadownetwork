@@ -67,7 +67,8 @@ class SqliteChatRepository implements ChatRepository {
     final rows = await _database.rawQuery(
       '''
       SELECT conversations.*,
-        peers.display_name AS remote_display_name,
+        COALESCE(NULLIF(TRIM(registered.owner_name), ''), peers.display_name)
+          AS remote_display_name,
         peers.peer_type_code AS remote_peer_type,
         peers.is_connected AS remote_is_connected,
         peers.signal_strength AS remote_signal_strength,
@@ -81,6 +82,9 @@ class SqliteChatRepository implements ChatRepository {
       FROM ${LocalMessagingDatabase.conversationsTable} AS conversations
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = conversations.remote_peer_id
+      LEFT JOIN ${LocalMessagingDatabase.trustedDevicesTable} AS registered
+        ON lower(registered.device_id) = lower(peers.id)
+        AND registered.status = 'approved'
       LEFT JOIN ${LocalMessagingDatabase.chatMessagesTable} AS latest
         ON latest.id = (
           SELECT messages.id FROM ${LocalMessagingDatabase.chatMessagesTable} AS messages

@@ -15,6 +15,11 @@ migrate_working_dir/
 # Installed JavaScript dependencies.
 node_modules/
 
+# Private Android signing material.
+/android/key.properties
+*.jks
+*.keystore
+
 # IntelliJ related
 *.iml
 *.ipr

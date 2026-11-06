@@ -41,6 +41,7 @@ import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../trust/data/services/trust_bundle_store.dart';
 import '../../../trust/data/repositories/sqlite_trust_repository.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
+import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
 import '../../../validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
@@ -161,7 +162,30 @@ final mapTileCacheStoreProvider = FutureProvider<CacheStore>((ref) async {
 final nearbyPeersProvider = FutureProvider<List<Peer>>((ref) async {
   final repository = await ref.watch(peerRepositoryProvider.future);
   final localPeer = await ref.watch(localPeerProvider.future);
-  return repository.getNearbyPeers(excludingPeerId: localPeer.id);
+  final peers = await repository.getNearbyPeers(excludingPeerId: localPeer.id);
+  final trustRepository = await ref.watch(trustRepositoryProvider.future);
+  final registrations = {
+    for (final device in await trustRepository.getDevices())
+      if (device.status == DeviceTrustStatus.approved)
+        device.deviceId.toLowerCase(): device,
+  };
+  return peers
+      .map((peer) {
+        final registration = registrations[peer.id.toLowerCase()];
+        if (registration == null || registration.ownerName.trim().isEmpty) {
+          return peer;
+        }
+        return peer.copyWith(
+          name: registration.ownerName,
+          type: switch (registration.role.toLowerCase()) {
+            'responder' || 'rescuer' => PeerType.responder,
+            'admin' => PeerType.authority,
+            'relay' => PeerType.relay,
+            _ => PeerType.civilian,
+          },
+        );
+      })
+      .toList(growable: false);
 });
 
 final sosMessagesProvider = FutureProvider<List<SosMessage>>((ref) async {

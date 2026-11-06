@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -5,6 +7,24 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
 }
+
+val releaseKeys = Properties().apply {
+    val propertiesFile = rootProject.file("key.properties")
+    if (propertiesFile.exists()) {
+        propertiesFile.inputStream().use { load(it) }
+    }
+}
+val releaseStoreFile = System.getenv("SHADOW_ANDROID_KEYSTORE_PATH")
+    ?: releaseKeys.getProperty("storeFile")
+val releaseStorePassword = System.getenv("SHADOW_ANDROID_KEYSTORE_PASSWORD")
+    ?: releaseKeys.getProperty("storePassword")
+val releaseKeyAlias = System.getenv("SHADOW_ANDROID_KEY_ALIAS")
+    ?: releaseKeys.getProperty("keyAlias")
+val releaseKeyPassword = System.getenv("SHADOW_ANDROID_KEY_PASSWORD")
+    ?: releaseKeys.getProperty("keyPassword")
+val hasReleaseSigning = listOf(
+    releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword,
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.example.shadownetwork"
@@ -31,11 +51,23 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = releaseStoreFile?.let { rootProject.file(it) }
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
+        }
+    }
+
     buildTypes {
+        debug {
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

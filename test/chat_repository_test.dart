@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_chat_repository.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
@@ -6,6 +7,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/message_moderat
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
+import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -77,5 +79,46 @@ void main() {
 
     await repository.markConversationRead(conversation.id);
     expect((await repository.getConversations(local.id)).single.unreadCount, 0);
+
+    await database.insert(LocalMessagingDatabase.trustedDevicesTable, {
+      'device_id': remote.id,
+      'owner_name': 'Registered Rescuer',
+      'role': 'responder',
+      'status': 'approved',
+      'key_version': 1,
+      'bundle_version': 1,
+      'bundle_hash': 'test-bundle',
+      'admin_updated_at': DateTime.utc(2026, 11, 6).toIso8601String(),
+      'imported_at': DateTime.utc(2026, 11, 6).toIso8601String(),
+    });
+    expect(
+      (await repository.getConversations(local.id)).single.remotePeer.name,
+      'Registered Rescuer',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        localMessagingDatabaseProvider.overrideWith((ref) async => database),
+        localPeerProvider.overrideWith((ref) async => local),
+      ],
+    );
+    addTearDown(container.dispose);
+    final nearby = await container.read(nearbyPeersProvider.future);
+    expect(nearby.single.name, 'Registered Rescuer');
+    expect(nearby.single.type, PeerType.responder);
+    await database.update(
+      LocalMessagingDatabase.trustedDevicesTable,
+      {'status': 'revoked'},
+      where: 'device_id = ?',
+      whereArgs: [remote.id],
+    );
+    container.invalidate(nearbyPeersProvider);
+    expect(
+      (await container.read(nearbyPeersProvider.future)).single.name,
+      remote.name,
+    );
+    expect(
+      (await repository.getConversations(local.id)).single.remotePeer.name,
+      remote.name,
+    );
   });
 }
