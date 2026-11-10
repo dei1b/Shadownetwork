@@ -19,6 +19,8 @@ const _mobileRed = Color(0xFFB52B32);
 const _mobileRedDark = Color(0xFF861A1A);
 const _mobileMuted = Color(0xFF666666);
 const _mobileField = Color(0xFFE1E1E1);
+// Version 40, byte mode, medium error correction.
+const _maxTrustQrBytes = 2331;
 
 class BrowserAdminDashboardPage extends StatefulWidget {
   const BrowserAdminDashboardPage({
@@ -518,8 +520,14 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
 
   Future<void> _showTrustBundleQr() async {
     late final String bundle;
+    late final TrustBundle parsed;
+    late final String qrData;
     try {
       bundle = await _registryStore.buildTrustBundleJson(_devices);
+      final json = jsonDecode(bundle) as Map<String, Object?>;
+      parsed = TrustBundle.fromJson(json);
+      // Whitespace is outside the canonical data covered by the signature.
+      qrData = jsonEncode(json);
     } on FormatException catch (error) {
       _showSnackBar(error.message, kind: FeedbackKind.error);
       return;
@@ -533,68 +541,97 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
       );
       return;
     }
-    final parsed = TrustBundle.fromJsonString(bundle);
     if (!mounted) {
       return;
     }
+    // The QR painter throws for oversized input even if validation picked v40.
+    final qr = utf8.encode(qrData).length <= _maxTrustQrBytes
+        ? QrCode.fromData(
+            data: qrData,
+            errorCorrectLevel: QrErrorCorrectLevel.M,
+          )
+        : null;
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text('Scan Signed Trust Bundle v${parsed.bundleVersion}'),
-          content: SizedBox(
-            width: 340,
+        final actions = [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: bundle));
+              if (context.mounted) {
+                Navigator.of(context).pop();
+              }
+              _showSnackBar('Offline trust bundle copied to clipboard.');
+            },
+            icon: const Icon(Icons.content_copy_rounded),
+            label: const Text('Copy JSON'),
+          ),
+        ];
+        if (qr == null) {
+          return AlertDialog(
+            title: Text('Share approval v${parsed.bundleVersion}'),
+            content: const Text(
+              'This approval update is too large for one QR. Copy the JSON, '
+              'transfer the text to the phone, then paste it on the approval screen.',
+            ),
+            actions: actions,
+          );
+        }
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          constraints: const BoxConstraints(maxWidth: 840),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
             child: Column(
-              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text(
-                  'Open Trust Bundle on the phone and scan this QR.',
+                Text(
+                  'Scan approval QR · v${parsed.bundleVersion}',
+                  style: Theme.of(context).textTheme.titleLarge,
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 18),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  color: Colors.white,
-                  child: QrImageView(
-                    data: bundle,
-                    version: QrVersions.auto,
-                    size: 280,
-                    backgroundColor: Colors.white,
-                    errorCorrectionLevel: QrErrorCorrectLevel.M,
-                    errorStateBuilder: (context, error) {
-                      return const SizedBox(
-                        width: 280,
-                        height: 280,
-                        child: Center(
-                          child: Text(
-                            'Bundle is too large for one QR. Use Copy JSON instead.',
-                            textAlign: TextAlign.center,
-                          ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Open the approval scanner on the phone and fit the whole code in view.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Four white modules on each side. The painter uses
+                      // half-pixel steps, so size the grid on those steps too.
+                      final modules = qr.moduleCount + 8;
+                      final tile =
+                          (constraints.biggest.shortestSide * 2 / modules)
+                              .floorToDouble() /
+                          2;
+                      if (tile == 0) return const SizedBox.shrink();
+                      return Center(
+                        child: QrImageView.withQr(
+                          qr: qr,
+                          size: modules * tile,
+                          padding: EdgeInsets.all(4 * tile),
+                          backgroundColor: Colors.white,
+                          semanticsLabel: 'Phone approval QR code',
                         ),
                       );
                     },
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  children: actions,
+                ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-            FilledButton.icon(
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: bundle));
-                if (context.mounted) {
-                  Navigator.of(context).pop();
-                }
-                _showSnackBar('Offline trust bundle copied to clipboard.');
-              },
-              icon: const Icon(Icons.content_copy_rounded),
-              label: const Text('Copy JSON'),
-            ),
-          ],
         );
       },
     );

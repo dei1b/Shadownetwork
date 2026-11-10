@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shadownetwork/features/admin/data/desktop_admin_registry_repository.dart';
 import 'package:shadownetwork/features/admin/domain/entities/registered_device.dart';
 import 'package:shadownetwork/features/admin/presentation/pages/desktop_admin_shell.dart';
@@ -14,6 +15,9 @@ import 'package:shadownetwork/features/admin/presentation/providers/admin_recove
 import 'package:shadownetwork/features/admin/presentation/theme/admin_theme.dart';
 import 'package:shadownetwork/features/admin_validation/domain/validation_import.dart';
 import 'package:shadownetwork/features/admin_validation/presentation/providers/validation_import_provider.dart';
+import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
+
+import 'support/signed_trust_bundle_fixture.dart';
 
 // These fixtures never touch the real Windows registry or signing identity.
 class _Registry implements DesktopAdminRegistryRepository {
@@ -111,6 +115,16 @@ class _Imports implements ValidationImportRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _QrRegistry extends _Registry {
+  _QrRegistry(this.bundle) : super(empty: true);
+
+  final String bundle;
+
+  @override
+  Future<String> buildTrustBundleJson(List<RegisteredDevice> devices) async =>
+      bundle;
+}
+
 void main() {
   Future<void> mount(
     WidgetTester tester,
@@ -118,6 +132,7 @@ void main() {
     double scale = 1,
     bool identity = true,
     bool empty = false,
+    DesktopAdminRegistryRepository? registry,
   }) async {
     await tester.binding.setSurfaceSize(size);
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -125,7 +140,8 @@ void main() {
       ProviderScope(
         overrides: [
           desktopAdminRegistryProvider.overrideWith(
-            (ref) async => _Registry(hasIdentity: identity, empty: empty),
+            (ref) async =>
+                registry ?? _Registry(hasIdentity: identity, empty: empty),
           ),
           validationImportRepositoryProvider.overrideWithValue(_Imports()),
         ],
@@ -145,6 +161,91 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+  }
+
+  for (final count in [3, 12]) {
+    testWidgets('publishes an approval QR for a $count-device bundle', (
+      tester,
+    ) async {
+      final bundle = (await tester.runAsync(() async {
+        final signer = await TestTrustBundleSigner.create();
+        return signer.sign(
+          bundleVersion: 7,
+          issuedAt: DateTime.utc(2026, 11, 10),
+          approvedDevices: [
+            for (var index = 0; index < count; index++)
+              TrustedDevice(
+                deviceId:
+                    '01a11062-f847-7203-9ad6-f420a162e${index.toString().padLeft(3, '0')}',
+                ownerName: 'María Santos $index',
+                role: 'civilian',
+                status: 'approved',
+                updatedAt: DateTime.utc(2026, 11, 10),
+                publicKey: base64UrlEncode(List.filled(32, index + 1)),
+                signingPublicKey: base64UrlEncode(List.filled(32, index + 32)),
+              ),
+          ],
+        );
+      }))!;
+      String? clipboard;
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          clipboard = (call.arguments as Map)['text'] as String;
+        }
+        return null;
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+
+      await mount(tester, const Size(1280, 720), registry: _QrRegistry(bundle));
+      final showQr = find.text('Show QR for Phone Scan');
+      await tester.ensureVisible(showQr);
+      await tester.pumpAndSettle();
+      await tester.tap(showQr);
+      await tester.pumpAndSettle();
+      final qr = find.byType(QrImageView);
+      if (count == 3) {
+        final painterFinder = find.descendant(
+          of: qr,
+          matching: find.byWidgetPredicate(
+            (widget) => widget is CustomPaint && widget.painter is QrPainter,
+          ),
+        );
+        final painter =
+            tester.widget<CustomPaint>(painterFinder).painter! as QrPainter;
+        final compact = QrCode.fromData(
+          data: jsonEncode(jsonDecode(bundle)),
+          errorCorrectLevel: QrErrorCorrectLevel.M,
+        );
+        final pretty = QrCode.fromData(
+          data: bundle,
+          errorCorrectLevel: QrErrorCorrectLevel.M,
+        );
+        expect(painter.version, compact.typeNumber);
+        expect(painter.version, lessThan(pretty.typeNumber));
+        final desktopWidth = tester.getSize(qr).width;
+        expect(desktopWidth, greaterThan(420));
+        final tileWidth =
+            tester.getSize(painterFinder).width / compact.moduleCount;
+        expect(
+          tester.widget<QrImageView>(qr).padding.left,
+          closeTo(4 * tileWidth, 0.01),
+        );
+
+        await tester.binding.setSurfaceSize(const Size(480, 480));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(tester.getSize(qr).width, lessThan(desktopWidth));
+      } else {
+        expect(qr, findsNothing);
+        expect(find.textContaining('too large for one QR'), findsOneWidget);
+      }
+      await tester.tap(find.text('Copy JSON'));
+      await tester.pumpAndSettle();
+      expect(clipboard, bundle);
+    });
   }
 
   for (final failRestore in [false, true]) {
