@@ -221,6 +221,7 @@ class AndroidScfTransport implements ScfTransport {
       type: _peerTypeFromName(map['type'] as String?),
       isConnected: map['isConnected'] as bool? ?? false,
       signalStrength: map['signalStrength'] as int?,
+      lastSeenAt: _timestamp(map['lastSeenAt']),
       transport: map['transport'] as String?,
     );
   }

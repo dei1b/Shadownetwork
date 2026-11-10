@@ -59,8 +59,9 @@ class RelayPayloadCodec {
             payload['schema_version'] ==
                 SecureSosMessagePayload.signedSchemaVersion) ||
         (payload['payload_type'] == ChatMessagePayload.payloadType &&
-            payload['schema_version'] ==
-                SecureChatMessagePayload.signedSchemaVersion);
+            SecureChatMessagePayload.isSignedVersion(
+              payload['schema_version'],
+            ));
     if (!signed) return null;
     final seconds = (payload['routing'] as Map)['ttl'];
     final created = createdAt(payloadJson);

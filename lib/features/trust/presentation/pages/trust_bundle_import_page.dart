@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../messaging/domain/entities/peer.dart';
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
+import '../../../messaging/presentation/providers/peer_location_providers.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../data/services/trust_bundle_store.dart';
@@ -243,6 +244,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       if (!mounted) {
         return;
       }
+      ref.invalidate(sharedPeerLocationsProvider);
       setState(() => _bundle = null);
       ref.invalidate(deviceAccessProfileProvider);
       _showSnackBar('Approval update removed from this phone.');

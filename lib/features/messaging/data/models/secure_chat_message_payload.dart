@@ -12,6 +12,7 @@ import '../../../security/domain/entities/encrypted_message_body.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
+import '../../domain/entities/peer_location_share.dart';
 import '../../domain/entities/peer_type.dart';
 import 'chat_message_payload.dart';
 import 'prepared_relay_payload.dart';
@@ -21,8 +22,11 @@ class SecureChatMessagePayload {
 
   static const schemaVersion = 2;
   static const signedSchemaVersion = 3;
+  static bool isSignedVersion(Object? value) =>
+      value == signedSchemaVersion || value == PeerLocationShare.schemaVersion;
+
   static bool supportsVersion(Object? value) =>
-      value == schemaVersion || value == signedSchemaVersion;
+      value == schemaVersion || isSignedVersion(value);
 
   static Future<PreparedRelayPayload> prepare(
     ChatMessage message, {
@@ -35,7 +39,12 @@ class SecureChatMessagePayload {
       throw MissingRecipientPublicKeyException(message.recipient.id);
     }
     final basePayload = _basePayload(message, hopCount: message.hopCount);
-    if (signingIdentity != null) {
+    if (message.conversationId == PeerLocationShare.conversationId) {
+      if (signingIdentity == null) {
+        throw const FormatException('Location shares must be signed.');
+      }
+      basePayload['schema_version'] = PeerLocationShare.schemaVersion;
+    } else if (signingIdentity != null) {
       basePayload['schema_version'] = signedSchemaVersion;
     }
     final encryptedBody = await encryptionService.encrypt(
@@ -66,7 +75,9 @@ class SecureChatMessagePayload {
     required DeviceCryptoIdentity localIdentity,
   }) async {
     if (payload['payload_type'] != ChatMessagePayload.payloadType ||
-        !supportsVersion(payload['schema_version'])) {
+        !supportsVersion(payload['schema_version']) ||
+        (payload['schema_version'] == PeerLocationShare.schemaVersion) !=
+            (payload['conversation_id'] == PeerLocationShare.conversationId)) {
       throw const FormatException('Unsupported secure chat payload.');
     }
     final hash = payload['message_hash'] as String?;
@@ -157,13 +168,13 @@ class SecureChatMessagePayload {
       'sender': payload['sender'],
       'recipient': payload['recipient'],
     };
-    return payload['schema_version'] == signedSchemaVersion
+    return isSignedVersion(payload['schema_version'])
         ? canonicalJsonEncode(data)
         : jsonEncode(data);
   }
 
   static String _hashMap(Map<String, Object?> payload) {
-    if (payload['schema_version'] == signedSchemaVersion) {
+    if (isSignedVersion(payload['schema_version'])) {
       final normalized = Map<String, Object?>.from(payload)
         ..remove('message_hash');
       normalized['routing'] = {

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:cryptography/cryptography.dart';
 
+import '../../../messaging/domain/entities/peer_location_share.dart';
 import '../../../trust/domain/entities/device_trust_record.dart';
 import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
@@ -15,7 +16,8 @@ class MessageAuthenticationService {
       (payload['payload_type'] == 'sos_message' &&
           payload['schema_version'] == 5) ||
       (payload['payload_type'] == 'chat_message' &&
-          payload['schema_version'] == 3);
+          (payload['schema_version'] == 3 ||
+              payload['schema_version'] == PeerLocationShare.schemaVersion));
 
   static String signingData(Map<String, Object?> payload) {
     final normalized = Map<String, Object?>.from(payload)

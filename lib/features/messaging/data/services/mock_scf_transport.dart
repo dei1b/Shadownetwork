@@ -179,7 +179,14 @@ class MockScfTransportEndpoint implements ScfTransport {
 
   @override
   Future<List<Peer>> discoverPeers() async {
-    return _network.discoverPeers(localPeerId);
+    final now = DateTime.now();
+    return _network
+        .discoverPeers(localPeerId)
+        .map(
+          (peer) =>
+              peer.lastSeenAt == null ? peer.copyWith(lastSeenAt: now) : peer,
+        )
+        .toList(growable: false);
   }
 
   @override

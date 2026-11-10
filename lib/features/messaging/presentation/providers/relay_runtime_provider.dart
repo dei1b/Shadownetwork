@@ -16,6 +16,7 @@ import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/message_moderation_status.dart';
 import '../../domain/entities/message_status.dart';
 import '../../domain/entities/peer.dart';
+import '../../domain/entities/peer_location_share.dart';
 import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/scf_envelope.dart';
 import '../../domain/entities/sos_message.dart';
@@ -31,6 +32,8 @@ import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../validation/domain/entities/validation_event.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
 import 'local_messaging_providers.dart';
+import 'nearby_peer_sightings_provider.dart';
+import 'peer_location_providers.dart';
 
 class RelayRuntimeState {
   const RelayRuntimeState({
@@ -193,6 +196,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     _ecbDebounceTimer = null;
     _relayEventSubscription?.cancel();
     _relayEventSubscription = null;
+    ref.read(nearbyPeerSightingsProvider.notifier).replace(const []);
     state = state.copyWith(
       isRunning: false,
       isSyncing: false,
@@ -331,6 +335,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         rethrow;
       }
       if (epoch != _epoch) return;
+      ref.read(nearbyPeerSightingsProvider.notifier).replace(discoveredPeers);
       await _persistPeerSnapshot(peerRepository, discoveredPeers, now);
 
       final receivedCount = await receiveIncoming();
@@ -426,7 +431,6 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         peer.copyWith(
           isConnected: peer.isConnected,
           type: peer.type == PeerType.unknown ? PeerType.relay : peer.type,
-          lastSeenAt: timestamp,
         ),
       );
     }
@@ -471,6 +475,33 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
                 )
               : ChatMessagePayload.fromPayload(payload);
           if (chat.recipient.id != localPeer.id) {
+            continue;
+          }
+          if (chat.conversationId == PeerLocationShare.conversationId) {
+            if (payload['schema_version'] != PeerLocationShare.schemaVersion ||
+                senderTrust.status != DeviceTrustStatus.approved ||
+                chat.sender.id.toLowerCase() == localPeer.id.toLowerCase() ||
+                (await trustRepository.getDevice(localPeer.id)).status !=
+                    DeviceTrustStatus.approved) {
+              await scfService.consumeDeliveredPayload(envelope.messageHash);
+              continue;
+            }
+            final approval = await trustRepository.getMetadata();
+            if (approval == null || !approval.signatureVerified) {
+              await scfService.consumeDeliveredPayload(envelope.messageHash);
+              continue;
+            }
+            final share = PeerLocationShare.fromChat(
+              chat,
+              ownerName: senderTrust.ownerName,
+              now: DateTime.now().toUtc(),
+              expiresAt: approval.expiresAt.isBefore(envelope.expiresAt)
+                  ? approval.expiresAt
+                  : envelope.expiresAt,
+            );
+            ref.read(sharedPeerLocationsProvider.notifier).record(share);
+            await scfService.consumeDeliveredPayload(envelope.messageHash);
+            storedCount++;
             continue;
           }
           final conversation = await chatRepository.openConversation(

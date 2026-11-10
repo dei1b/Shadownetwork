@@ -8,6 +8,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/message_status.
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
+import 'package:shadownetwork/features/messaging/presentation/providers/nearby_peer_sightings_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -117,6 +118,10 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
+    expect(await container.read(nearbyPeersProvider.future), isEmpty);
+    container.read(nearbyPeerSightingsProvider.notifier).replace([
+      remote.copyWith(lastSeenAt: DateTime.now()),
+    ]);
     final nearby = await container.read(nearbyPeersProvider.future);
     expect(nearby.single.name, 'Registered Rescuer');
     expect(nearby.single.type, PeerType.responder);

@@ -104,6 +104,8 @@ internal class AndroidTransportBridge(private val context: Context) {
     private val resolvedBlePeerIds = ConcurrentHashMap<String, String>()
     private var wifiReceiver: BroadcastReceiver? = null
     private var wifiServiceRequest: WifiP2pDnsSdServiceRequest? = null
+    private var wifiServiceRequestReady = false
+    private var lastWifiDiscoveryRequestAt: Long? = null
     private var bluetoothServerSocket: BluetoothServerSocket? = null
     private var bluetoothAcceptThread: Thread? = null
     private var wifiServerSocket: ServerSocket? = null
@@ -145,7 +147,10 @@ internal class AndroidTransportBridge(private val context: Context) {
                 stop()
                 result.success(true)
             }
-            "discoverPeers" -> result.success(currentPeers())
+            "discoverPeers" -> {
+                refreshWifiDiscoveryIfDue()
+                result.success(currentPeers())
+            }
             "connectPeer" -> {
                 val peerId = call.argument<String>("peerId")
                 if (peerId.isNullOrBlank()) {
@@ -244,7 +249,7 @@ internal class AndroidTransportBridge(private val context: Context) {
         bluetoothConnections.clear()
         wifiConnections.clear()
         synchronized(discoveredPeers) {
-            discoveredPeers.replaceAll { _, peer -> peer.copy(isConnected = false) }
+            discoveredPeers.clear()
         }
     }
 
@@ -258,10 +263,20 @@ internal class AndroidTransportBridge(private val context: Context) {
     }
 
     private fun currentPeers(): List<Map<String, Any?>> {
+        if (!running.get()) return emptyList()
+        val now = SystemClock.elapsedRealtime()
         return synchronized(discoveredPeers) {
             discoveredPeers.values
-                .filter { it.isVerifiedAppPeer && it.id != localPeerId }
-                .map(DiscoveredPeer::toPlatformMap)
+                .filter {
+                    it.isVerifiedAppPeer && it.id != localPeerId &&
+                        it.lastSeenElapsed?.let { seen -> now - seen < PEER_SIGHTING_MS } == true
+                }
+                .map { peer ->
+                    val signalIsRecent = peer.lastSignalElapsed?.let {
+                        now - it < PEER_SIGHTING_MS
+                    } == true
+                    (if (signalIsRecent) peer else peer.copy(signalStrength = null)).toPlatformMap()
+                }
         }
     }
 
@@ -424,6 +439,7 @@ internal class AndroidTransportBridge(private val context: Context) {
                                     bluetoothAddress = address,
                                     signalStrength = signalStrength,
                                 ),
+                                signalObserved = true,
                             )
                         }
                         return
@@ -589,7 +605,7 @@ internal class AndroidTransportBridge(private val context: Context) {
                     ),
                     markConnected = false,
                 )
-                rememberResolvedBlePeer(address, peer)
+                rememberResolvedBlePeer(address, peer, signalObserved = true)
             } catch (_: Throwable) {
                 // A later scan result retries transient identity failures.
             } finally {
@@ -598,12 +614,12 @@ internal class AndroidTransportBridge(private val context: Context) {
         }.start()
     }
 
-    private fun rememberResolvedBlePeer(address: String, peer: DiscoveredPeer) {
+    private fun rememberResolvedBlePeer(address: String, peer: DiscoveredPeer, signalObserved: Boolean = false) {
         resolvedBlePeerIds[address] = peer.id
         synchronized(discoveredPeers) {
             discoveredPeers.remove("ble:$address")
         }
-        rememberPeer(peer)
+        rememberPeer(peer, signalObserved)
     }
 
     private fun receiveBleChunk(address: String, value: ByteArray): Boolean {
@@ -714,6 +730,8 @@ internal class AndroidTransportBridge(private val context: Context) {
             })
         }
         wifiServiceRequest = null
+        wifiServiceRequestReady = false
+        lastWifiDiscoveryRequestAt = null
 
         wifiReceiver?.let {
             runCatching { context.unregisterReceiver(it) }
@@ -819,7 +837,9 @@ internal class AndroidTransportBridge(private val context: Context) {
             override fun onSuccess() {
                 manager.addServiceRequest(channel, request, object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
-                        manager.discoverServices(channel, emptyActionListener())
+                        if (wifiServiceRequest !== request) return
+                        wifiServiceRequestReady = true
+                        refreshWifiDiscoveryIfDue()
                     }
 
                     override fun onFailure(reason: Int) = Unit
@@ -828,6 +848,19 @@ internal class AndroidTransportBridge(private val context: Context) {
 
             override fun onFailure(reason: Int) = Unit
         })
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun refreshWifiDiscoveryIfDue() {
+        val manager = wifiP2pManager ?: return
+        val channel = wifiChannel ?: return
+        if (!running.get() || !wifiServiceRequestReady ||
+            synchronized(wifiLock) { wifiGroupFormed || pendingWifiPeerId != null }
+        ) return
+        val now = SystemClock.elapsedRealtime()
+        if (lastWifiDiscoveryRequestAt?.let { now - it < WIFI_DISCOVERY_REFRESH_MS } == true) return
+        lastWifiDiscoveryRequestAt = now
+        runCatching { manager.discoverServices(channel, emptyActionListener()) }
     }
 
     private fun emptyActionListener(): WifiP2pManager.ActionListener {
@@ -861,7 +894,9 @@ internal class AndroidTransportBridge(private val context: Context) {
         )
     }
 
-    private fun rememberPeer(peer: DiscoveredPeer) {
+    private fun rememberPeer(peer: DiscoveredPeer, signalObserved: Boolean = false) {
+        if (!running.get()) return
+        val now = SystemClock.elapsedRealtime()
         var shouldNotify = false
         synchronized(discoveredPeers) {
             val existing = discoveredPeers[peer.id]
@@ -872,13 +907,19 @@ internal class AndroidTransportBridge(private val context: Context) {
                 existing.merge(peer).also { mergedPeer ->
                     shouldNotify = mergedPeer.isVerifiedAppPeer &&
                         mergedPeer.id != localPeerId &&
-                        (mergedPeer.transport != existing.transport ||
+                        (existing.lastSeenElapsed?.let { now - it >= PEER_SIGHTING_MS } != false ||
+                            mergedPeer.transport != existing.transport ||
                             mergedPeer.isConnected != existing.isConnected ||
                             mergedPeer.deviceAddress != existing.deviceAddress ||
                             mergedPeer.bluetoothAddress != existing.bluetoothAddress)
                 }
             }
-            discoveredPeers[peer.id] = merged
+            discoveredPeers[peer.id] = merged.copy(
+                lastSeenAt = System.currentTimeMillis(),
+                lastSeenElapsed = now,
+                signalStrength = if (signalObserved) peer.signalStrength else existing?.signalStrength,
+                lastSignalElapsed = if (signalObserved) now else existing?.lastSignalElapsed,
+            )
         }
         if (shouldNotify) {
             notifyRelayEvent("peer_available")
@@ -1210,7 +1251,7 @@ internal class AndroidTransportBridge(private val context: Context) {
                     throw it
                 }
                 readBleIdentity(peer.copy(transport = TransportKind.BLUETOOTH), markConnected = true)
-            }.also(::rememberPeer)
+            }.also { rememberPeer(it) }
         }
 
         val connected = readBleIdentity(peer, markConnected = true)
@@ -1839,6 +1880,9 @@ internal class AndroidTransportBridge(private val context: Context) {
         val isConnected: Boolean = false,
         val signalStrength: Int? = null,
         val isVerifiedAppPeer: Boolean = false,
+        val lastSeenAt: Long? = null,
+        val lastSeenElapsed: Long? = null,
+        val lastSignalElapsed: Long? = null,
     ) {
         fun merge(other: DiscoveredPeer): DiscoveredPeer {
             val preferredTransport = when {
@@ -1853,7 +1897,6 @@ internal class AndroidTransportBridge(private val context: Context) {
                 deviceAddress = other.deviceAddress ?: deviceAddress,
                 bluetoothAddress = other.bluetoothAddress ?: bluetoothAddress,
                 isConnected = other.isConnected || isConnected,
-                signalStrength = other.signalStrength ?: signalStrength,
                 isVerifiedAppPeer = isVerifiedAppPeer || other.isVerifiedAppPeer,
             )
         }
@@ -1865,6 +1908,7 @@ internal class AndroidTransportBridge(private val context: Context) {
                 "type" to peerType,
                 "isConnected" to isConnected,
                 "signalStrength" to signalStrength,
+                "lastSeenAt" to lastSeenAt,
                 "transport" to transport,
                 "deviceAddress" to deviceAddress,
                 "bluetoothAddress" to bluetoothAddress,
@@ -1913,6 +1957,8 @@ internal class AndroidTransportBridge(private val context: Context) {
         private const val APP_ID = "shadownetwork"
         private const val PROTOCOL_VERSION = 2
         private const val ACK_TIMEOUT_MS = 10_000L
+        private const val PEER_SIGHTING_MS = 90_000L
+        private const val WIFI_DISCOVERY_REFRESH_MS = 45_000L
         private const val WIFI_SERVICE_INSTANCE = "ShadowNetwork"
         private const val WIFI_SERVICE_TYPE = "_shadownetwork._tcp"
         private const val DEFAULT_LOCAL_PEER_ID = "local-device"

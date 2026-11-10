@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:shadownetwork/core/constants/app_typography.dart';
+import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
@@ -22,12 +23,14 @@ import '../../domain/entities/category.dart' as messaging;
 import '../../domain/entities/message_moderation_status.dart' as messaging;
 import '../../domain/entities/message_status.dart' as messaging;
 import '../../domain/entities/peer.dart' as messaging;
+import '../../domain/entities/peer_location_share.dart';
 import '../../domain/entities/peer_type.dart' as messaging;
 import '../../domain/entities/sos_message.dart' as messaging;
 import '../../domain/entities/conversation.dart' as messaging;
 import '../../data/services/offline_panabo_tile_server.dart';
 import 'conversation_page.dart';
 import '../providers/local_messaging_providers.dart';
+import '../providers/peer_location_providers.dart';
 import '../providers/relay_runtime_provider.dart';
 import '../utils/message_feed_filter.dart';
 import '../widgets/sos_category_picker.dart';
@@ -58,6 +61,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _showMapLocation = true;
   bool _isCheckingAppUpdate = false;
   bool _isSyncingRelay = false;
+  bool _isSharingLocation = false;
   bool _sosComposerOpen = false;
 
   bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
@@ -96,6 +100,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   final OfflinePanaboTileServer _offlineTileServer = OfflinePanaboTileServer();
   ml.MapLibreMapController? _homeMapController;
   ml.MapLibreMapController? _fullMapController;
+  int _activityGeneration = 0;
   ml.MapLibreMapController? get _mapController => switch (_selectedTab) {
     0 => _homeMapController,
     2 => _fullMapController,
@@ -129,6 +134,18 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
       setState(() => _offlineMapStyle = styleUri.toString());
     } catch (_) {}
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final generation = NativeActivityScope.generationOf(context);
+    if (_activityGeneration == generation) return;
+    // The Flutter engine survives activity recreation, but its old native map
+    // surfaces do not. Keep the tab and camera state and replace both views.
+    _activityGeneration = generation;
+    _homeMapController = null;
+    _fullMapController = null;
   }
 
   @override
@@ -215,12 +232,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         return null;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 12),
-        ),
-      );
+      final position = await _readCurrentPosition();
 
       final myPoint = LatLng(position.latitude, position.longitude);
       if (!mounted) {
@@ -247,6 +259,50 @@ class _HomePageState extends ConsumerState<HomePage> {
       if (mounted) {
         setState(() => _isLocating = false);
       }
+    }
+  }
+
+  Future<Position> _readCurrentPosition() => Geolocator.getCurrentPosition(
+    locationSettings: const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      timeLimit: Duration(seconds: 12),
+    ),
+  );
+
+  Future<void> _shareCurrentPosition() async {
+    if (_isSharingLocation) return;
+    if (!widget.accessProfile.isApproved) {
+      _showMessage('Get your phone approved before sharing its location.');
+      return;
+    }
+    setState(() => _isSharingLocation = true);
+    try {
+      if (!await _ensureLocationReady() || !mounted) return;
+      final position = await _readCurrentPosition();
+      if (!mounted) return;
+      final count = await ref.read(queuePeerLocationProvider)(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        capturedAt: position.timestamp,
+      );
+      if (!mounted) return;
+      if (count == 0) {
+        _showMessage(
+          'No approved phones were seen nearby. Scan again and retry.',
+        );
+        return;
+      }
+      _showMessage(
+        'Location queued for $count approved ${count == 1 ? 'phone' : 'phones'}. Delivery pending.',
+        kind: FeedbackKind.success,
+      );
+      unawaited(ref.read(relayRuntimeProvider.notifier).syncNow(force: true));
+    } on FormatException catch (error) {
+      _showMessage(error.message);
+    } catch (_) {
+      _showMessage('Could not queue your location. Try again.');
+    } finally {
+      if (mounted) setState(() => _isSharingLocation = false);
     }
   }
 
@@ -393,8 +449,12 @@ class _HomePageState extends ConsumerState<HomePage> {
         return;
       }
       final status = ref.read(relayRuntimeProvider);
+      if (status.lastError != null) {
+        _showMessage('Unable to check nearby phones. Try again.');
+        return;
+      }
       _showMessage(
-        'Check complete: ${status.connectedPeers} connected phone(s), '
+        'Check complete: ${status.discoveredPeers} phone(s) seen recently, '
         '${status.lastReceivedCount} received, ${status.lastRelayedCount} relayed.',
         kind: FeedbackKind.success,
       );
@@ -1154,6 +1214,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildPeersTabContent(AsyncValue<List<messaging.Peer>> peers) {
     final items = peers.valueOrNull ?? const <messaging.Peer>[];
+    final locations = ref.watch(sharedPeerLocationsProvider);
     final relay = ref.watch(relayRuntimeProvider);
     final discoveryStatus = switch (relay) {
       RelayRuntimeState(permissionsGranted: false) =>
@@ -1161,20 +1222,29 @@ class _HomePageState extends ConsumerState<HomePage> {
       RelayRuntimeState(lastUpdated: null) => 'Waiting for a nearby scan',
       RelayRuntimeState(isRunning: false) => 'Nearby discovery is paused',
       RelayRuntimeState(lastError: final String _) => 'Nearby scan unavailable',
-      RelayRuntimeState(discoveredPeers: 1) =>
-        '1 phone detected in the latest scan',
-      _ => '${relay.discoveredPeers} phones detected in the latest scan',
+      _ => switch (items.length) {
+        0 => 'No phones seen recently',
+        1 => '1 phone seen recently',
+        final count => '$count phones seen recently',
+      },
     };
     final filters = const [
       (label: 'All Peers', icon: Icons.groups_rounded),
       (label: 'Connected', icon: Icons.link_rounded),
       (label: 'Rescuers', icon: Icons.health_and_safety_outlined),
-      (label: 'Nearby', icon: Icons.location_on_outlined),
+      (label: 'On map', icon: Icons.location_on_outlined),
     ];
 
     final connectedCount = items.where((peer) => peer.isConnected).length;
     final rescuerCount = items.where(_isResponderPeer).length;
-    final filteredPeers = items.where(_peerMatchesSelectedFilter).toList();
+    final filteredPeers = items.where((peer) {
+      return switch (_selectedPeerFilter) {
+        1 => peer.isConnected,
+        2 => _isResponderPeer(peer),
+        3 => locations.containsKey(peer.id.toLowerCase()),
+        _ => true,
+      };
+    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1193,6 +1263,17 @@ class _HomePageState extends ConsumerState<HomePage> {
           listedCount: items.length,
           rescuerCount: rescuerCount,
         ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: _isSharingLocation ? null : _shareCurrentPosition,
+          icon: const Icon(Icons.location_on_outlined),
+          label: Text(
+            _isSharingLocation ? 'Getting location…' : 'Share my location',
+          ),
+        ),
+        const Text(
+          'Send one location pin to approved nearby phones for 15 minutes.',
+        ),
         const SizedBox(height: 18),
         _PeerFilterBar(
           filters: filters,
@@ -1200,9 +1281,13 @@ class _HomePageState extends ConsumerState<HomePage> {
           onSelected: (index) => setState(() => _selectedPeerFilter = index),
         ),
         const SizedBox(height: 12),
-        const _PeerScanningRow(),
+        _PeerScanningRow(
+          checking: relay.isSyncing,
+          lastCheckedAt: relay.lastUpdated,
+        ),
         const SizedBox(height: 12),
         peers.when(
+          skipLoadingOnReload: true,
           data: (_) {
             if (filteredPeers.isEmpty) {
               return _buildEmptyState(
@@ -1213,12 +1298,13 @@ class _HomePageState extends ConsumerState<HomePage> {
 
             return Column(
               children: filteredPeers
-                  .map(
-                    (peer) => Padding(
+                  .map((peer) {
+                    final location = locations[peer.id.toLowerCase()];
+                    return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: _PeerDirectoryCard(
                         peer: peer,
-                        distanceText: _distanceTextForPeer(peer),
+                        distanceText: _distanceTextForPeer(location),
                         signalLabel: _signalLabelForPeer(peer),
                         signalColor: _signalColorForPeer(peer),
                         avatarColor: _avatarColorForPeer(peer),
@@ -1226,9 +1312,12 @@ class _HomePageState extends ConsumerState<HomePage> {
                         actionLabel: _peerActionLabel(peer),
                         actionStyle: _peerActionStyle(peer),
                         onActionTap: () => _connectToPeer(peer),
+                        onShowLocation: location == null
+                            ? null
+                            : () => _focusSharedLocation(location),
                       ),
-                    ),
-                  )
+                    );
+                  })
                   .toList(growable: false),
             );
           },
@@ -1716,32 +1805,19 @@ class _HomePageState extends ConsumerState<HomePage> {
     return '${(distanceMeters / 1000).toStringAsFixed(1)} km away';
   }
 
-  bool _peerMatchesSelectedFilter(messaging.Peer peer) {
-    return switch (_selectedPeerFilter) {
-      1 => peer.isConnected,
-      2 => _isResponderPeer(peer),
-      3 => peer.latitude != null && peer.longitude != null,
-      _ => true,
-    };
-  }
-
   bool _isResponderPeer(messaging.Peer peer) {
     return peer.type == messaging.PeerType.responder ||
         peer.type == messaging.PeerType.authority;
   }
 
-  String _distanceTextForPeer(messaging.Peer peer) {
+  String? _distanceTextForPeer(PeerLocationShare? location) {
     final myPosition = _myPosition;
-    final latitude = peer.latitude;
-    final longitude = peer.longitude;
-    if (myPosition == null || latitude == null || longitude == null) {
-      return 'In range';
-    }
+    if (location == null || myPosition == null) return null;
 
     final distanceMeters = const Distance().as(
       LengthUnit.Meter,
       myPosition,
-      LatLng(latitude, longitude),
+      LatLng(location.latitude, location.longitude),
     );
 
     if (distanceMeters < 1000) {
@@ -1753,7 +1829,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String _signalLabelForPeer(messaging.Peer peer) {
     final signalStrength = peer.signalStrength;
-    if (signalStrength == null || signalStrength >= 65) {
+    if (signalStrength == null) return 'Signal unknown';
+    if (signalStrength >= 65) {
       return 'Strong Signal';
     }
     if (signalStrength >= 35) {
@@ -1764,10 +1841,10 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Color _signalColorForPeer(messaging.Peer peer) {
     final signalStrength = peer.signalStrength;
-    if (signalStrength == null || signalStrength >= 65) {
+    if (signalStrength != null && signalStrength >= 65) {
       return const Color(0xFF15A832);
     }
-    if (signalStrength >= 35) {
+    if (signalStrength != null && signalStrength >= 35) {
       return const Color(0xFFF28B16);
     }
     return const Color(0xFF7D7D7D);
@@ -2057,6 +2134,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     bool showMyLocation = true,
   }) {
     final isViewingPanaboArea = _isInsidePanabo(_currentCenter);
+    final activityGeneration = _activityGeneration;
 
     return SizedBox.expand(
       child: Stack(
@@ -2102,7 +2180,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       Positioned.fill(
                         child: ml.MapLibreMap(
                           key: ValueKey<String>(
-                            '${showLegend ? 'maplibre-full' : 'maplibre-card'}:$mapStyle',
+                            '${showLegend ? 'maplibre-full' : 'maplibre-card'}:$mapStyle:$activityGeneration',
                           ),
                           initialCameraPosition: ml.CameraPosition(
                             target: _toMapLibreLatLng(_currentCenter),
@@ -2124,6 +2202,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                           attributionButtonPosition:
                               ml.AttributionButtonPosition.bottomLeft,
                           onMapCreated: (controller) {
+                            if (!mounted ||
+                                activityGeneration != _activityGeneration) {
+                              return;
+                            }
                             // MapLibre otherwise suspends HTTP while Android is
                             // offline, including our bundled map's loopback URL.
                             // This enables local requests; it does not turn on
@@ -2134,15 +2216,15 @@ class _HomePageState extends ConsumerState<HomePage> {
                             } else {
                               _homeMapController = controller;
                             }
-                            if (mounted) {
-                              setState(() {});
-                            }
+                            setState(() {});
                           },
                           onCameraMove: (cameraPosition) {
                             final active = showLegend
                                 ? _selectedTab == 2
                                 : _selectedTab == 0;
-                            if (!mounted || !active) {
+                            if (!mounted ||
+                                activityGeneration != _activityGeneration ||
+                                !active) {
                               return;
                             }
                             setState(() {
@@ -2263,23 +2345,64 @@ class _HomePageState extends ConsumerState<HomePage> {
     AsyncValue<List<messaging.Peer>> peers, {
     required double markerSize,
   }) {
-    final items = peers.valueOrNull ?? const <messaging.Peer>[];
-
-    return items
-        .where((peer) => peer.latitude != null && peer.longitude != null)
+    final connected = {
+      for (final peer in peers.valueOrNull ?? const <messaging.Peer>[])
+        if (peer.isConnected) peer.id.toLowerCase(),
+    };
+    return ref
+        .watch(sharedPeerLocationsProvider)
+        .values
         .map(
-          (peer) => _MapOverlayMarker(
-            id: 'peer-${peer.id}',
-            point: LatLng(peer.latitude!, peer.longitude!),
+          (share) => _MapOverlayMarker(
+            id: 'peer-${share.peerId}',
+            point: LatLng(share.latitude, share.longitude),
             width: markerSize,
             height: markerSize,
-            child: GestureDetector(
-              onTap: () => _openConversation(peer),
-              child: _PeerMapMarker(isConnected: peer.isConnected),
+            child: Semantics(
+              label: '${share.ownerName}, shared location',
+              button: true,
+              child: GestureDetector(
+                key: ValueKey('shared-peer-location-${share.peerId}'),
+                onTap: () => _showSharedLocationDetails(share),
+                child: _PeerMapMarker(
+                  isConnected: connected.contains(share.peerId.toLowerCase()),
+                ),
+              ),
             ),
           ),
         )
         .toList(growable: false);
+  }
+
+  void _focusSharedLocation(PeerLocationShare share) {
+    if (!share.expiresAt.isAfter(DateTime.now())) return;
+    setState(() {
+      _showMapPeers = true;
+      _isFollowing = false;
+      _currentCenter = LatLng(share.latitude, share.longitude);
+      _currentZoom = _defaultZoom;
+    });
+    _selectTab(2);
+  }
+
+  void _showSharedLocationDetails(PeerLocationShare share) {
+    if (!share.expiresAt.isAfter(DateTime.now())) return;
+    final time = TimeOfDay.fromDateTime(
+      share.sharedAt.toLocal(),
+    ).format(context);
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(share.ownerName),
+        content: Text('Location shared at $time.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   bool _isInsidePanabo(LatLng point) {
@@ -2738,6 +2861,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildNearbyPhonesPreview(AsyncValue<List<messaging.Peer>> peers) {
     const previewLimit = 2;
+    final relay = ref.watch(relayRuntimeProvider);
     const previewText = TextStyle(
       fontFamily: AppTypography.fontFamily,
       fontSize: 14,
@@ -2752,17 +2876,22 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Wrap(
                   spacing: 8,
                   runSpacing: 4,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text(
+                    const Text(
                       'Nearby phones',
                       style: TextStyle(fontWeight: FontWeight.w600),
                     ),
-                    _ScanningBadge(),
+                    if (relay.isSyncing || relay.isRunning)
+                      const _ScanningBadge()
+                    else if (relay.lastUpdated == null)
+                      const Text('Starting…')
+                    else
+                      const Text('Paused'),
                   ],
                 ),
               ),
@@ -2783,6 +2912,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
           const SizedBox(height: 4),
           peers.when(
+            skipLoadingOnReload: true,
             data: (items) => items.isEmpty
                 ? const Text('No nearby phones found yet.')
                 : Column(
@@ -3301,10 +3431,19 @@ class _PeerFilterBar extends StatelessWidget {
 }
 
 class _PeerScanningRow extends StatelessWidget {
-  const _PeerScanningRow();
+  const _PeerScanningRow({required this.checking, this.lastCheckedAt});
+
+  final bool checking;
+  final DateTime? lastCheckedAt;
 
   @override
   Widget build(BuildContext context) {
+    final time = lastCheckedAt?.toLocal();
+    final label = checking
+        ? 'Checking nearby phones…'
+        : time == null
+        ? 'Waiting for a nearby scan'
+        : 'Last checked at ${TimeOfDay.fromDateTime(time).format(context)}';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -3320,27 +3459,28 @@ class _PeerScanningRow extends StatelessWidget {
         ],
       ),
       child: Row(
-        children: const [
-          Icon(Icons.radar_rounded, color: Color(0xFF555555), size: 22),
-          SizedBox(width: 10),
+        children: [
+          const Icon(Icons.radar_rounded, color: Color(0xFF555555), size: 22),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Scanning nearby peers...',
-              style: TextStyle(
+              label,
+              style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 color: Color(0xFF6B6B6B),
               ),
             ),
           ),
-          SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.4,
-              color: Color(0xFFE83C3D),
+          if (checking)
+            const SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.4,
+                color: Color(0xFFE83C3D),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -4401,10 +4541,11 @@ class _PeerDirectoryCard extends StatelessWidget {
     required this.actionLabel,
     required this.actionStyle,
     required this.onActionTap,
+    this.onShowLocation,
   });
 
   final messaging.Peer peer;
-  final String distanceText;
+  final String? distanceText;
   final String signalLabel;
   final Color signalColor;
   final Color avatarColor;
@@ -4412,6 +4553,7 @@ class _PeerDirectoryCard extends StatelessWidget {
   final String actionLabel;
   final _PeerActionStyle actionStyle;
   final VoidCallback onActionTap;
+  final VoidCallback? onShowLocation;
 
   @override
   Widget build(BuildContext context) {
@@ -4525,6 +4667,11 @@ class _PeerDirectoryCard extends StatelessWidget {
                     ),
                   ],
                 ),
+                if (onShowLocation != null)
+                  TextButton(
+                    onPressed: onShowLocation,
+                    child: const Text('View on map'),
+                  ),
               ],
             ),
           ),
@@ -4537,26 +4684,28 @@ class _PeerDirectoryCard extends StatelessWidget {
                 style: actionStyle,
                 onTap: onActionTap,
               ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.location_on,
-                    color: Color(0xFFE83C3D),
-                    size: 17,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    distanceText,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF626262),
+              if (distanceText case final distance?) ...[
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.location_on,
+                      color: Color(0xFFE83C3D),
+                      size: 17,
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 4),
+                    Text(
+                      distance,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF626262),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ],
@@ -4636,7 +4785,7 @@ class _SignalBars extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final activeBars = strength == null
-        ? 4
+        ? 0
         : ((strength! / 25).ceil()).clamp(1, 4);
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,

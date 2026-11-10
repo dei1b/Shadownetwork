@@ -8,14 +8,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/peer_location_share.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/sos_message.dart';
 import 'package:shadownetwork/features/messaging/presentation/pages/home_page.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
+import 'package:shadownetwork/features/messaging/presentation/providers/peer_location_providers.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
@@ -201,7 +205,7 @@ void main() {
     await tester.tap(find.text('Network'));
     await tester.pump();
     expect(headerText('Network'), findsOneWidget);
-    expect(headerText('3 phones detected in the latest scan'), findsOneWidget);
+    expect(headerText('No phones seen recently'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
   });
@@ -221,6 +225,8 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(locationChannel, null);
     });
+    final activity = ValueNotifier(0);
+    addTearDown(activity.dispose);
 
     await tester.pumpWidget(
       ProviderScope(
@@ -239,8 +245,13 @@ void main() {
             ).copyWith(textScaler: const TextScaler.linear(1.5)),
             child: child!,
           ),
-          home: const HomePage(
-            accessProfile: DeviceAccessProfile.unregistered(deviceId: 'test'),
+          home: ValueListenableBuilder<int>(
+            valueListenable: activity,
+            builder: (_, generation, child) =>
+                NativeActivityScope(generation: generation, child: child!),
+            child: const HomePage(
+              accessProfile: DeviceAccessProfile.unregistered(deviceId: 'test'),
+            ),
           ),
         ),
       ),
@@ -265,7 +276,7 @@ void main() {
     final nearby = find.byKey(const ValueKey('nearby-phones-section'));
     expect(find.text('View all'), findsNothing);
     expect(find.text('Nearby phones'), findsOneWidget);
-    expect(find.text('Scanning…'), findsOneWidget);
+    expect(find.text('Starting…'), findsOneWidget);
     expect(
       tester.getBottomLeft(nearby).dy,
       lessThan(tester.getTopLeft(find.byType(ml.MapLibreMap)).dy),
@@ -345,6 +356,81 @@ void main() {
       tester.widget<PopScope<Object?>>(find.byType(PopScope<Object?>)).canPop,
       isTrue,
     );
+
+    const lastCamera = ml.CameraPosition(
+      target: ml.LatLng(7.31, 125.69),
+      zoom: 15,
+    );
+    cardMap.onCameraMove!(lastCamera);
+    await tester.pump();
+    activity.value++;
+    await tester.pump();
+    expect(find.text('Map'), findsNothing);
+    expect(tester.state(find.byType(ml.MapLibreMap)), isNot(same(cardState)));
+    final newCard = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    expect(newCard.initialCameraPosition?.target, lastCamera.target);
+    expect(newCard.initialCameraPosition?.zoom, lastCamera.zoom);
+    final staleController = _MapController();
+    cardMap.onMapCreated!(staleController);
+    expect(staleController.localRequestsEnabled, isFalse);
+    final newCardController = _MapController();
+    newCard.onMapCreated!(newCardController);
+    expect(newCardController.localRequestsEnabled, isTrue);
+
+    await tester.tap(find.text('Maps'));
+    await tester.pump();
+    expect(tester.state(find.byType(ml.MapLibreMap)), isNot(same(fullState)));
+    final newFullMap = tester.widget<ml.MapLibreMap>(
+      find.byType(ml.MapLibreMap),
+    );
+    final newFullController = _MapController();
+    newFullMap.onMapCreated!(newFullController);
+    expect(newFullController.localRequestsEnabled, isTrue);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(HomePage)),
+    );
+    final now = DateTime.now().toUtc();
+    final share = PeerLocationShare.fromChat(
+      ChatMessage(
+        id: 'location-test',
+        conversationId: PeerLocationShare.conversationId,
+        sender: const Peer(
+          id: 'nearby-responder',
+          name: 'Phone model',
+          type: PeerType.responder,
+          isConnected: false,
+        ),
+        recipient: const Peer(
+          id: 'test',
+          name: 'This phone',
+          type: PeerType.civilian,
+          isConnected: false,
+        ),
+        body: '{"latitude":7.31,"longitude":125.6915}',
+        status: MessageStatus.received,
+        createdAt: now,
+        ttl: const Duration(minutes: 15),
+      ),
+      ownerName: 'Approved responder',
+      now: now,
+      expiresAt: now.add(const Duration(minutes: 15)),
+    );
+    container.read(sharedPeerLocationsProvider.notifier).record(share);
+    await tester.pump();
+    final pin = find.byKey(
+      const ValueKey('shared-peer-location-nearby-responder'),
+    );
+    expect(pin.hitTestable(), findsOneWidget);
+    await tester.tap(pin);
+    await tester.pumpAndSettle();
+    expect(find.text('Approved responder'), findsOneWidget);
+    expect(find.textContaining('Location shared at'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    expect(pin, findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
@@ -451,6 +537,8 @@ void main() {
     expect(headerText('Nearby phones'), findsOneWidget);
     expect(headerText('Waiting for a nearby scan'), findsOneWidget);
     expect(find.text('Nearby phone 7'), findsOneWidget);
+    expect(find.text('Signal unknown'), findsWidgets);
+    expect(find.text('Strong Signal'), findsNothing);
     expect(find.text('CONNECT'), findsWidgets);
 
     await tester.binding.handlePopRoute();

@@ -12,9 +12,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) {
-            RelayEngineHost.notifyFreshLaunch()
-        }
+        RelayEngineHost.notifyActivityCreated(showSplash = savedInstanceState == null)
     }
 
     override fun onResume() {

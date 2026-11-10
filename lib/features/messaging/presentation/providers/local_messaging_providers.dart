@@ -46,6 +46,7 @@ import '../../../trust/domain/repositories/trust_repository.dart';
 import '../../../validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
 import '../../../validation/domain/entities/validation_event.dart';
+import 'nearby_peer_sightings_provider.dart';
 
 final localMessagingDatabaseProvider = FutureProvider<Database>((ref) async {
   final database = await LocalMessagingDatabase.open();
@@ -160,9 +161,8 @@ final mapTileCacheStoreProvider = FutureProvider<CacheStore>((ref) async {
 });
 
 final nearbyPeersProvider = FutureProvider<List<Peer>>((ref) async {
-  final repository = await ref.watch(peerRepositoryProvider.future);
-  final localPeer = await ref.watch(localPeerProvider.future);
-  final peers = await repository.getNearbyPeers(excludingPeerId: localPeer.id);
+  final peers = ref.watch(nearbyPeerSightingsProvider);
+  if (peers.isEmpty) return const [];
   final trustRepository = await ref.watch(trustRepositoryProvider.future);
   final registrations = {
     for (final device in await trustRepository.getDevices())

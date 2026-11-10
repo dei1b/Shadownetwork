@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/app/presentation/pages/startup_splash_page.dart';
+import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 
 void main() {
   testWidgets('background engine cannot consume the visible splash duration', (
@@ -69,6 +70,18 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(StartupSplashPage), findsNothing);
+    final activityScope = find.byType(NativeActivityScope);
+    expect(tester.widget<NativeActivityScope>(activityScope).generation, 0);
+    ServicesBinding.instance.channelBuffers.push(
+      'shadow_network/app_visibility',
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('reattached'),
+      ),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(StartupSplashPage), findsNothing);
+    expect(tester.widget<NativeActivityScope>(activityScope).generation, 1);
     ServicesBinding.instance.channelBuffers.push(
       'shadow_network/app_visibility',
       const StandardMethodCodec().encodeMethodCall(const MethodCall('opened')),
@@ -76,6 +89,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byType(StartupSplashPage), findsOneWidget);
+    expect(tester.widget<NativeActivityScope>(activityScope).generation, 2);
     await tester.pump(const Duration(milliseconds: 1900));
     expect(find.byType(StartupSplashPage), findsNothing);
     expect(controller.text, 'Keep my screen');

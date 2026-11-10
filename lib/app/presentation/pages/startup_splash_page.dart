@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../core/widgets/native_activity_scope.dart';
+
 class StartupGate extends StatefulWidget {
   const StartupGate({
     super.key,
@@ -27,6 +29,7 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   Future<void>? _imageReady;
   Timer? _splashTimer;
   int _visibilityRevision = 0;
+  int _activityGeneration = 0;
 
   @override
   void initState() {
@@ -35,13 +38,20 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
     _activityVisible =
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     _visibilityChannel.setMethodCallHandler((call) async {
-      if (call.method == 'opened' && mounted) {
-        _activityVisible = true;
-        setState(() => _showSplash = true);
-        _scheduleDismissal();
-      } else if (call.method == 'visible' && mounted) {
-        _activityVisible = true;
-        _scheduleDismissal();
+      if (!mounted) return;
+      switch (call.method) {
+        case 'opened':
+          _activityVisible = true;
+          setState(() {
+            _activityGeneration++;
+            _showSplash = true;
+          });
+          _scheduleDismissal();
+        case 'reattached':
+          setState(() => _activityGeneration++);
+        case 'visible':
+          _activityVisible = true;
+          _scheduleDismissal();
       }
     });
     widget.initialization.whenComplete(() {
@@ -101,7 +111,11 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   Widget build(BuildContext context) => Stack(
     fit: StackFit.expand,
     children: [
-      if (_initialized) widget.child,
+      if (_initialized)
+        NativeActivityScope(
+          generation: _activityGeneration,
+          child: widget.child,
+        ),
       if (_showSplash) const Positioned.fill(child: StartupSplashPage()),
     ],
   );

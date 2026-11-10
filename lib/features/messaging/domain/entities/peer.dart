@@ -1,6 +1,8 @@
 import 'peer_type.dart';
 
 class Peer {
+  static const sightingLifetime = Duration(seconds: 90);
+
   const Peer({
     required this.id,
     required this.name,
@@ -22,6 +24,13 @@ class Peer {
   final double? latitude;
   final double? longitude;
   final String? transport;
+
+  bool wasSeenRecently(DateTime now) {
+    final seen = lastSeenAt;
+    if (seen == null) return false;
+    final age = now.difference(seen);
+    return !age.isNegative && age < sightingLifetime;
+  }
 
   Peer copyWith({
     String? id,

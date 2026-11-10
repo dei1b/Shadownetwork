@@ -7,6 +7,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart'
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/security/domain/entities/device_crypto_identity.dart';
 import 'package:shadownetwork/features/security/domain/entities/device_signing_identity.dart';
+import 'package:shadownetwork/features/trust/domain/entities/device_trust_record.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/trust/domain/repositories/trust_repository.dart';
 import 'package:shadownetwork/features/trust/presentation/pages/trust_bundle_import_page.dart';
@@ -15,6 +16,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'support/signed_trust_bundle_fixture.dart';
 
 class _TrustRepository implements TrustRepository {
+  @override
+  Future<TrustBundleMetadata?> getMetadata() async => null;
+
   @override
   Future<void> replaceFromBundle(TrustBundle bundle) async {}
 

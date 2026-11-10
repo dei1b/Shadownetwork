@@ -40,10 +40,10 @@ internal object RelayEngineHost {
         }
     }
 
-    fun notifyFreshLaunch() {
+    fun notifyActivityCreated(showSplash: Boolean) {
         engine?.let {
             MethodChannel(it.dartExecutor.binaryMessenger, "shadow_network/app_visibility")
-                .invokeMethod("opened", null)
+                .invokeMethod(if (showSplash) "opened" else "reattached", null)
         }
     }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
+import '../../../messaging/presentation/providers/peer_location_providers.dart';
 import '../../data/services/trust_bundle_store.dart';
 import '../../domain/entities/device_access_profile.dart';
 import '../../domain/services/device_access_resolver.dart';
@@ -22,7 +23,11 @@ final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
   final bundle = await ref.watch(trustBundleStoreProvider).loadBundle();
   if (bundle?.isSignatureVerified == true) {
     final repository = await ref.watch(trustRepositoryProvider.future);
+    final previous = await repository.getMetadata();
     await repository.replaceFromBundle(bundle!);
+    if (previous?.bundleHash != bundle.bundleHash) {
+      ref.invalidate(sharedPeerLocationsProvider);
+    }
   }
 
   return ref
