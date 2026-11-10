@@ -536,11 +536,11 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             candidate: _chatSimilaritySample(candidate),
             priorMessages: recentMessages.map(_chatSimilaritySample),
           );
-          await chatRepository.saveMessage(
+          final inserted = await chatRepository.saveMessage(
             _withChatModeration(candidate, moderation),
             incrementUnread: true,
           );
-          if (senderTrust.status != DeviceTrustStatus.revoked) {
+          if (inserted && senderTrust.status != DeviceTrustStatus.revoked) {
             await metrics.captureEvent(
               type: ValidationEventType.envelopeDelivered,
               messageHash: envelope.messageHash,
@@ -551,6 +551,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             );
           }
           await scfService.consumeDeliveredPayload(envelope.messageHash);
+          if (!inserted) continue;
           ref.invalidate(chatMessagesProvider(conversation.id));
           storedCount++;
           continue;

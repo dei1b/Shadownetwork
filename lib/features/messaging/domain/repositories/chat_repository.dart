@@ -19,7 +19,8 @@ abstract class ChatRepository {
     required DateTime since,
   });
 
-  Future<void> saveMessage(ChatMessage message, {bool incrementUnread = false});
+  /// Returns whether a new message was inserted.
+  Future<bool> saveMessage(ChatMessage message, {bool incrementUnread = false});
 
   Future<void> updateOutgoingMessageStatus({
     required String messageHash,

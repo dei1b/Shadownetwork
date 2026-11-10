@@ -164,11 +164,11 @@ class SqliteChatRepository implements ChatRepository {
   }
 
   @override
-  Future<void> saveMessage(
+  Future<bool> saveMessage(
     ChatMessage message, {
     bool incrementUnread = false,
-  }) async {
-    await _database.transaction((transaction) async {
+  }) {
+    return _database.transaction((transaction) async {
       await PeerModel.upsert(
         transaction,
         message.sender,
@@ -184,6 +184,11 @@ class SqliteChatRepository implements ChatRepository {
         ChatMessageModel.toMap(message),
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
+      // An ignored insert can leave SQLite's last inserted row ID unchanged.
+      final inserted = Sqflite.firstIntValue(
+        await transaction.rawQuery('SELECT changes()'),
+      );
+      if (inserted == 0) return false;
       await transaction.rawUpdate(
         '''
         UPDATE ${LocalMessagingDatabase.conversationsTable}
@@ -198,6 +203,7 @@ class SqliteChatRepository implements ChatRepository {
           message.conversationId,
         ],
       );
+      return true;
     });
   }
 

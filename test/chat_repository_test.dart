@@ -97,6 +97,13 @@ void main() {
     await repository.markConversationRead(conversation.id);
     expect((await repository.getConversations(local.id)).single.unreadCount, 0);
 
+    expect(
+      await repository.saveMessage(messages.single, incrementUnread: true),
+      isFalse,
+    );
+    expect(await repository.getMessages(conversation.id), hasLength(1));
+    expect((await repository.getConversations(local.id)).single.unreadCount, 0);
+
     await database.insert(LocalMessagingDatabase.trustedDevicesTable, {
       'device_id': remote.id,
       'owner_name': 'Registered Rescuer',
