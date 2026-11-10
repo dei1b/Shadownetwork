@@ -63,6 +63,9 @@ class DeviceIdentityStore {
   final SecretValueStore _secretStore;
   final X25519 _x25519;
 
+  Future<bool> hasStoredIdentity() async =>
+      await _secretStore.read(_keyIdName) != null;
+
   Future<DeviceCryptoIdentity> loadOrCreate() async {
     final privateValue = await _secretStore.read(_privateKeyName);
     final publicValue = await _secretStore.read(_publicKeyName);
