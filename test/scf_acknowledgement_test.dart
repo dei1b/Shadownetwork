@@ -163,7 +163,7 @@ void main() {
       addTearDown(upgraded.close);
       final pending = (await ScfService(
         database: upgraded,
-      ).getPendingSosInbox()).single;
+      ).getPendingInbox()).single;
       expect(pending.messageHash, outbound.messageHash);
       expect(pending.transferId, isNull);
     },

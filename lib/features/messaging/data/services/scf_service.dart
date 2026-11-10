@@ -106,11 +106,9 @@ class ScfService {
         envelope: envelope,
         now: timestamp,
       );
-      if (inserted &&
-          RelayPayloadCodec.payloadType(envelope.payloadJson) ==
-              RelayPayloadCodec.sosPayloadType) {
+      if (inserted) {
         await transaction.insert(
-          LocalMessagingDatabase.pendingSosInboxTable,
+          LocalMessagingDatabase.pendingInboxTable,
           {
             ...ScfEnvelopeModel.toMap(envelope.copyWith(receivedAt: timestamp)),
             'received_from_peer_id': envelope.receivedFromPeerId,
@@ -124,17 +122,17 @@ class ScfService {
     });
   }
 
-  Future<List<ScfEnvelope>> getPendingSosInbox() async {
+  Future<List<ScfEnvelope>> getPendingInbox() async {
     final rows = await _database.query(
-      LocalMessagingDatabase.pendingSosInboxTable,
+      LocalMessagingDatabase.pendingInboxTable,
       orderBy: 'received_at ASC',
     );
     return rows.map(ScfEnvelopeModel.fromMap).toList(growable: false);
   }
 
-  Future<void> discardPendingSos(String messageHash) async {
+  Future<void> discardPendingMessage(String messageHash) async {
     await _database.delete(
-      LocalMessagingDatabase.pendingSosInboxTable,
+      LocalMessagingDatabase.pendingInboxTable,
       where: 'message_hash = ?',
       whereArgs: [messageHash],
     );
@@ -182,11 +180,18 @@ class ScfService {
   }
 
   Future<void> consumeDeliveredPayload(String messageHash) {
-    return _database.delete(
-      LocalMessagingDatabase.scfMessagesTable,
-      where: 'message_hash = ?',
-      whereArgs: [messageHash],
-    );
+    return _database.transaction((transaction) async {
+      for (final table in [
+        LocalMessagingDatabase.scfMessagesTable,
+        LocalMessagingDatabase.pendingInboxTable,
+      ]) {
+        await transaction.delete(
+          table,
+          where: 'message_hash = ?',
+          whereArgs: [messageHash],
+        );
+      }
+    });
   }
 
   Future<List<ScfEnvelope>> prepareOutboundForPeer(

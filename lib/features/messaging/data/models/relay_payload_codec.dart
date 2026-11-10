@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'chat_message_payload.dart';
@@ -9,6 +10,21 @@ class RelayPayloadCodec {
   const RelayPayloadCodec._();
 
   static const sosPayloadType = 'sos_message';
+
+  /// Normalize malformed wire fields without swallowing persistence failures.
+  static Future<T> decodeFields<T>(FutureOr<T> Function() decode) async {
+    try {
+      return await decode();
+    } on ArgumentError {
+      throw const FormatException(
+        'Message contains an unsupported field value.',
+      );
+    } on TypeError {
+      throw const FormatException(
+        'Message contains missing or invalid fields.',
+      );
+    }
+  }
 
   static String payloadType(String payloadJson) {
     final payload = jsonDecode(payloadJson) as Map<String, Object?>;

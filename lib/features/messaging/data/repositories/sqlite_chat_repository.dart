@@ -179,16 +179,36 @@ class SqliteChatRepository implements ChatRepository {
         message.recipient,
         timestamp: message.createdAt,
       );
+      final row = ChatMessageModel.toMap(message);
       await transaction.insert(
         LocalMessagingDatabase.chatMessagesTable,
-        ChatMessageModel.toMap(message),
+        row,
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
       // An ignored insert can leave SQLite's last inserted row ID unchanged.
       final inserted = Sqflite.firstIntValue(
         await transaction.rawQuery('SELECT changes()'),
       );
+      await transaction.delete(
+        LocalMessagingDatabase.pendingInboxTable,
+        where: 'message_hash = ?',
+        whereArgs: [row['message_hash']],
+      );
       if (inserted == 0) return false;
+      final conversations = await transaction.query(
+        LocalMessagingDatabase.conversationsTable,
+        columns: ['last_message_at'],
+        where: 'id = ?',
+        whereArgs: [message.conversationId],
+      );
+      final previousTimestamp =
+          conversations.single['last_message_at'] as String?;
+      final previous = previousTimestamp == null
+          ? null
+          : DateTime.parse(previousTimestamp);
+      final latest = previous != null && previous.isAfter(message.createdAt)
+          ? previous
+          : message.createdAt;
       await transaction.rawUpdate(
         '''
         UPDATE ${LocalMessagingDatabase.conversationsTable}
@@ -197,7 +217,7 @@ class SqliteChatRepository implements ChatRepository {
         WHERE id = ?
       ''',
         [
-          message.createdAt.toUtc().toIso8601String(),
+          latest.toUtc().toIso8601String(),
           DateTime.now().toUtc().toIso8601String(),
           incrementUnread ? 1 : 0,
           message.conversationId,

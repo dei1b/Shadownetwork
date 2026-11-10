@@ -397,16 +397,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     do {
       _receiveRequested = false;
       final relayService = await ref.read(scfRelayServiceProvider.future);
-      final incoming = await relayService.ingestIncomingEnvelopes();
+      await relayService.ingestIncomingEnvelopes();
       final scfService = await ref.read(scfServiceProvider.future);
-      final envelopes = [
-        ...await scfService.getPendingSosInbox(),
-        ...incoming.where(
-          (item) =>
-              RelayPayloadCodec.payloadType(item.payloadJson) ==
-              ChatMessagePayload.payloadType,
-        ),
-      ];
+      final envelopes = await scfService.getPendingInbox();
       if (envelopes.isEmpty) continue;
       count += await _persistIncomingMessages(
         messageRepository: await ref.read(sosMessageRepositoryProvider.future),
@@ -460,34 +453,45 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }) async {
     var storedCount = 0;
     for (final envelope in envelopes) {
-      final isChat =
-          RelayPayloadCodec.payloadType(envelope.payloadJson) ==
-          ChatMessagePayload.payloadType;
       try {
-        final senderTrust = await ref
-            .read(messageAuthenticationServiceProvider)
-            .authenticate(envelope.payloadJson, trustRepository);
+        final isChat = await RelayPayloadCodec.decodeFields(
+          () =>
+              RelayPayloadCodec.payloadType(envelope.payloadJson) ==
+              ChatMessagePayload.payloadType,
+        );
+        final senderTrust = await RelayPayloadCodec.decodeFields(
+          () => ref
+              .read(messageAuthenticationServiceProvider)
+              .authenticate(envelope.payloadJson, trustRepository),
+        );
         await scfService.updateOriginTrustStatus(
           messageHash: envelope.messageHash,
           status: senderTrust.status,
         );
-        final payload =
-            jsonDecode(envelope.payloadJson) as Map<String, Object?>;
+        final payload = await RelayPayloadCodec.decodeFields(
+          () => jsonDecode(envelope.payloadJson) as Map<String, Object?>,
+        );
+        final targetPeerId = await RelayPayloadCodec.decodeFields(
+          () => SosMessagePayload.targetPeerId(envelope.payloadJson),
+        );
+        if (targetPeerId != null && targetPeerId != localPeer.id) {
+          await scfService.discardPendingMessage(envelope.messageHash);
+          continue;
+        }
         if (isChat) {
-          final chat =
-              SecureChatMessagePayload.supportsVersion(
-                payload['schema_version'],
-              )
-              ? await SecureChatMessagePayload.decode(
-                  payload,
-                  localPeerId: localPeer.id,
-                  encryptionService: encryptionService,
-                  localIdentity: localIdentity,
+          final chat = await RelayPayloadCodec.decodeFields(
+            () async =>
+                SecureChatMessagePayload.supportsVersion(
+                  payload['schema_version'],
                 )
-              : ChatMessagePayload.fromPayload(payload);
-          if (chat.recipient.id != localPeer.id) {
-            continue;
-          }
+                ? await SecureChatMessagePayload.decode(
+                    payload,
+                    localPeerId: localPeer.id,
+                    encryptionService: encryptionService,
+                    localIdentity: localIdentity,
+                  )
+                : ChatMessagePayload.fromPayload(payload),
+          );
           if (chat.conversationId == PeerLocationShare.conversationId) {
             if (payload['schema_version'] != PeerLocationShare.schemaVersion ||
                 senderTrust.status != DeviceTrustStatus.approved ||
@@ -559,21 +563,19 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         final isSecureSos = SecureSosMessagePayload.supportsVersion(
           payload['schema_version'],
         );
-        final targetPeerId = isSecureSos
-            ? SecureSosMessagePayload.targetPeerId(envelope.payloadJson)
-            : SosMessagePayload.targetPeerId(envelope.payloadJson);
-        if (targetPeerId != null && targetPeerId != localPeer.id) {
-          await scfService.discardPendingSos(envelope.messageHash);
-          continue;
-        }
-        final incoming = isSecureSos
-            ? await SecureSosMessagePayload.decode(
-                payload,
-                localPeerId: localPeer.id,
-                encryptionService: encryptionService,
-                localIdentity: localIdentity,
-              )
-            : SosMessagePayload.fromPayload(payload, localPeerId: localPeer.id);
+        final incoming = await RelayPayloadCodec.decodeFields(
+          () async => isSecureSos
+              ? await SecureSosMessagePayload.decode(
+                  payload,
+                  localPeerId: localPeer.id,
+                  encryptionService: encryptionService,
+                  localIdentity: localIdentity,
+                )
+              : SosMessagePayload.fromPayload(
+                  payload,
+                  localPeerId: localPeer.id,
+                ),
+        );
         final isLocalOrigin = incoming.sender.id == localPeer.id;
         final decoded = incoming.copyWith(
           status: MessageStatus.received,
@@ -632,7 +634,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           error: error.message.toString(),
           metadata: const {'phase': 'decode'},
         );
-        if (!isChat) await scfService.discardPendingSos(envelope.messageHash);
+        await scfService.discardPendingMessage(envelope.messageHash);
         continue;
       }
     }

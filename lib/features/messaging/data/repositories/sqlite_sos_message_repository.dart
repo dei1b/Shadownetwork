@@ -142,7 +142,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
       await transaction.delete(
-        LocalMessagingDatabase.pendingSosInboxTable,
+        LocalMessagingDatabase.pendingInboxTable,
         where: 'message_hash = ?',
         whereArgs: [row['message_hash']],
       );
