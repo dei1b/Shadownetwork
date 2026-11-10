@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -100,7 +101,7 @@ void main() {
   });
 
   test(
-    'migration 12 to 13 preserves evidence, receipts, queue and signing keys',
+    'migration from 12 preserves evidence, receipts, queue and signing keys',
     () async {
       final h = await DatabaseMigrationTestHarness.create();
       addTearDown(h.dispose);
@@ -114,6 +115,7 @@ void main() {
           'ALTER TABLE validation_sessions DROP COLUMN test_run_id',
         );
       }
+      await original.execute('DROP TABLE pending_sos_inbox');
       await original.setVersion(12);
       const stamp = '2026-10-26T02:00:00.000Z';
       await original.insert('peers', {
@@ -183,7 +185,10 @@ void main() {
       await original.close();
       final upgraded = await h.openCurrentDatabase();
       addTearDown(upgraded.close);
-      expect(await upgraded.getVersion(), 13);
+      expect(
+        await upgraded.getVersion(),
+        LocalMessagingDatabase.databaseVersion,
+      );
       for (final entry in before.entries) {
         expect(await upgraded.query(entry.key), entry.value);
       }

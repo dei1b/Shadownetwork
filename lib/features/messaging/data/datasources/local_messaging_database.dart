@@ -11,7 +11,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 13;
+  static const databaseVersion = 14;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -19,6 +19,7 @@ class LocalMessagingDatabase {
   static const sosMessagesTable = 'sos_messages';
   static const scfMessagesTable = 'scf_messages';
   static const scfPeerStatusesTable = 'scf_peer_statuses';
+  static const pendingSosInboxTable = 'pending_sos_inbox';
   static const conversationsTable = 'conversations';
   static const chatMessagesTable = 'chat_messages';
   static const trustedDevicesTable = 'trusted_devices';
@@ -44,7 +45,39 @@ class LocalMessagingDatabase {
     11: _addTransferEventMetadata,
     12: _addSenderSigningKeys,
     13: _addValidationRunIdentity,
+    14: _addPendingSosInbox,
   };
+
+  static Future<void> _addPendingSosInbox(Database database) async {
+    await database.execute('''
+      CREATE TABLE $pendingSosInboxTable (
+        message_hash TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        payload_type TEXT NOT NULL,
+        hop_count INTEGER NOT NULL,
+        received_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        received_from_peer_id TEXT,
+        received_transport TEXT,
+        transfer_id TEXT
+      )
+    ''');
+    // Older builds did not save local receipt context alongside the relay copy.
+    await database.execute('''
+      INSERT INTO $pendingSosInboxTable (
+        message_hash, payload_json, payload_type, hop_count, received_at, expires_at
+      )
+      SELECT relay.message_hash, relay.payload_json, relay.payload_type,
+             relay.hop_count, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), relay.expires_at
+      FROM $scfMessagesTable AS relay
+      WHERE relay.payload_type = 'sos_message'
+        AND relay.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        AND NOT EXISTS (
+          SELECT 1 FROM $sosMessagesTable AS inbox
+          WHERE inbox.message_hash = relay.message_hash
+        )
+    ''');
+  }
 
   static Future<void> _addValidationRunIdentity(Database database) async {
     await database.execute(

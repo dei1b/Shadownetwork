@@ -11,6 +11,9 @@ class ScfEnvelopeModel {
       receivedAt: DateTime.parse(map['received_at']! as String),
       expiresAt: DateTime.parse(map['expires_at']! as String),
       payloadType: (map['payload_type'] as String?) ?? 'sos_message',
+      receivedFromPeerId: map['received_from_peer_id'] as String?,
+      receivedTransport: map['received_transport'] as String?,
+      transferId: map['transfer_id'] as String?,
     );
   }
 

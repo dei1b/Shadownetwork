@@ -197,6 +197,7 @@ void main() {
         where: 'id > ?',
         whereArgs: [8],
       );
+      await original.execute('DROP TABLE pending_sos_inbox');
       await original.setVersion(8);
       await original.insert(LocalMessagingDatabase.peersTable, {
         'id': 'existing-resident',
@@ -351,6 +352,7 @@ void main() {
       await original.execute(
         'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
       );
+      await original.execute('DROP TABLE pending_sos_inbox');
       await original.setVersion(10);
       await original.insert(LocalMessagingDatabase.peersTable, {
         'id': 'victim',
@@ -429,6 +431,7 @@ void main() {
       await original.execute(
         'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
       );
+      await original.execute('DROP TABLE pending_sos_inbox');
       await original.setVersion(11);
       await original.insert(LocalMessagingDatabase.peersTable, {
         'id': 'resident',
@@ -483,6 +486,7 @@ void main() {
     await original.execute(
       'ALTER TABLE trusted_devices DROP COLUMN signing_public_key',
     );
+    await original.execute('DROP TABLE pending_sos_inbox');
     await original.setVersion(9);
     await original.insert(LocalMessagingDatabase.peersTable, {
       'id': 'resident',

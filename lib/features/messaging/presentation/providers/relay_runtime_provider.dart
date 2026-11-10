@@ -282,6 +282,8 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         validationMetricsRepositoryProvider.future,
       );
 
+      final receivedCount = await receiveIncoming();
+
       final expiredHashes = await scfService.pruneExpiredHashes(now: now);
       for (final messageHash in expiredHashes) {
         await metrics.captureEvent(
@@ -337,8 +339,6 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       if (epoch != _epoch) return;
       ref.read(nearbyPeerSightingsProvider.notifier).replace(discoveredPeers);
       await _persistPeerSnapshot(peerRepository, discoveredPeers, now);
-
-      final receivedCount = await receiveIncoming();
 
       var relayedCount = 0;
       for (final peer in discoveredPeers) {
@@ -397,12 +397,21 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     do {
       _receiveRequested = false;
       final relayService = await ref.read(scfRelayServiceProvider.future);
-      final envelopes = await relayService.ingestIncomingEnvelopes();
+      final incoming = await relayService.ingestIncomingEnvelopes();
+      final scfService = await ref.read(scfServiceProvider.future);
+      final envelopes = [
+        ...await scfService.getPendingSosInbox(),
+        ...incoming.where(
+          (item) =>
+              RelayPayloadCodec.payloadType(item.payloadJson) ==
+              ChatMessagePayload.payloadType,
+        ),
+      ];
       if (envelopes.isEmpty) continue;
       count += await _persistIncomingMessages(
         messageRepository: await ref.read(sosMessageRepositoryProvider.future),
         chatRepository: await ref.read(chatRepositoryProvider.future),
-        scfService: await ref.read(scfServiceProvider.future),
+        scfService: scfService,
         spamDetectionService: ref.read(spamDetectionServiceProvider),
         peerRepository: await ref.read(peerRepositoryProvider.future),
         localPeer: await ref.read(scfTransportProvider).getLocalPeer(),
@@ -451,6 +460,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }) async {
     var storedCount = 0;
     for (final envelope in envelopes) {
+      final isChat =
+          RelayPayloadCodec.payloadType(envelope.payloadJson) ==
+          ChatMessagePayload.payloadType;
       try {
         final senderTrust = await ref
             .read(messageAuthenticationServiceProvider)
@@ -461,8 +473,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         );
         final payload =
             jsonDecode(envelope.payloadJson) as Map<String, Object?>;
-        if (RelayPayloadCodec.payloadType(envelope.payloadJson) ==
-            ChatMessagePayload.payloadType) {
+        if (isChat) {
           final chat =
               SecureChatMessagePayload.supportsVersion(
                 payload['schema_version'],
@@ -551,6 +562,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             ? SecureSosMessagePayload.targetPeerId(envelope.payloadJson)
             : SosMessagePayload.targetPeerId(envelope.payloadJson);
         if (targetPeerId != null && targetPeerId != localPeer.id) {
+          await scfService.discardPendingSos(envelope.messageHash);
           continue;
         }
         final incoming = isSecureSos
@@ -564,9 +576,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         final isLocalOrigin = incoming.sender.id == localPeer.id;
         final decoded = incoming.copyWith(
           status: MessageStatus.received,
-          // The envelope timestamp belongs to the previous phone.
-          // Record this device's acceptance time independently.
-          receivedAt: isLocalOrigin ? null : DateTime.now().toUtc(),
+          receivedAt: isLocalOrigin ? null : envelope.receivedAt,
           receivedFromPeerId: isLocalOrigin
               ? null
               : envelope.receivedFromPeerId,
@@ -621,6 +631,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           error: error.message.toString(),
           metadata: const {'phase': 'decode'},
         );
+        if (!isChat) await scfService.discardPendingSos(envelope.messageHash);
         continue;
       }
     }

@@ -101,8 +101,43 @@ class ScfService {
     }
 
     return _database.transaction((transaction) async {
-      return _insertEnvelope(transaction, envelope: envelope, now: timestamp);
+      final inserted = await _insertEnvelope(
+        transaction,
+        envelope: envelope,
+        now: timestamp,
+      );
+      if (inserted &&
+          RelayPayloadCodec.payloadType(envelope.payloadJson) ==
+              RelayPayloadCodec.sosPayloadType) {
+        await transaction.insert(
+          LocalMessagingDatabase.pendingSosInboxTable,
+          {
+            ...ScfEnvelopeModel.toMap(envelope.copyWith(receivedAt: timestamp)),
+            'received_from_peer_id': envelope.receivedFromPeerId,
+            'received_transport': envelope.receivedTransport,
+            'transfer_id': envelope.transferId,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      return inserted;
     });
+  }
+
+  Future<List<ScfEnvelope>> getPendingSosInbox() async {
+    final rows = await _database.query(
+      LocalMessagingDatabase.pendingSosInboxTable,
+      orderBy: 'received_at ASC',
+    );
+    return rows.map(ScfEnvelopeModel.fromMap).toList(growable: false);
+  }
+
+  Future<void> discardPendingSos(String messageHash) async {
+    await _database.delete(
+      LocalMessagingDatabase.pendingSosInboxTable,
+      where: 'message_hash = ?',
+      whereArgs: [messageHash],
+    );
   }
 
   Future<int> pruneExpired({DateTime? now}) async {

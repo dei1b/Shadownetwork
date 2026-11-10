@@ -94,6 +94,81 @@ void main() {
     },
   );
 
+  test('restores an acknowledged SOS to the inbox after restart', () async {
+    final f = await _fixture();
+    final outbound = (await f.scfA.prepareOutboundForPeer(
+      receiver.id,
+    )).single.copyWith(transferId: 'before-restart');
+    final incoming = f.b.relayEvents.first;
+    final sending = f.a.sendEnvelope(peer: receiver, envelope: outbound);
+    await incoming;
+    final acceptedAt = DateTime.now().toUtc();
+    final relay = ScfRelayService(scfService: f.scfB, transport: f.b);
+    expect(await relay.ingestIncoming(now: acceptedAt), 1);
+    expect((await sending).acknowledged, isTrue);
+    expect(await f.dbB.query(LocalMessagingDatabase.sosMessagesTable), isEmpty);
+    final databasePath = f.dbB.path;
+    await f.dbB.close();
+
+    final reopened = await LocalMessagingDatabase.open(
+      databasePath: databasePath,
+      factory: databaseFactoryFfi,
+    );
+    addTearDown(reopened.close);
+    // Local inbox work survives even when the original relay copy expires.
+    await ScfService(database: reopened).pruneExpired(now: outbound.expiresAt);
+    final offline = MockScfTransportNetwork().registerPeer(receiver);
+    final container = ProviderContainer(
+      overrides: [
+        localMessagingDatabaseProvider.overrideWith((ref) async => reopened),
+        scfTransportProvider.overrideWithValue(offline),
+        deviceIdentityStoreProvider.overrideWithValue(
+          DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final runtime = container.read(relayRuntimeProvider.notifier);
+    await runtime.start();
+    runtime.stop();
+
+    final repository = await container.read(
+      sosMessageRepositoryProvider.future,
+    );
+    final receipt = (await repository.getMessages()).single;
+    expect(receipt.id, 'sos');
+    expect(receipt.receivedAt, acceptedAt);
+    expect(receipt.receivedFromPeerId, sender.id);
+    expect(receipt.transferId, 'before-restart');
+    expect(await runtime.receiveIncoming(), 0);
+  });
+
+  test(
+    'database upgrade finds active SOS copies missing from the inbox',
+    () async {
+      final f = await _fixture();
+      final outbound = (await f.scfA.prepareOutboundForPeer(
+        receiver.id,
+      )).single;
+      expect(await f.scfB.storeEnvelope(outbound), isTrue);
+      final databasePath = f.dbB.path;
+      await f.dbB.execute('DROP TABLE pending_sos_inbox');
+      await f.dbB.setVersion(13);
+      await f.dbB.close();
+
+      final upgraded = await LocalMessagingDatabase.open(
+        databasePath: databasePath,
+        factory: databaseFactoryFfi,
+      );
+      addTearDown(upgraded.close);
+      final pending = (await ScfService(
+        database: upgraded,
+      ).getPendingSosInbox()).single;
+      expect(pending.messageHash, outbound.messageHash);
+      expect(pending.transferId, isNull);
+    },
+  );
+
   test(
     'write alone and wrong ACK do not complete; valid ACK completes once',
     () async {
