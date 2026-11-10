@@ -87,8 +87,20 @@ jobs:
           set -euo pipefail
           : "${EXPECTED_CERT_SHA256:?Missing pinned signing certificate}"
           APKSIGNER="$(find "${ANDROID_HOME}/build-tools" -mindepth 2 -maxdepth 2 -name apksigner -type f | sort -V | tail -n 1)"
-          CERT_SHA256="$("${APKSIGNER}" verify --print-certs build/app/outputs/flutter-apk/app-release.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
-          test "${CERT_SHA256}" = "${EXPECTED_CERT_SHA256,,}" || { echo "APK signing certificate does not match the permanent key."; exit 1; }
+          SIGNER_OUTPUT="$("${APKSIGNER}" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
+          # Build Tools 37 changed the signer label. The digest field is shared.
+          CERT_SHA256="$(printf '%s\n' "${SIGNER_OUTPUT}" \
+            | sed -nE '/^Source Stamp Signer[: ]/d; s/^.* certificate SHA-256 digest: ([[:xdigit:]]{64})[[:space:]]*$/\1/p' \
+            | tr 'A-F' 'a-f' | sort -u)"
+          if [[ -z "${CERT_SHA256}" ]]; then
+            echo "apksigner did not report an APK signer SHA-256 digest."
+            exit 1
+          fi
+          if [[ "${CERT_SHA256}" != "${EXPECTED_CERT_SHA256,,}" ]]; then
+            echo "APK signing certificate does not match the permanent key. Reported SHA-256 digest(s):"
+            printf '%s\n' "${CERT_SHA256}"
+            exit 1
+          fi
           echo "Verified permanent release certificate."
 
       - name: Remove temporary signing material
