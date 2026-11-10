@@ -1659,6 +1659,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     String? ownSenderLabel,
   ) {
     final isSpam =
+        ownSenderLabel == null &&
         message.moderationStatus == messaging.MessageModerationStatus.spam;
     final type = isSpam ? 'SPAM' : _messageTypeForCategory(message.category);
     final accentColor = isSpam
@@ -1690,6 +1691,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       message: message,
       messageType: _messageTypeForCategory(message.category),
       activeFilter: filter,
+      isOutgoing: _ownSosSenderLabel(message) != null,
     );
   }
 

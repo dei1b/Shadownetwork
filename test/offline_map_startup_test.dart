@@ -142,6 +142,8 @@ void main() {
         sender: local,
         status: MessageStatus.queued,
         body: 'My outgoing SOS.',
+        moderationStatus: MessageModerationStatus.spam,
+        moderationReason: 'jaccard_similarity',
       ),
       normal.copyWith(id: 'received-local-id', sender: local),
       normal.copyWith(id: 'request', category: Category.water),
@@ -187,6 +189,7 @@ void main() {
     expect(find.text('SOS details'), findsOneWidget);
     expect(find.text('Message sender'), findsNothing);
     expect(find.text('Created on this phone'), findsOneWidget);
+    expect(find.text('Moderation'), findsNothing);
     expect(find.text('Saved on this phone · Delivery pending'), findsWidgets);
     await tester.tap(find.byTooltip('Close SOS details'));
     await tester.pumpAndSettle();
@@ -199,6 +202,14 @@ void main() {
     expect(find.text('Message sender'), findsOneWidget);
     await tester.tap(find.byTooltip('Close SOS details'));
     await tester.pumpAndSettle();
+    final spamFilter = find.text('Spam');
+    await tester.ensureVisible(spamFilter);
+    await tester.pumpAndSettle();
+    await tester.tap(spamFilter);
+    await tester.pump();
+    expect(ownCard, findsNothing);
+    expect(find.byKey(const ValueKey('sos-card-spam')), findsOneWidget);
+
     await tester.tap(find.text('SOS Map'));
     await tester.pump();
     expect(headerText('SOS Map'), findsOneWidget);

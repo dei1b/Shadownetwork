@@ -9,6 +9,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/nearby_peer_sightings_provider.dart';
+import 'package:shadownetwork/features/messaging/presentation/utils/message_feed_filter.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -139,6 +140,35 @@ void main() {
     expect(
       (await repository.getConversations(local.id)).single.remotePeer.name,
       remote.name,
+    );
+
+    await repository.saveMessage(
+      ChatMessage(
+        id: 'chat-outbound',
+        conversationId: conversation.id,
+        sender: local,
+        recipient: remote,
+        body: 'I am still here.',
+        status: MessageStatus.queued,
+        createdAt: DateTime.utc(2026, 5, 25, 10, 1),
+        moderationStatus: MessageModerationStatus.spam,
+      ),
+    );
+    final outgoingThread = (await repository.getConversations(local.id)).single;
+    expect(outgoingThread.latestBody, 'I am still here.');
+    expect(
+      shouldShowConversationForFilter(
+        conversation: outgoingThread,
+        activeFilter: 'ALL',
+      ),
+      isTrue,
+    );
+    expect(
+      shouldShowConversationForFilter(
+        conversation: outgoingThread,
+        activeFilter: 'SPAM',
+      ),
+      isFalse,
     );
   });
 }

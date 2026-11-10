@@ -194,15 +194,17 @@ class SosDetailSheet extends StatelessWidget {
                         ? 'Created on this phone'
                         : message.trustStatus.displayLabel,
                   ),
-                  _DetailRow(
-                    label: 'Moderation',
-                    value: isSpam ? 'Spam' : 'Normal',
-                  ),
-                  if (message.moderationReason != null)
+                  if (ownSenderLabel == null) ...[
                     _DetailRow(
-                      label: 'Moderation reason',
-                      value: message.moderationReason!,
+                      label: 'Moderation',
+                      value: isSpam ? 'Spam' : 'Normal',
                     ),
+                    if (message.moderationReason != null)
+                      _DetailRow(
+                        label: 'Moderation reason',
+                        value: message.moderationReason!,
+                      ),
+                  ],
                   _DetailRow(
                     label: 'Payload privacy',
                     value: message.isEncrypted

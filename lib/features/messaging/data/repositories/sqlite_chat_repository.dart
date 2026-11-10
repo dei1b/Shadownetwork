@@ -80,8 +80,12 @@ class SqliteChatRepository implements ChatRepository {
         peers.longitude AS remote_longitude,
         latest.body AS latest_body,
         latest.status AS latest_status,
-        latest.moderation_status AS latest_moderation_status
-        , latest.trust_status AS latest_trust_status
+        CASE
+          WHEN lower(latest.sender_peer_id) = lower(conversations.local_peer_id)
+          THEN 'normal'
+          ELSE latest.moderation_status
+        END AS latest_moderation_status,
+        latest.trust_status AS latest_trust_status
       FROM ${LocalMessagingDatabase.conversationsTable} AS conversations
       INNER JOIN ${LocalMessagingDatabase.peersTable} AS peers
         ON peers.id = conversations.remote_peer_id

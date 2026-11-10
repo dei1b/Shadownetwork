@@ -8,8 +8,10 @@ bool shouldShowSosMessageForFilter({
   required SosMessage message,
   required String messageType,
   required String activeFilter,
+  bool isOutgoing = false,
 }) {
-  final isSpam = message.moderationStatus == MessageModerationStatus.spam;
+  final isSpam =
+      !isOutgoing && message.moderationStatus == MessageModerationStatus.spam;
   final isRevoked = message.trustStatus == DeviceTrustStatus.revoked;
   return switch (activeFilter) {
     'ALL' => !isSpam && !isRevoked,
