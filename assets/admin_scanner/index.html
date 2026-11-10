@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShadowNetwork · Scan phone QR</title>
+<style>
+  :root { color-scheme: dark; font: 1rem system-ui, sans-serif; background: #181717; color: #faf5f3; }
+  main { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.6rem; }
+  video { display: block; width: 100%; max-height: 65vh; background: #090909; border-radius: .75rem; }
+  p { line-height: 1.5; }
+  select, button { font: inherit; padding: .4rem .6rem; }
+  label, button { margin-top: .75rem; }
+  [hidden] { display: none; }
+</style>
+<main>
+  <h1>Scan phone registration QR</h1>
+  <p>Allow camera access, then hold the entire QR code from ShadowNetwork steady in view.</p>
+  <video id="preview" autoplay muted playsinline></video>
+  <label id="camera-picker" hidden>Camera <select id="camera"></select></label>
+  <p id="status" role="status">Opening camera…</p>
+  <button id="retry" type="button" hidden>Retry camera</button>
+</main>
+<script defer src="jsqr.js"></script>
+<script defer src="scan.js"></script>
+</html>

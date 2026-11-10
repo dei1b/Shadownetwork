@@ -22,6 +22,9 @@ class SqliteChatRepository implements ChatRepository {
     required Peer remotePeer,
     String? relatedSosMessageHash,
   }) async {
+    if (localPeer.id.toLowerCase() == remotePeer.id.toLowerCase()) {
+      throw const FormatException('Cannot open a chat with this phone.');
+    }
     final now = DateTime.now().toUtc();
     final id = 'conversation-${localPeer.id}-${remotePeer.id}';
     await _database.transaction((transaction) async {
@@ -92,6 +95,7 @@ class SqliteChatRepository implements ChatRepository {
           ORDER BY messages.created_at DESC LIMIT 1
         )
       WHERE conversations.local_peer_id = ?
+        AND lower(conversations.remote_peer_id) != lower(conversations.local_peer_id)
       ORDER BY conversations.last_message_at DESC, conversations.updated_at DESC
     ''',
       [localPeerId],

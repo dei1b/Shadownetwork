@@ -32,9 +32,6 @@ dependencies:
   shared_preferences: ^2.5.5
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.0
-  camera_windows: ^0.3.0+1
-  camera_platform_interface: ^2.12.0
-  zxing2: ^0.2.4
   cryptography: ^2.9.0
   flutter_secure_storage: ^10.3.1
 
@@ -46,6 +43,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/admin_scanner/
     - assets/auth/
     - assets/home/
     - assets/map_fonts/Noto Sans Bold/

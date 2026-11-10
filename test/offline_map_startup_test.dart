@@ -77,7 +77,7 @@ void main() {
   Finder headerText(String label) =>
       find.descendant(of: header, matching: find.text(label));
 
-  testWidgets('responder dashboard count matches the SOS alerts it opens', (
+  testWidgets('responder alerts distinguish outgoing SOS from received SOS', (
     tester,
   ) async {
     final originalFactory = ml.MapLibrePlatform.createInstance;
@@ -104,6 +104,7 @@ void main() {
             accessProfile: DeviceAccessProfile(
               level: DeviceAccessLevel.responder,
               deviceId: 'responder',
+              ownerName: 'Registered Responder',
             ),
           ),
         ),
@@ -124,8 +125,21 @@ void main() {
       status: MessageStatus.received,
       createdAt: DateTime.now(),
     );
+    const local = Peer(
+      id: 'RESPONDER',
+      name: 'Phone model',
+      type: PeerType.responder,
+      isConnected: false,
+    );
     messages.complete([
       normal,
+      normal.copyWith(
+        id: 'own',
+        sender: local,
+        status: MessageStatus.queued,
+        body: 'My outgoing SOS.',
+      ),
+      normal.copyWith(id: 'received-local-id', sender: local),
       normal.copyWith(id: 'request', category: Category.water),
       normal.copyWith(id: 'update', category: Category.information),
       normal.copyWith(id: 'revoked', trustStatus: DeviceTrustStatus.revoked),
@@ -135,7 +149,7 @@ void main() {
       ),
     ]);
     await tester.pump();
-    expect(find.text('1 SOS alert on this phone'), findsOneWidget);
+    expect(find.text('3 SOS alerts on this phone'), findsOneWidget);
     await tester.tap(find.text('Open SOS alerts'));
     await tester.pump();
     expect(headerText('Alerts'), findsOneWidget);
@@ -143,6 +157,44 @@ void main() {
     for (final id in ['request', 'update', 'revoked', 'spam']) {
       expect(find.byKey(ValueKey('sos-card-$id')), findsNothing);
     }
+    final ownCard = find.byKey(const ValueKey('sos-card-own'));
+    await tester.ensureVisible(ownCard);
+    await tester.pump();
+    expect(
+      find.descendant(
+        of: ownCard,
+        matching: find.textContaining('Registered Responder (you)'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: ownCard, matching: find.text('UNVERIFIED')),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('sos-card-received-local-id')),
+        matching: find.text('UNVERIFIED'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(ownCard);
+    await tester.pumpAndSettle();
+    expect(find.text('SOS details'), findsOneWidget);
+    expect(find.text('Message sender'), findsNothing);
+    expect(find.text('Created on this phone'), findsOneWidget);
+    expect(find.text('Saved on this phone · Delivery pending'), findsWidgets);
+    await tester.tap(find.byTooltip('Close SOS details'));
+    await tester.pumpAndSettle();
+
+    final incomingCard = find.byKey(const ValueKey('sos-card-emergency'));
+    await tester.ensureVisible(incomingCard);
+    await tester.pump();
+    await tester.tap(incomingCard);
+    await tester.pumpAndSettle();
+    expect(find.text('Message sender'), findsOneWidget);
+    await tester.tap(find.byTooltip('Close SOS details'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('SOS Map'));
     await tester.pump();
     expect(headerText('SOS Map'), findsOneWidget);

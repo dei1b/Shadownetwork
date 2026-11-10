@@ -9,11 +9,13 @@ import '../../../trust/domain/entities/device_trust_status.dart';
 import '../providers/sos_clock_provider.dart';
 import '../utils/sos_timing_labels.dart';
 import 'sos_receipt_summary.dart';
+import 'sos_send_status.dart';
 
 Future<void> showSosDetailSheet(
   BuildContext context, {
   required SosMessage message,
-  required VoidCallback onMessageSender,
+  VoidCallback? onMessageSender,
+  String? ownSenderLabel,
 }) => showModalBottomSheet<void>(
   context: context,
   isScrollControlled: true,
@@ -22,10 +24,13 @@ Future<void> showSosDetailSheet(
   showDragHandle: true,
   builder: (sheetContext) => SosDetailSheet(
     message: message,
-    onMessageSender: () {
-      Navigator.of(sheetContext).pop();
-      onMessageSender();
-    },
+    ownSenderLabel: ownSenderLabel,
+    onMessageSender: onMessageSender == null
+        ? null
+        : () {
+            Navigator.of(sheetContext).pop();
+            onMessageSender();
+          },
   ),
 );
 
@@ -33,11 +38,13 @@ class SosDetailSheet extends StatelessWidget {
   const SosDetailSheet({
     super.key,
     required this.message,
-    required this.onMessageSender,
+    this.onMessageSender,
+    this.ownSenderLabel,
   });
 
   final SosMessage message;
-  final VoidCallback onMessageSender;
+  final VoidCallback? onMessageSender;
+  final String? ownSenderLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -90,16 +97,21 @@ class SosDetailSheet extends StatelessWidget {
                     style: const TextStyle(fontSize: 15),
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: onMessageSender,
-                      icon: const Icon(Icons.chat_bubble_outline),
-                      label: const Text('Message sender'),
+                  if (ownSenderLabel == null && onMessageSender != null) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: onMessageSender,
+                        icon: const Icon(Icons.chat_bubble_outline),
+                        label: const Text('Message sender'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  SosReceiptSummary(message: message),
+                    const SizedBox(height: 14),
+                  ],
+                  if (ownSenderLabel != null)
+                    SosSendStatus(message: message)
+                  else
+                    SosReceiptSummary(message: message),
                   const SizedBox(height: 14),
                   const Divider(),
                   const Text(
@@ -140,7 +152,7 @@ class SosDetailSheet extends StatelessWidget {
                   _DetailRow(
                     label: 'Sender',
                     value:
-                        '${message.trustOwnerName ?? message.sender.name}\n${message.sender.id}',
+                        '${ownSenderLabel ?? message.trustOwnerName ?? message.sender.name}\n${message.sender.id}',
                   ),
                   _DetailRow(
                     label: 'Last relay peer',
@@ -173,9 +185,13 @@ class SosDetailSheet extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   _DetailRow(
-                    label: 'Trust',
+                    label: ownSenderLabel != null && !isRevoked
+                        ? 'Origin'
+                        : 'Trust',
                     value: isRevoked
                         ? 'Revoked • Quarantine'
+                        : ownSenderLabel != null
+                        ? 'Created on this phone'
                         : message.trustStatus.displayLabel,
                   ),
                   _DetailRow(

@@ -62,6 +62,24 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
 
+  String? get _localDeviceId => widget.accessProfile.deviceId == 'unknown'
+      ? ref.read(localPeerProvider).valueOrNull?.id
+      : widget.accessProfile.deviceId;
+
+  bool _isLocalPeerId(String peerId) =>
+      peerId.toLowerCase() == _localDeviceId?.toLowerCase();
+
+  String? _ownSosSenderLabel(messaging.SosMessage message) {
+    if (message.status == messaging.MessageStatus.received ||
+        message.receivedAt != null ||
+        !_isLocalPeerId(message.sender.id)) {
+      return null;
+    }
+    final profile = widget.accessProfile;
+    final name = profile.isApproved ? profile.ownerName?.trim() : null;
+    return name == null || name.isEmpty ? 'You' : '$name (you)';
+  }
+
   static const String _mapFilterAllMarkers = 'all-markers';
   static const String _mapFilterPeers = 'peers';
   static const String _mapFilterLocation = 'location';
@@ -531,6 +549,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     messaging.Peer peer, {
     messaging.SosMessage? linkedSosMessage,
   }) async {
+    if (_isLocalPeerId(peer.id)) return;
     final conversation = await ref.read(openConversationProvider)(
       remotePeer: peer,
       relatedSosMessageHash: linkedSosMessage?.messageHash,
@@ -967,9 +986,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     ];
 
     final String activeType = filters[_selectedMessageFilter].$3;
-    final localDeviceId = !_isResponder
-        ? ref.watch(localPeerProvider).valueOrNull?.id
-        : null;
+    if (widget.accessProfile.deviceId == 'unknown') {
+      ref.watch(localPeerProvider);
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1072,7 +1091,6 @@ class _HomePageState extends ConsumerState<HomePage> {
           data: (items) {
             final filteredMessages = items
                 .where((message) => _matchesSosFeedFilter(message, activeType))
-                .map(_messageFeedItemFromSosMessage)
                 .toList(growable: false);
 
             if (filteredMessages.isEmpty) {
@@ -1084,13 +1102,14 @@ class _HomePageState extends ConsumerState<HomePage> {
 
             return Column(
               children: filteredMessages
-                  .map(
-                    (item) => _buildMessageFeedCard(
-                      item,
-                      isOwnSos: item.message.sender.id == localDeviceId,
-                      onTap: () => _openSosMessage(item.message),
-                    ),
-                  )
+                  .map((message) {
+                    final ownSenderLabel = _ownSosSenderLabel(message);
+                    return _buildMessageFeedCard(
+                      _messageFeedItemFromSosMessage(message, ownSenderLabel),
+                      isOwnSos: ownSenderLabel != null,
+                      onTap: () => _openSosMessage(message),
+                    );
+                  })
                   .toList(growable: false),
             );
           },
@@ -1333,11 +1352,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-                    if (_isResponder) ...[
+                    if (_isResponder && !isOwnSos) ...[
                       const SizedBox(height: 8),
                       SosReceiptSummary(message: item.message),
                     ],
-                    if (isOwnSos && item.type == 'SOS') ...[
+                    if (isOwnSos) ...[
                       const SizedBox(height: 8),
                       SosSendStatus(message: item.message),
                     ],
@@ -1372,7 +1391,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                             ),
                           ],
                         ),
-                        _TrustStatusBadge(status: item.trustStatus),
+                        if (!isOwnSos || isRevoked)
+                          _TrustStatusBadge(status: item.trustStatus),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 10,
@@ -1530,20 +1550,24 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _openSosMessage(messaging.SosMessage message) async {
-    if (!_isResponder) {
+    final isLocalSender = _isLocalPeerId(message.sender.id);
+    if (!_isResponder && !isLocalSender) {
       await _openConversation(message.sender, linkedSosMessage: message);
       return;
     }
     await showSosDetailSheet(
       context,
       message: message,
-      onMessageSender: () =>
-          _openConversation(message.sender, linkedSosMessage: message),
+      ownSenderLabel: _ownSosSenderLabel(message),
+      onMessageSender: isLocalSender
+          ? null
+          : () => _openConversation(message.sender, linkedSosMessage: message),
     );
   }
 
   _MessageFeedItem _messageFeedItemFromSosMessage(
     messaging.SosMessage message,
+    String? ownSenderLabel,
   ) {
     final isSpam =
         message.moderationStatus == messaging.MessageModerationStatus.spam;
@@ -1554,8 +1578,9 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return _MessageFeedItem(
       message: message,
-      title:
-          '${_labelForCategory(message.category)} from ${message.trustOwnerName ?? message.sender.name}',
+      title: ownSenderLabel == null
+          ? '${_labelForCategory(message.category)} from ${message.trustOwnerName ?? message.sender.name}'
+          : '${_labelForCategory(message.category)} · $ownSenderLabel',
       description: message.body,
       distance: _distanceTextForMessage(message),
       time: _relativeTime(message.createdAt),

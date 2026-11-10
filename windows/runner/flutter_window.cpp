@@ -1,5 +1,8 @@
 #include "flutter_window.h"
 
+#include <flutter/method_channel.h>
+#include <flutter/standard_method_codec.h>
+
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -26,6 +29,25 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  flutter::MethodChannel<flutter::EncodableValue> window_channel(
+      flutter_controller_->engine()->messenger(),
+      "shadownetwork/admin_window", &flutter::StandardMethodCodec::GetInstance());
+  window_channel.SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() != "focus") {
+      result->NotImplemented();
+      return;
+    }
+    HWND window = GetHandle();
+    if (::IsIconic(window)) {
+      ::ShowWindow(window, SW_RESTORE);
+    }
+    if (::GetForegroundWindow() != window && !::SetForegroundWindow(window)) {
+      FLASHWINFO flash{sizeof(FLASHWINFO), window, FLASHW_TRAY, 3, 0};
+      ::FlashWindowEx(&flash);
+    }
+    result->Success();
+  });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();

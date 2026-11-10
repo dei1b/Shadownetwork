@@ -38,6 +38,21 @@ void main() {
       remotePeer: remote,
       relatedSosMessageHash: 'sos-hash',
     );
+    await expectLater(
+      repository.openConversation(
+        localPeer: local,
+        remotePeer: local.copyWith(id: local.id.toUpperCase()),
+      ),
+      throwsFormatException,
+    );
+    final savedAt = DateTime.utc(2026, 5, 25).toIso8601String();
+    await database.insert(LocalMessagingDatabase.conversationsTable, {
+      'id': 'legacy-self-chat',
+      'local_peer_id': local.id,
+      'remote_peer_id': local.id,
+      'created_at': savedAt,
+      'updated_at': savedAt,
+    });
     await repository.saveMessage(
       ChatMessage(
         id: 'chat-inbound',
