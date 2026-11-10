@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/models/sos_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/models/chat_message_payload.dart';
@@ -10,6 +12,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/chat_message.da
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/scf_envelope.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/scf_peer_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/sos_message.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
@@ -161,6 +164,71 @@ void main() {
 
     expect(status?.status, ScfPeerStatus.offered);
     expect(status?.attemptCount, 2);
+  });
+
+  test('retries interrupted offers after reopening SQLite', () async {
+    final directory = await Directory.systemTemp.createTemp('scf-restart-');
+    final databasePath = path.join(directory.path, 'messages.db');
+    final factory = databaseFactoryFfi;
+    addTearDown(() async {
+      await factory.deleteDatabase(databasePath);
+      await directory.delete();
+    });
+    Future<Database> openDatabase() => LocalMessagingDatabase.open(
+      databasePath: databasePath,
+      factory: factory,
+    );
+
+    final now = DateTime.utc(2026, 5, 2, 5, 30);
+    const peerId = 'peer-2';
+    final interrupted = _message();
+    final acknowledged = _message().copyWith(id: 'sos-2');
+    final interruptedHash = SosMessagePayload.messageHash(interrupted);
+    final acknowledgedHash = SosMessagePayload.messageHash(acknowledged);
+
+    final database = await openDatabase();
+    late final ScfEnvelope originalOffer;
+    try {
+      final original = ScfService(database: database);
+      await original.storeMessage(interrupted, receivedAt: now);
+      await original.storeMessage(acknowledged, receivedAt: now);
+      final offers = await original.prepareOutboundForPeer(peerId, now: now);
+      expect(offers, hasLength(2));
+      originalOffer = offers.singleWhere(
+        (item) => item.messageHash == interruptedHash,
+      );
+      await original.updatePeerStatus(
+        messageHash: acknowledgedHash,
+        peerId: peerId,
+        status: ScfPeerStatus.sent,
+        updatedAt: now,
+      );
+      expect(await original.prepareOutboundForPeer(peerId, now: now), isEmpty);
+    } finally {
+      await database.close();
+    }
+
+    final reopened = await openDatabase();
+    addTearDown(reopened.close);
+    final restarted = ScfService(database: reopened);
+    final retries = await restarted.prepareOutboundForPeer(
+      peerId,
+      now: now.add(const Duration(minutes: 1)),
+    );
+
+    expect(retries.map((item) => item.messageHash), [interruptedHash]);
+    expect(retries.single.expiresAt, originalOffer.expiresAt);
+    expect(retries.single.hopCount, originalOffer.hopCount);
+    final retriedStatus = await restarted.getPeerStatus(
+      messageHash: interruptedHash,
+      peerId: peerId,
+    );
+    final acknowledgedStatus = await restarted.getPeerStatus(
+      messageHash: acknowledgedHash,
+      peerId: peerId,
+    );
+    expect(retriedStatus?.attemptCount, 2);
+    expect(acknowledgedStatus?.status, ScfPeerStatus.sent);
   });
 
   test(

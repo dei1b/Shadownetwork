@@ -3,6 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../domain/entities/category.dart';
 import '../../domain/entities/peer_type.dart';
+import '../../domain/entities/scf_peer_status.dart';
 
 typedef DatabaseMigration = Future<void> Function(Database database);
 
@@ -95,7 +96,19 @@ class LocalMessagingDatabase {
         onConfigure: _configure,
         onCreate: _create,
         onUpgrade: _upgrade,
+        onOpen: _recoverInterruptedOffers,
       ),
+    );
+  }
+
+  static Future<void> _recoverInterruptedOffers(Database database) async {
+    // A send from the previous database session can no longer finish here.
+    // Keep its attempt count; normal queue selection still enforces TTL and trust.
+    await database.update(
+      scfPeerStatusesTable,
+      {'status': ScfPeerStatus.pending.name},
+      where: 'status = ?',
+      whereArgs: [ScfPeerStatus.offered.name],
     );
   }
 
