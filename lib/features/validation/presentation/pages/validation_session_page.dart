@@ -843,8 +843,13 @@ class _MetricItem {
 
 List<_MetricItem> _metricItems(ValidationSummary summary) => [
   _MetricItem(
-    'MESSAGE DELIVERY SUCCESS',
-    _percent(summary.deliverySuccessRate, empty: 'Needs delivery'),
+    'MESSAGES RECEIVED HERE',
+    '${summary.deliveredMessageCount}',
+    Icons.inbox_outlined,
+  ),
+  _MetricItem(
+    'OUTGOING CONFIRMATION RATE',
+    _percent(summary.deliverySuccessRate, empty: 'No outgoing attempts'),
     Icons.task_alt_rounded,
   ),
   _MetricItem(
@@ -853,8 +858,11 @@ List<_MetricItem> _metricItems(ValidationSummary summary) => [
     Icons.radar_rounded,
   ),
   _MetricItem(
-    'NODE-TO-NODE LATENCY',
-    _milliseconds(summary.averageNodeLatencyMs),
+    'OUTGOING CONFIRMATION TIME',
+    _milliseconds(
+      summary.averageNodeLatencyMs,
+      empty: 'No timed confirmations',
+    ),
     Icons.speed_rounded,
   ),
   _MetricItem(
@@ -872,9 +880,9 @@ List<_MetricItem> _metricItems(ValidationSummary summary) => [
     Icons.hub_outlined,
   ),
   _MetricItem(
-    'TRANSPORT USAGE',
+    'OUTGOING TRANSPORT USAGE',
     summary.transportUsage.isEmpty
-        ? 'No transfers'
+        ? 'No outgoing transfers'
         : summary.transportUsage.entries
               .map((entry) => '${_transportLabel(entry.key)} ${entry.value}')
               .join(' / '),
@@ -897,8 +905,8 @@ List<_MetricItem> _metricItems(ValidationSummary summary) => [
 String _percent(double? value, {required String empty}) =>
     value == null ? empty : '${(value * 100).toStringAsFixed(1)}%';
 
-String _milliseconds(double? value) {
-  if (value == null) return 'Needs matching events';
+String _milliseconds(double? value, {String empty = 'Needs matching events'}) {
+  if (value == null) return empty;
   if (value >= 1000) return '${(value / 1000).toStringAsFixed(2)} s';
   return '${value.toStringAsFixed(0)} ms';
 }
