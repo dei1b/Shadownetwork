@@ -70,12 +70,18 @@ class SqliteChatRepository implements ChatRepository {
       }
       return id;
     });
-    final conversations = await getConversations(localPeer.id);
-    return conversations.firstWhere((item) => item.id == id);
+    final conversations = await _queryConversations(localPeer.id, id: id);
+    return conversations.first;
   }
 
   @override
-  Future<List<Conversation>> getConversations(String localPeerId) async {
+  Future<List<Conversation>> getConversations(String localPeerId) =>
+      _queryConversations(localPeerId);
+
+  Future<List<Conversation>> _queryConversations(
+    String localPeerId, {
+    String? id,
+  }) async {
     final rows = await _database.rawQuery(
       '''
       SELECT conversations.*,
@@ -109,9 +115,10 @@ class SqliteChatRepository implements ChatRepository {
         )
       WHERE conversations.local_peer_id = ?
         AND lower(conversations.remote_peer_id) != lower(conversations.local_peer_id)
+        AND ${id == null ? 'latest.id IS NOT NULL' : 'conversations.id = ?'}
       ORDER BY conversations.last_message_at DESC, conversations.updated_at DESC
     ''',
-      [localPeerId],
+      [localPeerId, ?id],
     );
     return rows.map(ConversationModel.fromMap).toList(growable: false);
   }

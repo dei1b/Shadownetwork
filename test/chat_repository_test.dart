@@ -40,6 +40,12 @@ void main() {
       remotePeer: remote,
       relatedSosMessageHash: 'sos-hash',
     );
+    final directChat = await repository.openConversation(
+      localPeer: local,
+      remotePeer: remote.copyWith(id: 'node-b', name: 'Resident B'),
+    );
+    expect(conversation.relatedSosMessageHash, 'sos-hash');
+    expect(await repository.getConversations(local.id), isEmpty);
     await expectLater(
       repository.openConversation(
         localPeer: local,
@@ -177,5 +183,23 @@ void main() {
       ),
       isFalse,
     );
+
+    await repository.saveMessage(
+      ChatMessage(
+        id: 'first-direct-message',
+        conversationId: directChat.id,
+        sender: local,
+        recipient: directChat.remotePeer,
+        body: 'First message',
+        status: MessageStatus.queued,
+        createdAt: DateTime.utc(2026, 5, 25, 10, 2),
+      ),
+    );
+    final visible = await repository.getConversations(local.id);
+    expect(visible.map((thread) => thread.id), [
+      directChat.id,
+      conversation.id,
+    ]);
+    expect(visible.first.latestBody, 'First message');
   });
 }

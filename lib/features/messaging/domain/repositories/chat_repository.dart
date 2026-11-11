@@ -10,6 +10,7 @@ abstract class ChatRepository {
     String? relatedSosMessageHash,
   });
 
+  /// Lists conversations that contain at least one saved chat message.
   Future<List<Conversation>> getConversations(String localPeerId);
 
   Future<List<ChatMessage>> getMessages(String conversationId);
