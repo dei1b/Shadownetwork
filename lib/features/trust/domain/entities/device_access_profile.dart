@@ -25,6 +25,10 @@ class DeviceAccessProfile {
 
   bool get canAccessResponderInterface => level == DeviceAccessLevel.responder;
 
+  bool get canUseFieldTest =>
+      level == DeviceAccessLevel.civilian ||
+      level == DeviceAccessLevel.responder;
+
   bool get isApproved => switch (level) {
     DeviceAccessLevel.civilian ||
     DeviceAccessLevel.responder ||

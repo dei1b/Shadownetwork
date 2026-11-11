@@ -26,28 +26,38 @@ class SqliteChatRepository implements ChatRepository {
       throw const FormatException('Cannot open a chat with this phone.');
     }
     final now = DateTime.now().toUtc();
-    final id = 'conversation-${localPeer.id}-${remotePeer.id}';
-    await _database.transaction((transaction) async {
+    final id = await _database.transaction((transaction) async {
       await PeerModel.upsert(transaction, localPeer, timestamp: now);
-      await PeerModel.upsert(transaction, remotePeer, timestamp: now);
       final existing = await transaction.query(
         LocalMessagingDatabase.conversationsTable,
-        columns: ['id', 'related_sos_message_hash'],
-        where: 'local_peer_id = ? AND remote_peer_id = ?',
-        whereArgs: [localPeer.id, remotePeer.id],
+        columns: ['id', 'remote_peer_id'],
+        where: 'local_peer_id = ? AND lower(remote_peer_id) = ?',
+        whereArgs: [localPeer.id, remotePeer.id.toLowerCase()],
+        orderBy: 'last_message_at DESC, updated_at DESC, id',
         limit: 1,
       );
+      final storedRemoteId =
+          existing.firstOrNull?['remote_peer_id'] as String? ?? remotePeer.id;
+      await PeerModel.upsert(
+        transaction,
+        remotePeer.copyWith(id: storedRemoteId),
+        timestamp: now,
+      );
       if (existing.isEmpty) {
+        final id = 'conversation-${localPeer.id}-$storedRemoteId';
         await transaction.insert(LocalMessagingDatabase.conversationsTable, {
           'id': id,
           'local_peer_id': localPeer.id,
-          'remote_peer_id': remotePeer.id,
+          'remote_peer_id': storedRemoteId,
           'related_sos_message_hash': relatedSosMessageHash,
           'unread_count': 0,
           'created_at': now.toIso8601String(),
           'updated_at': now.toIso8601String(),
         });
-      } else if (relatedSosMessageHash != null) {
+        return id;
+      }
+      final id = existing.single['id']! as String;
+      if (relatedSosMessageHash != null) {
         await transaction.update(
           LocalMessagingDatabase.conversationsTable,
           {
@@ -55,14 +65,13 @@ class SqliteChatRepository implements ChatRepository {
             'updated_at': now.toIso8601String(),
           },
           where: 'id = ?',
-          whereArgs: [existing.single['id']],
+          whereArgs: [id],
         );
       }
+      return id;
     });
     final conversations = await getConversations(localPeer.id);
-    return conversations.firstWhere(
-      (item) => item.remotePeer.id == remotePeer.id,
-    );
+    return conversations.firstWhere((item) => item.id == id);
   }
 
   @override

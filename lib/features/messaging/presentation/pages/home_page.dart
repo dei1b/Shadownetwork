@@ -753,16 +753,20 @@ class _HomePageState extends ConsumerState<HomePage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (_isResponder)
-          const _TabHeader(title: 'Responder dashboard')
-        else
-          _TabHeader(
-            title: 'ShadowNetwork',
-            badge: _TabHeaderBadge(
-              label: approvalLabel,
-              positive: profile.isApproved,
-            ),
+        _TabHeader(
+          title: _isResponder ? 'Responder dashboard' : 'ShadowNetwork',
+          badge: _isResponder
+              ? null
+              : _TabHeaderBadge(
+                  label: approvalLabel,
+                  positive: profile.isApproved,
+                ),
+          trailing: IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => Navigator.of(context).pushNamed('/settings'),
           ),
+        ),
         const SizedBox(height: 12),
         if (_isResponder) ...[
           _buildResponderAlertButton(messages),
@@ -2894,21 +2898,6 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: _ActionCard(
-            icon: const Icon(
-              Icons.science_outlined,
-              color: Color(0xFFE83C3D),
-              size: 34,
-            ),
-            label: 'VALIDATION TEST',
-            labelColor: const Color(0xFFE83C3D),
-            subtitle: 'Record real field metrics',
-            onTap: () => Navigator.of(context).pushNamed('/validation'),
-          ),
         ),
         const SizedBox(height: 14),
         SizedBox(

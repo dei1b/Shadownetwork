@@ -87,7 +87,7 @@ class SecureChatMessagePayload {
     final recipient = _peerFromPayload(
       payload['recipient']! as Map<String, Object?>,
     );
-    if (recipient.id != localPeerId) {
+    if (recipient.id.toLowerCase() != localPeerId.toLowerCase()) {
       throw const FormatException(
         'Encrypted chat payload is for another peer.',
       );

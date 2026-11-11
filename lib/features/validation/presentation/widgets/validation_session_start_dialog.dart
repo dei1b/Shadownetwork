@@ -112,8 +112,7 @@ class _ValidationSessionStartDialogState
                 decoration: const InputDecoration(
                   labelText: 'Run code',
                   hintText: 'PANABO-2026-001',
-                  helperText:
-                      'Use the same code on every participating rescuer.',
+                  helperText: 'Use the same code on every participating phone.',
                   helperMaxLines: 3,
                   errorMaxLines: 4,
                 ),

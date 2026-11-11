@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shadownetwork/app/presentation/pages/settings_page.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
@@ -17,11 +18,141 @@ import 'package:shadownetwork/features/validation/presentation/providers/validat
 import 'package:shadownetwork/features/validation/presentation/widgets/validation_session_start_dialog.dart';
 import 'package:shadownetwork/features/validation/presentation/widgets/validation_run_qr_dialog.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'support/database_migration_test_harness.dart';
 import 'support/validation_run_fixtures.dart';
 
 void main() {
   setUpAll(sqfliteFfiInit);
+  setUp(
+    () => SharedPreferences.setMockInitialValues({
+      'shadow_network_field_test_tools_enabled': true,
+    }),
+  );
+  for (final role in [
+    DeviceAccessLevel.civilian,
+    DeviceAccessLevel.responder,
+  ]) {
+    testWidgets('$role opens field tests only after opting in', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      Future<void> openSettings() => tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            deviceAccessProfileProvider.overrideWith(
+              (ref) async =>
+                  DeviceAccessProfile(deviceId: 'local', level: role),
+            ),
+            validationSessionProvider.overrideWith(
+              _EmptyFieldTestController.new,
+            ),
+          ],
+          child: MaterialApp(
+            home: const SettingsPage(),
+            routes: {'/validation': (_) => const ValidationSessionPage()},
+          ),
+        ),
+      );
+      await openSettings();
+      await tester.pumpAndSettle();
+      expect(find.text('Field test tools'), findsNothing);
+      await tester.tap(find.text('Advanced'));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
+        isFalse,
+      );
+      expect(find.text('Open SOS field test'), findsNothing);
+      await tester.tap(find.text('Field test tools'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open SOS field test'));
+      await tester.pumpAndSettle();
+      expect(find.text('Set up test'), findsOneWidget);
+
+      // A new app scope reads the persisted opt-in.
+      await tester.pumpWidget(const SizedBox.shrink());
+      await openSettings();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Advanced'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open SOS field test'), findsOneWidget);
+      await tester.tap(find.text('Field test tools'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open SOS field test'), findsNothing);
+    });
+  }
+  testWidgets('approved civilian records a shared run under their own role', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(DatabaseMigrationTestHarness.create))!;
+    addTearDown(h.dispose);
+    final db = (await tester.runAsync(h.openCurrentDatabase))!;
+    addTearDown(db.close);
+    final repo = SqliteValidationMetricsRepository(database: db);
+    final container = ProviderContainer(
+      overrides: [
+        localMessagingDatabaseProvider.overrideWith((ref) async => db),
+        batterySamplerProvider.overrideWithValue(
+          const UnavailableBatterySampler(),
+        ),
+        deviceAccessProfileProvider.overrideWith(
+          (ref) async => const DeviceAccessProfile(
+            deviceId: 'local',
+            level: DeviceAccessLevel.civilian,
+          ),
+        ),
+        localPeerProvider.overrideWith(
+          (ref) async => const Peer(
+            id: 'local',
+            name: 'Resident',
+            type: PeerType.civilian,
+            isConnected: false,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.runAsync(
+      () => container.read(validationSessionProvider.future),
+    );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ValidationSessionPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Set up test'));
+      await repo.getSessions();
+    });
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('validation-session-name')),
+      'Civilian sender',
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('validation-run-code')),
+      'SHARED-01',
+    );
+    await tester.tap(find.text('Start recording'));
+    for (var attempt = 0; attempt < 50; attempt++) {
+      await tester.pump(const Duration(milliseconds: 50));
+      if (container
+              .read(validationSessionProvider)
+              .valueOrNull
+              ?.activeSession !=
+          null) {
+        break;
+      }
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+    }
+    final session = await tester.runAsync(repo.getActiveSession);
+    expect(session?.deviceRole, 'civilian');
+    expect(session?.testRunId, 'SHARED-01');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
   testWidgets('approval lost while form is open cannot start recording', (
     tester,
   ) async {
@@ -321,9 +452,7 @@ void main() {
       },
     );
   }
-  testWidgets('unregistered phones cannot enter responder validation', (
-    tester,
-  ) async {
+  testWidgets('unregistered phones cannot enter field tests', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -336,9 +465,18 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('approved responder device'), findsOneWidget);
+    expect(
+      find.textContaining('approved civilian or responder phone'),
+      findsOneWidget,
+    );
     expect(find.text('Generate code'), findsNothing);
   });
+}
+
+class _EmptyFieldTestController extends ValidationSessionController {
+  @override
+  Future<ValidationSessionViewState> build() async =>
+      ValidationSessionViewState(sessions: const [], now: DateTime(2026));
 }
 
 Widget _host(

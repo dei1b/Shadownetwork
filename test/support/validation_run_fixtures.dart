@@ -5,6 +5,7 @@ import 'package:shadownetwork/features/validation/domain/entities/validation_ses
 ValidationSessionData runFixture({
   String id = 'session',
   String deviceId = 'local',
+  String deviceRole = 'responder',
   String? runId = 'RUN-001',
   DateTime? startedAt,
   bool telemetry = true,
@@ -17,7 +18,7 @@ ValidationSessionData runFixture({
       name: 'Local trial',
       environment: 'Lab',
       deviceId: deviceId,
-      deviceRole: 'responder',
+      deviceRole: deviceRole,
       testRunId: runId,
       startedAt: start,
       endedAt: status == ValidationSessionStatus.completed

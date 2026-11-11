@@ -43,9 +43,9 @@ class ValidationBundleExportController
     state = const AsyncLoading();
     try {
       final access = await ref.refresh(deviceAccessProfileProvider.future);
-      if (!access.canAccessResponderInterface) {
+      if (!access.canUseFieldTest) {
         throw StateError(
-          'An approved responder device is required to share validation files.',
+          'An approved civilian or responder phone is required to share validation files.',
         );
       }
       final local = await ref.read(localPeerProvider.future);
@@ -57,10 +57,10 @@ class ValidationBundleExportController
       final currentAccess = await ref.refresh(
         deviceAccessProfileProvider.future,
       );
-      if (!currentAccess.canAccessResponderInterface ||
+      if (!currentAccess.canUseFieldTest ||
           currentAccess.deviceId != local.id) {
         throw StateError(
-          'Responder approval changed. Check this phone registration before exporting.',
+          'Phone approval changed. Check registration before exporting.',
         );
       }
       final bundle =

@@ -56,17 +56,21 @@ void main() {
           publicKey: identity.encodedPublicKey,
           signingPublicKey: signingKey ?? signingIdentity.encodedPublicKey,
         );
-    TrustBundle approval(List<TrustedDevice> devices, {bool expired = false}) =>
-        TrustBundle(
-          schemaVersion: 2,
-          generatedAt: now,
-          expiresAt: now.add(Duration(hours: expired ? -1 : 1)),
-          isSignatureVerified: true,
-          approvedDevices: devices,
-          revokedDevices: const [],
-        );
+    TrustBundle approval(
+      List<TrustedDevice> devices, {
+      bool expired = false,
+      List<TrustedDevice> revoked = const [],
+    }) => TrustBundle(
+      schemaVersion: 2,
+      generatedAt: now,
+      expiresAt: now.add(Duration(hours: expired ? -1 : 1)),
+      isSignatureVerified: true,
+      approvedDevices: devices,
+      revokedDevices: revoked,
+    );
 
     final receiveSos = container.read(canReceiveSosProvider);
+    final inboxAccess = container.read(sosInboxAccessProvider);
     final targets = container.read(approvedSosRescuersProvider);
     expect(await receiveSos(), isFalse);
     store.bundle = approval([
@@ -103,6 +107,19 @@ void main() {
     expect(await receiveSos(), isFalse);
     store.bundle = approval([device(local.id, 'responder')], expired: true);
     expect(await receiveSos(), isFalse);
+    expect(await inboxAccess(), SosInboxAccess.awaitingRenewal);
     expect(await targets('another-phone'), isEmpty);
+    store.bundle = approval([device(local.id, 'civilian')], expired: true);
+    expect(await inboxAccess(), SosInboxAccess.denied);
+    store.bundle = approval([
+      device(local.id, 'responder', signingKey: 'wrong'),
+    ], expired: true);
+    expect(await inboxAccess(), SosInboxAccess.denied);
+    store.bundle = approval(
+      [device(local.id, 'responder')],
+      expired: true,
+      revoked: [device(local.id, 'responder')],
+    );
+    expect(await inboxAccess(), SosInboxAccess.denied);
   });
 }

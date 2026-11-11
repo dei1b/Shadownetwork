@@ -6,6 +6,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
 import 'package:shadownetwork/features/messaging/data/models/sos_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/models/chat_message_payload.dart';
+import 'package:shadownetwork/features/messaging/data/models/secure_chat_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_chat_repository.dart';
 import 'package:shadownetwork/features/messaging/data/services/incoming_message_notifications.dart';
 import 'package:shadownetwork/features/messaging/data/services/mock_scf_transport.dart';
@@ -21,6 +22,9 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart'
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
+import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
+import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
+import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 import 'support/database_migration_test_harness.dart';
 
@@ -47,8 +51,10 @@ ProviderContainer runtimeContainer(
       localMessagingDatabaseProvider.overrideWith((ref) async => db),
       scfTransportProvider.overrideWithValue(transport),
       incomingMessageNotificationsProvider.overrideWithValue(notifications),
-      canReceiveSosProvider.overrideWithValue(
-        () async => transport.localPeerId == receiver.id,
+      sosInboxAccessProvider.overrideWithValue(
+        () async => transport.localPeerId == receiver.id
+            ? SosInboxAccess.allowed
+            : SosInboxAccess.denied,
       ),
       deviceIdentityStoreProvider.overrideWithValue(
         DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
@@ -69,9 +75,163 @@ ChatMessage chat(String id, DateTime time, String conversation) => ChatMessage(
   createdAt: time,
 );
 
+class _TestBundleStore extends TrustBundleStore {
+  TrustBundle? bundle;
+
+  @override
+  Future<TrustBundle?> loadBundle() async => bundle;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(sqfliteFfiInit);
+
+  test(
+    'signed chat with mixed-case IDs reaches the existing conversation',
+    () async {
+      final db = await LocalMessagingDatabase.open(
+        databasePath: inMemoryDatabasePath,
+        factory: databaseFactoryFfi,
+      );
+      addTearDown(db.close);
+      final network = MockScfTransportNetwork();
+      final container = runtimeContainer(db, network.registerPeer(receiver));
+      final repository = await container.read(chatRepositoryProvider.future);
+      final conversation = await repository.openConversation(
+        localPeer: receiver,
+        remotePeer: sender.copyWith(id: sender.id.toUpperCase()),
+      );
+      final now = DateTime.now().toUtc();
+      final message = chat(
+        'private reply',
+        now,
+        'remote-conversation',
+      ).copyWith(recipient: receiver.copyWith(id: receiver.id.toUpperCase()));
+      final identity = await container.read(
+        deviceCryptoIdentityProvider.future,
+      );
+      final signing = await DeviceSigningIdentityStore(
+        secretStore: InMemorySecretValueStore(),
+      ).loadOrCreate();
+      final prepared = await SecureChatMessagePayload.prepare(
+        message,
+        encryptionService: container.read(messageEncryptionServiceProvider),
+        recipientPublicKey: identity.encodedPublicKey,
+        signingIdentity: signing,
+      );
+      network.send(
+        fromPeerId: sender.id,
+        toPeerId: receiver.id,
+        envelope: ScfEnvelope(
+          messageHash: prepared.hash,
+          payloadJson: prepared.payloadJson,
+          hopCount: 1,
+          receivedAt: now,
+          expiresAt: now.add(message.ttl),
+        ),
+      );
+      expect(
+        await container.read(relayRuntimeProvider.notifier).receiveIncoming(),
+        1,
+      );
+      expect(
+        (await repository.getConversations(receiver.id)).single.id,
+        conversation.id,
+      );
+      final received = (await repository.getMessages(conversation.id)).single;
+      expect(received.body, message.body);
+      expect(received.recipient.id, receiver.id);
+      expect(received.messageHash, prepared.hash);
+    },
+  );
+
+  test(
+    'stored SOS reaches the inbox after responder approval renewal',
+    () async {
+      final db = await LocalMessagingDatabase.open(
+        databasePath: inMemoryDatabasePath,
+        factory: databaseFactoryFfi,
+      );
+      addTearDown(db.close);
+      final store = _TestBundleStore();
+      final container = ProviderContainer(
+        overrides: [
+          localMessagingDatabaseProvider.overrideWith((ref) async => db),
+          scfTransportProvider.overrideWithValue(
+            MockScfTransportNetwork().registerPeer(receiver),
+          ),
+          trustBundleStoreProvider.overrideWithValue(store),
+          deviceIdentityStoreProvider.overrideWithValue(
+            DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
+          ),
+          deviceSigningIdentityStoreProvider.overrideWithValue(
+            DeviceSigningIdentityStore(secretStore: InMemorySecretValueStore()),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final identity = await container.read(
+        deviceCryptoIdentityProvider.future,
+      );
+      final signing = await container.read(
+        deviceSigningIdentityProvider.future,
+      );
+      final receivedAt = DateTime.now().toUtc().subtract(
+        const Duration(minutes: 2),
+      );
+      final registration = TrustedDevice(
+        deviceId: receiver.id,
+        ownerName: receiver.name,
+        role: 'responder',
+        status: 'approved',
+        updatedAt: receivedAt,
+        publicKey: identity.encodedPublicKey,
+        keyVersion: identity.keyVersion,
+        signingPublicKey: signing.encodedPublicKey,
+      );
+      TrustBundle approval(DateTime expiresAt) => TrustBundle(
+        schemaVersion: 2,
+        generatedAt: receivedAt,
+        expiresAt: expiresAt,
+        isSignatureVerified: true,
+        approvedDevices: [registration],
+        revokedDevices: const [],
+      );
+      store.bundle = approval(receivedAt.add(const Duration(minutes: 1)));
+      final sos = SosMessage(
+        id: 'pending-renewal',
+        sender: sender,
+        recipient: receiver,
+        body: 'Need assistance',
+        category: Category.medical,
+        status: MessageStatus.queued,
+        createdAt: receivedAt,
+      );
+      final envelope = ScfEnvelope(
+        messageHash: SosMessagePayload.messageHash(sos),
+        payloadJson: SosMessagePayload.canonicalJson(sos),
+        payloadType: 'sos_message',
+        hopCount: 1,
+        receivedAt: receivedAt,
+        expiresAt: receivedAt.add(const Duration(hours: 1)),
+      );
+      final scf = ScfService(database: db);
+      expect(await scf.storeEnvelope(envelope, now: receivedAt), isTrue);
+      final runtime = container.read(relayRuntimeProvider.notifier);
+      final repository = await container.read(
+        sosMessageRepositoryProvider.future,
+      );
+      expect(await runtime.receiveIncoming(), 0);
+      expect(await repository.getMessages(), isEmpty);
+      expect(await scf.getPendingInbox(), hasLength(1));
+
+      store.bundle = approval(receivedAt.add(const Duration(days: 1)));
+      expect(await runtime.receiveIncoming(), 1);
+      expect((await repository.getMessages()).single.receivedAt, receivedAt);
+      expect(await scf.getPendingInbox(), isEmpty);
+      expect(await runtime.receiveIncoming(), 0);
+    },
+  );
 
   test(
     'foreground chat and background SOS notify once per local receipt',

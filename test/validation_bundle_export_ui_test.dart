@@ -21,6 +21,7 @@ import 'package:shadownetwork/features/validation/presentation/providers/validat
 import 'package:shadownetwork/features/validation/presentation/providers/validation_session_provider.dart';
 import 'package:shadownetwork/features/validation/presentation/widgets/validation_bundle_share_button.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/database_migration_test_harness.dart';
 import 'support/validation_run_fixtures.dart';
@@ -49,6 +50,11 @@ class _Files implements ValidationBundleFileGateway {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(sqfliteFfiInit);
+  setUp(
+    () => SharedPreferences.setMockInitialValues({
+      'shadow_network_field_test_tools_enabled': true,
+    }),
+  );
 
   test(
     'cached responder access is resolved again after trust bundle expires',
@@ -306,7 +312,7 @@ void main() {
   }
 
   test(
-    'approval checked at submission and concurrent requests do not duplicate files',
+    'approved civilian can share and concurrent requests do not duplicate files',
     () async {
       final harness = await DatabaseMigrationTestHarness.create();
       addTearDown(harness.dispose);
@@ -314,7 +320,7 @@ void main() {
       addTearDown(db.close);
       await SqliteValidationMetricsRepository(
         database: db,
-      ).importSessionData(runFixture());
+      ).importSessionData(runFixture(deviceRole: 'civilian'));
       final files = _Files();
       final access = StateProvider((ref) => DeviceAccessLevel.keyMismatch);
       final container = ProviderContainer(
@@ -345,12 +351,15 @@ void main() {
       );
       await expectLater(controller.shareSession('session'), throwsStateError);
       expect(files.writes, 0);
-      container.read(access.notifier).state = DeviceAccessLevel.responder;
+      container.read(access.notifier).state = DeviceAccessLevel.civilian;
       files.pending = Completer<void>();
       final first = controller.shareSession('session');
       expect(await controller.shareSession('session'), isNull);
       files.pending!.complete();
-      expect(await first, isNotNull);
+      expect(
+        (await first)?.toJson()['device'],
+        containsPair('role', 'civilian'),
+      );
       expect(files.writes, 1);
       expect(files.shares, 1);
     },

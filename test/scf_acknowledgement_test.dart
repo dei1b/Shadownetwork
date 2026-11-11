@@ -66,8 +66,10 @@ void main() {
           overrides: [
             localMessagingDatabaseProvider.overrideWith((ref) async => db),
             scfTransportProvider.overrideWithValue(transport),
-            canReceiveSosProvider.overrideWithValue(
-              () async => transport.localPeerId == receiver.id,
+            sosInboxAccessProvider.overrideWithValue(
+              () async => transport.localPeerId == receiver.id
+                  ? SosInboxAccess.allowed
+                  : SosInboxAccess.denied,
             ),
             deviceIdentityStoreProvider.overrideWithValue(
               DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
@@ -135,7 +137,9 @@ void main() {
       overrides: [
         localMessagingDatabaseProvider.overrideWith((ref) async => reopened),
         scfTransportProvider.overrideWithValue(offline),
-        canReceiveSosProvider.overrideWithValue(() async => true),
+        sosInboxAccessProvider.overrideWithValue(
+          () async => SosInboxAccess.allowed,
+        ),
         deviceIdentityStoreProvider.overrideWithValue(
           DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
         ),

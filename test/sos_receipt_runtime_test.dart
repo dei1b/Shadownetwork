@@ -70,7 +70,10 @@ void main() {
               (ref) async => database,
             ),
             scfTransportProvider.overrideWithValue(transport),
-            canReceiveSosProvider.overrideWithValue(() async => !localOrigin),
+            sosInboxAccessProvider.overrideWithValue(
+              () async =>
+                  localOrigin ? SosInboxAccess.denied : SosInboxAccess.allowed,
+            ),
             deviceIdentityStoreProvider.overrideWithValue(identityStore),
           ],
         );

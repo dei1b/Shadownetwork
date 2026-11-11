@@ -185,6 +185,9 @@ class ValidationAnalysisCalculator {
     String attempt(AnalysisRecord r) => '${r.device}/${r.transfer}';
     bool matches(AnalysisRecord a, AnalysisRecord b) =>
         a.hash == b.hash && a.data['peer_id'] == b.data['peer_id'];
+    bool sendFailure(AnalysisRecord r) =>
+        r.type == 'envelopeRejected' &&
+        (r.data['metadata'] as Map?)?['phase'] == 'send';
     final offers = <String, AnalysisRecord>{};
     final sent = <String, AnalysisRecord>{};
     final failed = <String>{};
@@ -206,6 +209,9 @@ class ValidationAnalysisCalculator {
       if (!matches(previous, r)) badAttempts.add(key);
       if (r.type == 'envelopeSent' || r.type == 'envelopeAcknowledged') {
         outcomes[key] = r;
+      } else if (sendFailure(r) && r.transport != 'unknown') {
+        // A radio can fail before any envelopeSent event is recorded.
+        outcomes.putIfAbsent(key, () => r);
       }
     }
     for (final r in selected.where(
@@ -218,12 +224,11 @@ class ValidationAnalysisCalculator {
         offers.putIfAbsent(key, () => r);
       }
       if (r.type == 'envelopeSent') sent.putIfAbsent(key, () => r);
-      if (r.type == 'envelopeRejected' &&
-          (r.data['metadata'] as Map?)?['phase'] == 'send') {
+      if (sendFailure(r)) {
         failed.add(key);
       }
     }
-    // Filter offers by the actual sent transport when available, not a preferred radio.
+    // Use the radio reported by the outcome, including failures before sending.
     if (filter.transport != null) {
       for (final r in all.where(
         (r) =>
@@ -245,12 +250,7 @@ class ValidationAnalysisCalculator {
         acks.putIfAbsent(attempt(r), () => r);
       }
     }
-    for (final r in all.where(
-      (r) =>
-          r.type == 'envelopeRejected' &&
-          r.transfer != null &&
-          (r.data['metadata'] as Map?)?['phase'] == 'send',
-    )) {
+    for (final r in all.where((r) => r.transfer != null && sendFailure(r))) {
       final key = attempt(r);
       final offer = offers[key];
       if (offer != null && matches(offer, r) && !badAttempts.contains(key)) {
@@ -258,12 +258,7 @@ class ValidationAnalysisCalculator {
       }
     }
     final uncorrelated = selected
-        .where(
-          (r) =>
-              r.type == 'envelopeRejected' &&
-              r.transfer == null &&
-              (r.data['metadata'] as Map?)?['phase'] == 'send',
-        )
+        .where((r) => r.transfer == null && sendFailure(r))
         .length;
     if (uncorrelated > 0) {
       issues.add(

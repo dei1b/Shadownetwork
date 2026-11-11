@@ -461,7 +461,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }) async {
     var storedCount = 0;
     final notifications = ref.read(incomingMessageNotificationsProvider);
-    bool? canReceiveSos;
+    SosInboxAccess? sosAccess;
     for (final envelope in envelopes) {
       try {
         final isChat = await RelayPayloadCodec.decodeFields(
@@ -484,7 +484,10 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         final targetPeerId = await RelayPayloadCodec.decodeFields(
           () => SosMessagePayload.targetPeerId(envelope.payloadJson),
         );
-        if (targetPeerId != null && targetPeerId != localPeer.id) {
+        if (targetPeerId != null &&
+            (isChat
+                ? targetPeerId.toLowerCase() != localPeer.id.toLowerCase()
+                : targetPeerId != localPeer.id)) {
           await scfService.discardPendingMessage(envelope.messageHash);
           continue;
         }
@@ -536,6 +539,8 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           );
           final candidate = chat.copyWith(
             conversationId: conversation.id,
+            sender: chat.sender.copyWith(id: conversation.remotePeer.id),
+            recipient: localPeer,
             trustStatus: senderTrust.status,
             trustRole: senderTrust.role,
             trustOwnerName: senderTrust.ownerName,
@@ -577,8 +582,9 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           storedCount++;
           continue;
         }
-        canReceiveSos ??= await ref.read(canReceiveSosProvider)();
-        if (!canReceiveSos) {
+        sosAccess ??= await ref.read(sosInboxAccessProvider)();
+        if (sosAccess == SosInboxAccess.awaitingRenewal) continue;
+        if (sosAccess == SosInboxAccess.denied) {
           // Keep the forwarding copy so a rescuer can receive it later.
           await scfService.discardPendingMessage(envelope.messageHash);
           continue;

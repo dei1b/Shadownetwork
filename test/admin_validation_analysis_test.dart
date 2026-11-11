@@ -113,6 +113,29 @@ void main() {
       expect(calculate([missing]).issues.join(), contains('1 uncorrelated'));
     },
   );
+  test('failed fallback before sending counts under the actual radio', () {
+    final records = [
+      event('offer', 'envelopeOffered', radio: 'wifi_direct'),
+      event('failed', 'envelopeRejected', radio: 'bluetooth', hour: 2),
+    ];
+    ValidationRunAnalysis forRadio(String radio) => calculate(
+      records,
+      filter: ValidationAnalysisFilter(
+        run: 'run',
+        transport: radio,
+        end: DateTime.utc(2026, 11, 11, 1),
+      ),
+    );
+    final bluetooth = forRadio('bluetooth');
+    expect(bluetooth.offered, 1);
+    expect(bluetooth.failed, 1);
+    expect(bluetooth.open, 0);
+    expect(bluetooth.sent, 0);
+    final wifi = forRadio('wifi_direct');
+    expect(wifi.offered, 0);
+    expect(wifi.failed, 0);
+    expect(calculate(records).failed, 1);
+  });
   test('earliest valid receipt wins over invalid ordering', () {
     AnalysisRecord receipt(String received) =>
         AnalysisRecord('run', 'a', 'responder', 's', 'sos_receipts', {

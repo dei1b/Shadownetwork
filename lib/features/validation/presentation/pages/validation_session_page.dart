@@ -8,6 +8,7 @@ import '../../../trust/presentation/providers/device_access_provider.dart';
 import '../../domain/entities/validation_session.dart';
 import '../../domain/entities/validation_session_data.dart';
 import '../../domain/entities/validation_summary.dart';
+import '../providers/field_test_settings_provider.dart';
 import '../providers/validation_session_provider.dart';
 import '../widgets/validation_session_start_dialog.dart';
 import '../widgets/validation_run_qr_dialog.dart';
@@ -23,15 +24,20 @@ class ValidationSessionPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final access = ref.watch(deviceAccessProfileProvider);
-    final isResponder = access.valueOrNull?.canAccessResponderInterface == true;
-    if (!isResponder) {
+    final canUseFieldTest = access.valueOrNull?.canUseFieldTest == true;
+    final toolsEnabled = canUseFieldTest
+        ? ref.watch(fieldTestToolsEnabledProvider)
+        : const AsyncData(false);
+    if (!canUseFieldTest || toolsEnabled.valueOrNull != true) {
       return Scaffold(
         appBar: AppBar(title: const Text('SOS field test')),
-        body: const Center(
+        body: Center(
           child: Padding(
-            padding: EdgeInsets.all(28),
+            padding: const EdgeInsets.all(28),
             child: Text(
-              'Validation sessions are available only on an approved responder device.',
+              canUseFieldTest
+                  ? 'Turn on Field test tools in Settings → Advanced.'
+                  : 'Field tests require an approved civilian or responder phone.',
               textAlign: TextAlign.center,
             ),
           ),
@@ -143,12 +149,14 @@ class ValidationSessionPage extends ConsumerWidget {
         initialRunCode: recentCode,
       );
       if (result == null || !context.mounted) return;
-      final profile = await ref.read(deviceAccessProfileProvider.future);
+      final profile = await ref.refresh(deviceAccessProfileProvider.future);
       if (!context.mounted) return;
-      if (!profile.canAccessResponderInterface) {
+      if (!profile.canUseFieldTest ||
+          profile.deviceId != localPeer.id ||
+          ref.read(fieldTestToolsEnabledProvider).valueOrNull != true) {
         ActionFeedback.show(
           context,
-          'Current responder approval is required to start recording.',
+          'Check phone approval and turn on Field test tools before recording.',
           kind: FeedbackKind.warning,
         );
         return;
