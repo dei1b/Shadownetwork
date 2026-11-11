@@ -1,0 +1,16 @@
+00:00 +0: loading C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_test.dart
+00:00 +0: failure after window closes offer and uncorrelated failures stay visible
+00:00 +1: earliest valid receipt wins over invalid ordering
+00:00 +2: large overlapping evidence stays linear and deduplicated
+100000 overlapping records analyzed in 1021 ms
+00:01 +3: validated decoder retains records and rejects tampering
+00:01 +4: overlapping snapshots, repeated event and cross-session telemetry do not inflate attempts
+00:01 +5: ACK after offer time window still matches
+00:01 +6: device and run isolate reused transfer IDs; mismatched identities excluded
+00:01 +7: conflicting duplicate records excluded
+00:01 +8: partial responder data supplies no final receipt estimates
+00:01 +9: statistics use midpoint median and nearest rank P95
+00:01 +10: fallback and ACK rates use distinct populations
+00:01 +11: battery needs unplugged non-rising ordered samples
+00:01 +12: receipt hops require SOS receipts; negative propagation excluded
+00:01 +13: All tests passed!

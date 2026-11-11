@@ -1,0 +1,10 @@
+00:00 +0: loading C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_dashboard_test.dart
+00:00 +0: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_dashboard_test.dart: (setUpAll)
+00:00 +0: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_dashboard_test.dart: partial dashboard fits 800.0 and renders honest empty receipt metrics
+00:01 +1: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:02 +2: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:03 +3: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:04 +4: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: legacy warnings and metadata fit narrow layouts with scaled text
+00:04 +5: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file picker failure is recoverable and never echoes exception source
+00:05 +6: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: conflicting files block import without writing any dataset
+00:06 +7: All tests passed!

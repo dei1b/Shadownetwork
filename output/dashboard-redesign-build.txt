@@ -1,0 +1,13 @@
+Building Windows application...                                 
+CMake Deprecation Warning at C:/Users/Dave/Desktop/Shadownetwork/build/windows/x64/extracted/firebase_cpp_sdk_windows/CMakeLists.txt:17 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+Nuget.exe not found, trying to download or use cached version.
+Building Windows application...                                    55.6s
+√ Built build\windows\x64\runner\Release\ShadowNetworkAdmin.exe

@@ -1,0 +1,332 @@
+00:00 +0: loading C:/Users/Dave/Desktop/Shadownetwork/test/action_feedback_test.dart
+00:00 +0: C:/Users/Dave/Desktop/Shadownetwork/test/action_feedback_test.dart: clipboard failure never shows a completed state
+00:00 +1: C:/Users/Dave/Desktop/Shadownetwork/test/action_feedback_test.dart: clipboard failure never shows a completed state
+00:00 +2: C:/Users/Dave/Desktop/Shadownetwork/test/action_feedback_test.dart: clipboard failure never shows a completed state
+00:00 +3: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:00 +4: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:00 +5: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:00 +6: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:00 +7: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:00 +8: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:01 +9: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:01 +10: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:01 +11: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:01 +12: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +13: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +14: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +15: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +16: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +17: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:03 +18: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:03 +19: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_dashboard_test.dart: partial dashboard fits 800.0 and renders honest empty receipt metrics
+00:03 +20: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_test.dart: large overlapping evidence stays linear and deduplicated
+00:03 +21: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_test.dart: large overlapping evidence stays linear and deduplicated
+00:03 +22: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_test.dart: large overlapping evidence stays linear and deduplicated
+00:04 +23: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_analysis_test.dart: large overlapping evidence stays linear and deduplicated
+100000 overlapping records analyzed in 1478 ms
+00:04 +24: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +25: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +26: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +27: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +28: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +29: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +30: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +31: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +32: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +33: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +34: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +35: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +36: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +37: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +38: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +39: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +40: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +41: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +42: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: user contact details can be edited and cleared
+00:04 +43: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +44: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +45: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +46: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +47: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +48: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +49: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +50: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +51: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +52: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +53: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +54: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +55: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +56: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +57: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:06 +58: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:06 +59: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:06 +60: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:06 +61: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +62: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +63: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +64: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +65: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +66: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +67: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +68: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +69: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +70: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +71: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +72: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +73: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +74: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +75: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +76: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +77: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +78: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:07 +79: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:08 +80: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: device search combines with status and role and can reset
+00:08 +81: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: publishes an approval QR for a 12-device bundle
+00:08 +82: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: legacy warnings and metadata fit narrow layouts with scaled text
+00:08 +83: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: legacy warnings and metadata fit narrow layouts with scaled text
+00:08 +84: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: legacy warnings and metadata fit narrow layouts with scaled text
+00:08 +85: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:08 +86: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:08 +87: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:08 +88: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +89: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +90: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +91: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +92: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +93: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +94: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +95: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +96: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:09 +97: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +98: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +99: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +100: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +101: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +102: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +103: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +104: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +105: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +106: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +107: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +108: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +109: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +110: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +111: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +112: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +113: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +114: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +115: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +116: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:10 +117: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:11 +118: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:11 +119: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:11 +120: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:11 +121: C:/Users/Dave/Desktop/Shadownetwork/test/admin_workspace_test.dart: same-identity restore reloads before publication and registration
+00:11 +122: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +123: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +124: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +125: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +126: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +127: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +128: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +129: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +130: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +131: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +132: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +133: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +134: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +135: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:11 +136: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:12 +137: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:12 +138: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:12 +139: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:12 +140: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:12 +141: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:13 +142: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:13 +143: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:13 +144: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:14 +145: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:14 +146: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:14 +147: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +148: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +149: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +150: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +151: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +152: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +153: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: explicit matching restore repairs malformed protected identity and retains database counter
+00:17 +154: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:17 +155: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:17 +156: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:17 +157: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:18 +158: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:18 +159: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:18 +160: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +161: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +162: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +163: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +164: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +165: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +166: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +167: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +168: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +169: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +170: C:/Users/Dave/Desktop/Shadownetwork/test/offline_map_startup_test.dart: responder alerts distinguish outgoing SOS from received SOS
+00:19 +171: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +172: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +173: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +174: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +175: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +176: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +177: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +178: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +179: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +180: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +181: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +182: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +183: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +184: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +185: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +186: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:19 +187: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +188: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +189: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +190: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +191: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +192: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +193: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +194: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +195: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +196: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +197: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +198: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +199: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +200: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +201: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +202: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +203: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:20 +204: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +205: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +206: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +207: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +208: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +209: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +210: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +211: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +212: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +213: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:21 +214: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +215: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +216: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +217: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +218: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +219: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +220: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +221: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +222: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +223: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +224: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +225: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +226: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +227: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +228: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +229: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +230: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:22 +231: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:23 +232: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +233: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +234: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +235: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +236: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +237: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +238: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +239: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +240: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +241: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +242: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +243: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +244: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +245: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +246: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +247: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:24 +248: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +249: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +250: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +251: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +252: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +253: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +254: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +255: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +256: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +257: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +258: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +259: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +260: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:25 +261: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +262: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +263: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +264: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +265: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +266: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:26 +267: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:27 +268: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: malformed protected blob does not permit restoring a different bound administrator
+00:27 +269: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +270: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +271: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +272: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +273: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +274: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +275: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +276: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +277: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +278: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +279: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +280: C:/Users/Dave/Desktop/Shadownetwork/test/user_information_form_test.dart: phone information validates, saves offline and reloads
+00:27 +281: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:27 +282: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:27 +283: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +284: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +285: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +286: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +287: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +288: C:/Users/Dave/Desktop/Shadownetwork/test/validation_bundle_export_ui_test.dart: platform failure before writing makes no saved-file claim
+00:28 +289: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +290: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +291: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +292: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +293: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +294: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +295: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +296: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +297: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:28 +298: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:29 +299: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:29 +300: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +301: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +302: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +302 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +303 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +304 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +305 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:30 +306 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:31 +307 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:31 +308 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:31 +309 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:31 +310 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:31 +311 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +312 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +313 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +314 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +315 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +316 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:32 +317 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:33 +318 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:33 +319 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:33 +320 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:33 +321 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: backup restores registry, key and next version without plaintext identity
+00:34 +322 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: wrong password and tamper leave empty destination and protected store untouched
+00:44 +323 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: restore refuses populated registry and different protected issuer
+00:55 +324 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: restoring an older matching backup retains higher counter
+01:01 +325 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: authenticated backup rejects mismatched keypair and malformed records before live writes
+01:15 +326 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: restore transaction failure leaves a matching protected identity and can retry
+01:25 +327 ~1: C:/Users/Dave/Desktop/Shadownetwork/test/features/admin/desktop_admin_registry_repository_test.dart: bounds and invalid registry records are rejected before mutations
+01:25 +328 ~1: All tests passed!
