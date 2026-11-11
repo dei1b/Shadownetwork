@@ -6,6 +6,7 @@ import '../../domain/entities/sos_message.dart';
 import '../../domain/repositories/sos_message_repository.dart';
 import '../datasources/local_messaging_database.dart';
 import '../models/peer_model.dart';
+import '../services/scf_service.dart';
 import '../models/sos_message_model.dart';
 
 class SqliteSosMessageRepository implements SosMessageRepository {
@@ -103,7 +104,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
   }
 
   @override
-  Future<bool> saveMessage(SosMessage message) {
+  Future<bool> saveMessage(SosMessage message, {String? outgoingPayloadJson}) {
     return _database.transaction((transaction) async {
       await PeerModel.upsert(
         transaction,
@@ -149,6 +150,16 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         where: 'message_hash = ?',
         whereArgs: [row['message_hash']],
       );
+      if (outgoingPayloadJson != null) {
+        final queued = await ScfService(database: _database).storePayload(
+          payloadJson: outgoingPayloadJson,
+          ttl: message.ttl,
+          hopCount: message.hopCount,
+          originTrustStatus: message.trustStatus,
+          transaction: transaction,
+        );
+        if (!queued) throw StateError('Outgoing message could not be queued.');
+      }
       return existing.isEmpty;
     });
   }

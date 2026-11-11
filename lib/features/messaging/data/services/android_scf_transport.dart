@@ -197,10 +197,34 @@ class AndroidScfTransport implements ScfTransport {
       return const [];
     }
 
-    return rows
-        .whereType<Map<Object?, Object?>>()
-        .map(_envelopeFromPlatformMap)
-        .toList(growable: false);
+    final envelopes = <ScfEnvelope>[];
+    for (final row in rows.whereType<Map<Object?, Object?>>()) {
+      try {
+        envelopes.add(_envelopeFromPlatformMap(row));
+      } on FormatException {
+        await _rejectMalformedEnvelope(row);
+      } on TypeError {
+        await _rejectMalformedEnvelope(row);
+      }
+    }
+    return envelopes;
+  }
+
+  Future<void> _rejectMalformedEnvelope(Map<Object?, Object?> row) async {
+    final transferId = row['transferId'];
+    final hash = row['messageHash'];
+    if (transferId is! String || hash is! String) return;
+    try {
+      await _channel.invokeMethod<void>('acknowledgeEnvelope', {
+        'transferId': transferId,
+        'messageHash': hash,
+        'accepted': false,
+      });
+    } on PlatformException {
+      // The route may already have closed. Keep processing the batch.
+    } on MissingPluginException {
+      // There is no native route to acknowledge.
+    }
   }
 
   Peer _peerFromPlatformMap(Map<Object?, Object?>? map) {

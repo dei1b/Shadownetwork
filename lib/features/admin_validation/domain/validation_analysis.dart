@@ -224,9 +224,6 @@ class ValidationAnalysisCalculator {
         offers.putIfAbsent(key, () => r);
       }
       if (r.type == 'envelopeSent') sent.putIfAbsent(key, () => r);
-      if (sendFailure(r)) {
-        failed.add(key);
-      }
     }
     // Use the radio reported by the outcome, including failures before sending.
     if (filter.transport != null) {

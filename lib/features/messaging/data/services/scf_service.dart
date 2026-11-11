@@ -60,6 +60,8 @@ class ScfService {
     DateTime? receivedAt,
     Duration? ttl,
     int hopCount = 0,
+    Transaction? transaction,
+    DeviceTrustStatus originTrustStatus = DeviceTrustStatus.unknown,
   }) async {
     if (hopCount < 0) {
       throw ArgumentError.value(hopCount, 'hopCount', 'Must not be negative.');
@@ -80,9 +82,15 @@ class ScfService {
       payloadType: RelayPayloadCodec.payloadType(payloadJson),
     );
 
-    return _database.transaction((transaction) async {
-      return _insertEnvelope(transaction, envelope: envelope, now: now);
-    });
+    Future<bool> insert(Transaction executor) => _insertEnvelope(
+      executor,
+      envelope: envelope,
+      now: now,
+      originTrustStatus: originTrustStatus,
+    );
+    return transaction == null
+        ? _database.transaction(insert)
+        : insert(transaction);
   }
 
   Future<bool> storeEnvelope(ScfEnvelope envelope, {DateTime? now}) async {
@@ -383,6 +391,7 @@ class ScfService {
     Transaction transaction, {
     required ScfEnvelope envelope,
     required DateTime now,
+    DeviceTrustStatus originTrustStatus = DeviceTrustStatus.unknown,
   }) async {
     final existing = await transaction.query(
       LocalMessagingDatabase.scfMessagesTable,
@@ -407,10 +416,10 @@ class ScfService {
       );
     }
 
-    await transaction.insert(
-      LocalMessagingDatabase.scfMessagesTable,
-      ScfEnvelopeModel.toMap(envelope),
-    );
+    await transaction.insert(LocalMessagingDatabase.scfMessagesTable, {
+      ...ScfEnvelopeModel.toMap(envelope),
+      'origin_trust_status': originTrustStatus.name,
+    });
     return true;
   }
 }

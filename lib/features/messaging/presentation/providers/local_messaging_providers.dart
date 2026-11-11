@@ -28,8 +28,6 @@ import '../../domain/entities/peer_type.dart';
 import '../../domain/entities/sos_message.dart';
 import '../../domain/entities/spam_detection_result.dart';
 import '../../domain/repositories/peer_repository.dart';
-import '../../domain/repositories/chat_repository.dart';
-import '../../domain/repositories/sos_message_repository.dart';
 import '../../domain/services/scf_transport.dart';
 import '../../domain/services/spam_detection_service.dart';
 import '../../../security/data/services/device_identity_store.dart';
@@ -60,14 +58,16 @@ final peerRepositoryProvider = FutureProvider<PeerRepository>((ref) async {
   return SqlitePeerRepository(database: database);
 });
 
-final sosMessageRepositoryProvider = FutureProvider<SosMessageRepository>((
+final sosMessageRepositoryProvider = FutureProvider<SqliteSosMessageRepository>(
+  (ref) async {
+    final database = await ref.watch(localMessagingDatabaseProvider.future);
+    return SqliteSosMessageRepository(database: database);
+  },
+);
+
+final chatRepositoryProvider = FutureProvider<SqliteChatRepository>((
   ref,
 ) async {
-  final database = await ref.watch(localMessagingDatabaseProvider.future);
-  return SqliteSosMessageRepository(database: database);
-});
-
-final chatRepositoryProvider = FutureProvider<ChatRepository>((ref) async {
   final database = await ref.watch(localMessagingDatabaseProvider.future);
   return SqliteChatRepository(database: database);
 });
@@ -277,7 +277,6 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
     }
     final localPeer = await ref.read(localPeerProvider.future);
     final repository = await ref.read(chatRepositoryProvider.future);
-    final scfService = await ref.read(scfServiceProvider.future);
     final spamDetectionService = ref.read(spamDetectionServiceProvider);
     final trustRepository = await ref.read(trustRepositoryProvider.future);
     final metrics = await ref.read(validationMetricsRepositoryProvider.future);
@@ -326,15 +325,9 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
       trustOwnerName: authenticatedSender.ownerName,
       messageHash: prepared.hash,
     );
-    await repository.saveMessage(securedMessage);
-    await scfService.storePayload(
-      payloadJson: prepared.payloadJson,
-      ttl: securedMessage.ttl,
-      hopCount: securedMessage.hopCount,
-    );
-    await scfService.updateOriginTrustStatus(
-      messageHash: prepared.hash,
-      status: securedMessage.trustStatus,
+    await repository.saveMessage(
+      securedMessage,
+      outgoingPayloadJson: prepared.payloadJson,
     );
     await metrics.captureEvent(
       type: ValidationEventType.chatQueued,
@@ -404,7 +397,6 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
       }
     }
     final repository = await ref.read(sosMessageRepositoryProvider.future);
-    final scfService = await ref.read(scfServiceProvider.future);
     final spamDetectionService = ref.read(spamDetectionServiceProvider);
     final trustRepository = await ref.read(trustRepositoryProvider.future);
     final metrics = await ref.read(validationMetricsRepositoryProvider.future);
@@ -442,15 +434,9 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
       messageHash: prepared.hash,
       isEncrypted: trustedMessage.recipient != null,
     );
-    await repository.saveMessage(securedMessage);
-    await scfService.storePayload(
-      payloadJson: prepared.payloadJson,
-      ttl: securedMessage.ttl,
-      hopCount: securedMessage.hopCount,
-    );
-    await scfService.updateOriginTrustStatus(
-      messageHash: prepared.hash,
-      status: securedMessage.trustStatus,
+    await repository.saveMessage(
+      securedMessage,
+      outgoingPayloadJson: prepared.payloadJson,
     );
     await metrics.captureEvent(
       type: ValidationEventType.sosQueued,

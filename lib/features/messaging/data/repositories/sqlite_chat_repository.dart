@@ -9,6 +9,7 @@ import '../datasources/local_messaging_database.dart';
 import '../models/chat_message_model.dart';
 import '../models/conversation_model.dart';
 import '../models/peer_model.dart';
+import '../services/scf_service.dart';
 
 class SqliteChatRepository implements ChatRepository {
   const SqliteChatRepository({required Database database})
@@ -183,6 +184,7 @@ class SqliteChatRepository implements ChatRepository {
   Future<bool> saveMessage(
     ChatMessage message, {
     bool incrementUnread = false,
+    String? outgoingPayloadJson,
   }) {
     return _database.transaction((transaction) async {
       await PeerModel.upsert(
@@ -210,7 +212,12 @@ class SqliteChatRepository implements ChatRepository {
         where: 'message_hash = ?',
         whereArgs: [row['message_hash']],
       );
-      if (inserted == 0) return false;
+      if (inserted == 0) {
+        if (outgoingPayloadJson != null) {
+          throw StateError('Outgoing chat message already exists.');
+        }
+        return false;
+      }
       final conversations = await transaction.query(
         LocalMessagingDatabase.conversationsTable,
         columns: ['last_message_at'],
@@ -239,6 +246,16 @@ class SqliteChatRepository implements ChatRepository {
           message.conversationId,
         ],
       );
+      if (outgoingPayloadJson != null) {
+        final queued = await ScfService(database: _database).storePayload(
+          payloadJson: outgoingPayloadJson,
+          ttl: message.ttl,
+          hopCount: message.hopCount,
+          originTrustStatus: message.trustStatus,
+          transaction: transaction,
+        );
+        if (!queued) throw StateError('Outgoing message could not be queued.');
+      }
       return true;
     });
   }

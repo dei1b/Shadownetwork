@@ -381,6 +381,33 @@ void main() {
     },
   );
 
+  test('outbound queue failure rolls back the visible SOS', () async {
+    await register();
+    final network = MockScfTransportNetwork();
+    final container = ProviderContainer(
+      overrides: [
+        localMessagingDatabaseProvider.overrideWith((ref) async => db),
+        scfTransportProvider.overrideWithValue(network.registerPeer(sender)),
+        deviceSigningIdentityProvider.overrideWith((ref) async => signing),
+      ],
+    );
+    addTearDown(container.dispose);
+    await db.execute("""
+        CREATE TRIGGER fail_outbound_queue BEFORE INSERT ON scf_messages
+        BEGIN SELECT RAISE(ABORT, 'injected queue failure'); END
+      """);
+    await expectLater(
+      container.read(saveSosMessageProvider)(message()),
+      throwsA(isA<DatabaseException>()),
+    );
+    final repository = await container.read(
+      sosMessageRepositoryProvider.future,
+    );
+    expect(await repository.getMessages(), isEmpty);
+    final queue = await container.read(scfServiceProvider.future);
+    expect(await queue.getStoredEnvelopes(), isEmpty);
+  });
+
   test(
     'signed TTL cannot be extended by editing the transport envelope',
     () async {

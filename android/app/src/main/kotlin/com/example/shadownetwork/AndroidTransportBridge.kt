@@ -50,6 +50,7 @@ import io.flutter.plugin.common.MethodChannel
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -99,7 +100,7 @@ internal class AndroidTransportBridge(private val context: Context) {
     private var advertiseCallback: AdvertiseCallback? = null
     private var scanCallback: ScanCallback? = null
     private var bleGattServer: BluetoothGattServer? = null
-    private val bleFrameBuffers = ConcurrentHashMap<String, StringBuilder>()
+    private val bleFrameBuffers = ConcurrentHashMap<String, ByteArrayOutputStream>()
     private val bleIdentityLookups = ConcurrentHashMap.newKeySet<String>()
     private val resolvedBlePeerIds = ConcurrentHashMap<String, String>()
     private var wifiReceiver: BroadcastReceiver? = null
@@ -113,7 +114,8 @@ internal class AndroidTransportBridge(private val context: Context) {
     private var wifiGroupFormed = false
     private var wifiIsGroupOwner = false
     private var wifiGroupOwnerHostAddress: String? = null
-    private var pendingWifiPeerId: String? = null
+    private class WifiConnectAttempt(val peerId: String)
+    private var pendingWifiAttempt: WifiConnectAttempt? = null
     private var localPeerId: String = DEFAULT_LOCAL_PEER_ID
     private var localPeerName: String = DEFAULT_LOCAL_PEER_NAME
     private var methodChannel: MethodChannel? = null
@@ -632,28 +634,29 @@ internal class AndroidTransportBridge(private val context: Context) {
     private fun receiveBleChunk(address: String, value: ByteArray): Boolean {
         if (value.isEmpty()) return false
 
-        val content = value.copyOfRange(1, value.size).toString(Charsets.UTF_8)
+        val content = value.copyOfRange(1, value.size)
         val completeFrame = when (value[0]) {
             BLE_FRAME_SINGLE -> content
             BLE_FRAME_START -> {
-                bleFrameBuffers[address] = StringBuilder(content)
+                bleFrameBuffers[address] = ByteArrayOutputStream().apply { write(content) }
                 null
             }
             BLE_FRAME_CONTINUE -> {
                 val buffer = bleFrameBuffers[address] ?: return false
-                buffer.append(content)
+                buffer.write(content)
                 null
             }
             BLE_FRAME_END -> {
                 val buffer = bleFrameBuffers.remove(address) ?: return false
-                buffer.append(content).toString()
+                buffer.write(content)
+                buffer.toByteArray()
             }
             else -> return false
         }
 
         if (completeFrame != null) {
             return runCatching {
-                val frame = JSONObject(completeFrame)
+                val frame = JSONObject(completeFrame.toString(Charsets.UTF_8))
                 if (frame.optString("type") != "envelope") {
                     return false
                 }
@@ -752,7 +755,7 @@ internal class AndroidTransportBridge(private val context: Context) {
             wifiGroupFormed = false
             wifiIsGroupOwner = false
             wifiGroupOwnerHostAddress = null
-            pendingWifiPeerId = null
+            pendingWifiAttempt = null
         }
         wifiConnections.values.toList().forEach(ManagedConnection::close)
         wifiConnections.clear()
@@ -798,7 +801,7 @@ internal class AndroidTransportBridge(private val context: Context) {
 
         if (!info.isGroupOwner) {
             val ownerPeerId = group?.owner?.deviceAddress?.let(::findPeerIdByWifiAddress)
-                ?: synchronized(wifiLock) { pendingWifiPeerId }
+                ?: synchronized(wifiLock) { pendingWifiAttempt?.peerId }
             val hostAddress = info.groupOwnerAddress?.hostAddress
             if (!ownerPeerId.isNullOrBlank() && !hostAddress.isNullOrBlank()) {
                 startWifiClientSocket(ownerPeerId, hostAddress)
@@ -862,7 +865,7 @@ internal class AndroidTransportBridge(private val context: Context) {
         val manager = wifiP2pManager ?: return
         val channel = wifiChannel ?: return
         if (!running.get() || !wifiServiceRequestReady ||
-            synchronized(wifiLock) { wifiGroupFormed || pendingWifiPeerId != null }
+            synchronized(wifiLock) { wifiGroupFormed || pendingWifiAttempt != null }
         ) return
         val now = SystemClock.elapsedRealtime()
         if (lastWifiDiscoveryRequestAt?.let { now - it < WIFI_DISCOVERY_REFRESH_MS } == true) return
@@ -1699,32 +1702,48 @@ internal class AndroidTransportBridge(private val context: Context) {
         val deviceAddress = peer.deviceAddress
             ?: throw IOException("Peer ${peer.id} has no Wi-Fi Direct address.")
 
+        val attempt = WifiConnectAttempt(peer.id)
         synchronized(wifiLock) {
-            pendingWifiPeerId = peer.id
-        }
-
-        val config = WifiP2pConfig().apply {
-            this.deviceAddress = deviceAddress
-            groupOwnerIntent = 0
-        }
-
-        manager.connect(channel, config, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = Unit
-            override fun onFailure(reason: Int) = Unit
-        })
-
-        val deadline = System.currentTimeMillis() + WIFI_CONNECT_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
             wifiConnections[peer.id]?.takeIf { it.isActive }?.let { return it }
-            Thread.sleep(250)
+            if (pendingWifiAttempt != null) {
+                throw IOException("A Wi-Fi Direct connection is already pending.")
+            }
+            pendingWifiAttempt = attempt
         }
 
-        val hostAddress = synchronized(wifiLock) { wifiGroupOwnerHostAddress }
-        if (!hostAddress.isNullOrBlank() && !wifiIsGroupOwner) {
-            return startWifiClientSocket(peer.id, hostAddress)
-        }
+        try {
+            val config = WifiP2pConfig().apply {
+                this.deviceAddress = deviceAddress
+                groupOwnerIntent = 0
+            }
+            val failureReason = AtomicInteger(-1)
+            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() = Unit
+                override fun onFailure(reason: Int) {
+                    failureReason.set(reason)
+                }
+            })
 
-        throw IOException("Timed out connecting to ${peer.id} over Wi-Fi Direct.")
+            val deadline = SystemClock.elapsedRealtime() + WIFI_CONNECT_TIMEOUT_MS
+            while (SystemClock.elapsedRealtime() < deadline) {
+                wifiConnections[peer.id]?.takeIf { it.isActive }?.let { return it }
+                val reason = failureReason.get()
+                if (reason >= 0) throw IOException("Wi-Fi Direct connection failed (reason $reason).")
+                Thread.sleep(250)
+            }
+
+            val hostAddress = synchronized(wifiLock) {
+                wifiGroupOwnerHostAddress.takeIf { pendingWifiAttempt === attempt && !wifiIsGroupOwner }
+            }
+            if (!hostAddress.isNullOrBlank()) {
+                return startWifiClientSocket(peer.id, hostAddress)
+            }
+            throw IOException("Timed out connecting to ${peer.id} over Wi-Fi Direct.")
+        } finally {
+            synchronized(wifiLock) {
+                if (pendingWifiAttempt === attempt) pendingWifiAttempt = null
+            }
+        }
     }
 
     private fun startWifiClientSocket(peerId: String, hostAddress: String): ManagedConnection {

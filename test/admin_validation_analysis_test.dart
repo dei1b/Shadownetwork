@@ -32,6 +32,21 @@ ValidationRunAnalysis calculate(
   ValidationAnalysisInput(records, []),
 ], filter);
 void main() {
+  test('date filter excludes failures whose offers are outside the window', () {
+    final result = calculate(
+      [
+        event('offer', 'envelopeOffered', hour: 1),
+        event('failure', 'envelopeRejected', hour: 2),
+      ],
+      filter: ValidationAnalysisFilter(
+        run: 'run',
+        start: DateTime.utc(2026, 11, 11, 2),
+      ),
+    );
+    expect(result.offered, 0);
+    expect(result.failed, 0);
+  });
+
   test(
     'SOS success counts matching messages once and checks the recipient',
     () {

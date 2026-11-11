@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shadownetwork/features/messaging/data/datasources/local_messaging_database.dart';
+import 'package:shadownetwork/features/messaging/data/models/chat_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_chat_repository.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
@@ -14,6 +15,53 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   setUpAll(sqfliteFfiInit);
+
+  test(
+    'outbound queue failure rolls back the chat and its conversation timestamp',
+    () async {
+      final database = await LocalMessagingDatabase.open(
+        databasePath: inMemoryDatabasePath,
+        factory: databaseFactoryFfi,
+      );
+      addTearDown(database.close);
+      final repository = SqliteChatRepository(database: database);
+      const local = Peer(
+        id: 'local',
+        name: 'Local',
+        type: PeerType.civilian,
+        isConnected: true,
+      );
+      final remote = local.copyWith(id: 'remote');
+      final conversation = await repository.openConversation(
+        localPeer: local,
+        remotePeer: remote,
+      );
+      final chat = ChatMessage(
+        id: 'outgoing',
+        conversationId: conversation.id,
+        sender: local,
+        recipient: remote,
+        body: 'Need help',
+        status: MessageStatus.queued,
+        createdAt: DateTime.now().toUtc(),
+      );
+      final payload = ChatMessagePayload.canonicalJson(chat);
+      await database.execute("""
+      CREATE TRIGGER fail_outbound_chat BEFORE INSERT ON scf_messages
+      BEGIN SELECT RAISE(ABORT, 'injected queue failure'); END
+    """);
+      await expectLater(
+        repository.saveMessage(chat, outgoingPayloadJson: payload),
+        throwsA(isA<DatabaseException>()),
+      );
+      expect(await repository.getMessages(conversation.id), isEmpty);
+      expect(await repository.getConversations(local.id), isEmpty);
+      final rows = await database.query(
+        LocalMessagingDatabase.conversationsTable,
+      );
+      expect(rows.single['last_message_at'], isNull);
+    },
+  );
 
   test('persists conversation history and unread inbound chat', () async {
     final database = await LocalMessagingDatabase.open(
