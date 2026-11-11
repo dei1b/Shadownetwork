@@ -1,3 +1,4 @@
+import '../theme/admin_theme.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -15,10 +16,10 @@ import '../widgets/admin_device_registry_panel.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
 
-const _mobileRed = Color(0xFFB52B32);
-const _mobileRedDark = Color(0xFF861A1A);
-const _mobileMuted = Color(0xFF666666);
-const _mobileField = Color(0xFFE1E1E1);
+const _mobileRed = AdminTheme.action;
+const _mobileRedDark = AdminTheme.action;
+const _mobileMuted = AdminTheme.muted;
+const _mobileField = AdminTheme.border;
 // Version 40, byte mode, medium error correction.
 const _maxTrustQrBytes = 2331;
 
@@ -767,7 +768,7 @@ class _AdminDashboardBody extends StatelessWidget {
         SliverToBoxAdapter(
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1320),
+              constraints: const BoxConstraints(maxWidth: AdminTheme.pageWidth),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(24, 0, 24, 36),
                 child: Column(
@@ -902,7 +903,9 @@ class _Header extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1272),
+          constraints: const BoxConstraints(
+            maxWidth: AdminTheme.pageWidth - 48,
+          ),
           child: SizedBox(
             width: double.infinity,
             child: Column(
@@ -912,11 +915,7 @@ class _Header extends StatelessWidget {
                   header: true,
                   child: Text(
                     desktopMode ? 'Devices' : 'Shadow Network Admin',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF222222),
-                    ),
+                    style: AdminTheme.pageTitle,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1233,7 +1232,7 @@ class _DeviceRegistrationScannerPageState
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.72),
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(AdminTheme.radius),
               ),
               child: const Text(
                 'Allow camera access, then point the PC camera at the registration QR displayed on the phone.',
@@ -1467,16 +1466,13 @@ class _Panel extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(19),
+        borderRadius: BorderRadius.circular(AdminTheme.radius),
         border: Border.all(color: _mobileField),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w700),
-          ),
+          Text(title, style: AdminTheme.sectionTitle),
           const SizedBox(height: 6),
           Text(subtitle, style: const TextStyle(color: _mobileMuted)),
           const SizedBox(height: 18),

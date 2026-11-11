@@ -60,7 +60,33 @@ void main() {
                 FixtureImports.new,
               ),
               validationAnalysisProvider.overrideWith(
-                (ref) async => [const ValidationAnalysisInput([], [])],
+                (ref) async => [
+                  ValidationAnalysisInput(
+                    List.generate(
+                      11,
+                      (index) => AnalysisRecord(
+                        'SN-FIXTURE',
+                        'responder-fixture',
+                        'responder',
+                        'session',
+                        'battery_samples',
+                        {
+                          'id': 'battery-$index',
+                          'sampled_at': DateTime.utc(
+                            2026,
+                            11,
+                            11,
+                            8,
+                            index,
+                          ).toIso8601String(),
+                          'battery_percent': 80,
+                          'is_charging': false,
+                        },
+                      ),
+                    ),
+                    [],
+                  ),
+                ],
               ),
             ],
             child: MaterialApp(
@@ -92,10 +118,22 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.text('SOS alerts received'), findsOneWidget);
         expect(find.text('1 phone imported'), findsOneWidget);
-        expect(find.text('Not enough data'), findsWidgets);
+        expect(find.text('Not measured'), findsWidgets);
         expect(find.text('Filter results'), findsOneWidget);
         expect(find.text('Detailed records'), findsOneWidget);
         expect(find.byType(TextField), findsNothing);
+        if (width >= 800) {
+          expect(
+            tester.getTopLeft(find.text('SOS alerts received')).dy,
+            tester.getTopLeft(find.text('Phone-to-phone handoffs')).dy,
+          );
+        }
+        if (width == 1440) {
+          expect(
+            tester.getTopLeft(find.text('SOS alerts received')).dy,
+            tester.getTopLeft(find.text('Typical handoff time')).dy,
+          );
+        }
         await tester.ensureVisible(find.text('How to interpret these results'));
         await tester.tap(find.text('How to interpret these results'));
         await tester.pumpAndSettle();
@@ -122,6 +160,29 @@ void main() {
             ).writeAsBytes(bytes!.buffer.asUint8List());
           });
           picture.dispose();
+          await tester.ensureVisible(find.text('Timing and battery details'));
+          await tester.tap(find.text('Timing and battery details'));
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(find.text('Phone 1 · battery level'));
+          await tester.pumpAndSettle();
+          expect(
+            find.text(
+              'Battery level over time · orange dots indicate charging.',
+            ),
+            findsOneWidget,
+          );
+          final batteryPicture = (await tester.runAsync(
+            () => boundary.toImage(),
+          ))!;
+          final batteryBytes = await tester.runAsync(
+            () => batteryPicture.toByteData(format: ui.ImageByteFormat.png),
+          );
+          await tester.runAsync(
+            () => File(
+              'output/admin-dashboard/battery-fixture.png',
+            ).writeAsBytes(batteryBytes!.buffer.asUint8List()),
+          );
+          batteryPicture.dispose();
         }
       },
     );

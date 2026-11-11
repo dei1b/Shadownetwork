@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/validation_analysis.dart';
+import '../../admin/presentation/theme/admin_theme.dart';
 import 'providers/validation_analysis_provider.dart';
 import 'providers/validation_import_provider.dart';
 
@@ -26,7 +27,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
   String short(String value) =>
       value.length > 18 ? '${value.substring(0, 18)}…' : value;
   String rate(int n, int d) => d == 0
-      ? 'Not enough data'
+      ? 'Not measured'
       : '${(100 * n / d).toStringAsFixed(0)}% · $n of $d';
   String ms(double? value) => value == null
       ? 'Not recorded'
@@ -83,36 +84,141 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
     ),
   );
 
-  Widget metric(String label, String value, String explanation) => SizedBox(
-    width: 430,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(0, 12, 24, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget grid({
+    required List<Widget> children,
+    double spacing = 16,
+    double runSpacing = 16,
+  }) => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 1100 && children.length >= 4
+          ? 4
+          : constraints.maxWidth >= 640
+          ? 2
+          : 1;
+      return Column(
         children: [
-          Text(
-            label,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(explanation, style: Theme.of(context).textTheme.bodyMedium),
+          for (var index = 0; index < children.length; index += columns)
+            Padding(
+              padding: EdgeInsets.only(
+                bottom: index + columns < children.length ? 16 : 0,
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var column = 0; column < columns; column++) ...[
+                      if (column > 0) const SizedBox(width: 16),
+                      Expanded(
+                        child: index + column < children.length
+                            ? children[index + column]
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
         ],
+      );
+    },
+  );
+
+  Widget panel({required Widget child}) => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surface,
+      border: Border.all(color: AdminTheme.border),
+      borderRadius: BorderRadius.circular(AdminTheme.radius),
+    ),
+    child: child,
+  );
+
+  Widget metric(String label, String value, String explanation) => panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ExcludeSemantics(
+              child: Icon(
+                switch (label) {
+                  'SOS alerts received' => Icons.sos_outlined,
+                  'Phone-to-phone handoffs' => Icons.phonelink_ring_outlined,
+                  'Typical handoff time' ||
+                  'Handoff timing' => Icons.schedule_outlined,
+                  'Transfer status' => Icons.sync_alt_outlined,
+                  'Nearby phone searches' => Icons.radar_outlined,
+                  'Backup connection use' => Icons.swap_horiz_outlined,
+                  _ => Icons.insights_outlined,
+                },
+                size: 20,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AdminTheme.muted,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          value,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            fontSize: 25,
+            fontWeight: FontWeight.w700,
+            height: 1.2,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          explanation,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            fontSize: 14,
+            height: 1.5,
+            color: AdminTheme.muted,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget disclosure({
+    required Widget title,
+    Widget? subtitle,
+    EdgeInsetsGeometry? tilePadding,
+    required List<Widget> children,
+  }) => Padding(
+    padding: const EdgeInsets.only(top: 16),
+    child: Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: AdminTheme.border),
+        borderRadius: BorderRadius.circular(AdminTheme.radius),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        title: title,
+        subtitle: subtitle,
+        children: children,
       ),
     ),
   );
 
   Widget section(String title, String explanation, List<Widget> children) =>
       Padding(
-        padding: const EdgeInsets.only(top: 28),
+        padding: const EdgeInsets.only(top: 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -140,39 +246,90 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
 
   Widget bars(String title, Map<String, int> values) {
     final total = values.values.fold(0, (a, b) => a + b);
-    return SizedBox(
-      width: 470,
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
+    return panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              if (total == 0) const Text('No measurements for this selection.'),
-              ...values.entries
-                  .where((e) => e.value > 0)
-                  .map(
-                    (e) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '${radio(e.key)}: ${e.value} (${total == 0 ? 0 : (100 * e.value / total).toStringAsFixed(0)}%)',
-                          ),
-                          LinearProgressIndicator(
-                            value: total == 0 ? 0 : e.value / total,
-                            semanticsLabel: '${e.key}: ${e.value} of $total',
-                          ),
-                        ],
-                      ),
-                    ),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                '$total samples',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
           ),
-        ),
+          const SizedBox(height: 20),
+          if (total == 0)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.bar_chart_outlined,
+                    size: 32,
+                    color: AdminTheme.muted,
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'No measurements yet',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Import phone files with matching delivery or transfer records to show this chart.',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          for (final entry in values.entries.where((e) => e.value > 0))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text(radio(entry.key))),
+                      Text(
+                        '${entry.value} · ${(100 * entry.value / total).toStringAsFixed(0)}%',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      minHeight: 8,
+                      value: entry.value / total,
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      semanticsLabel: '${entry.key}: ${entry.value} of $total',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -347,7 +504,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  ExpansionTile(
+                  disclosure(
                     tilePadding: EdgeInsets.zero,
                     title: const Text('Filter results'),
                     subtitle: Text(
@@ -425,9 +582,9 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     ),
                   section(
                     'What this test shows',
-                    'Results from the imported phone files for $selectedRun.',
+                    'Confirmed transfers and final SOS receipts, shown separately.',
                     [
-                      Wrap(
+                      grid(
                         spacing: 16,
                         runSpacing: 4,
                         children: [
@@ -453,9 +610,11 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                                 : 'The middle value from ${result.latency.count} confirmed transfers, including connection setup and storage confirmation.',
                           ),
                           metric(
-                            'Transfer attempts needing attention',
-                            '${result.failed} failed · ${result.open} awaiting confirmation',
-                            'A failed attempt can be retried by Store-Carry-Forward. Awaiting confirmation means no recorded outcome yet.',
+                            'Transfer status',
+                            result.offered == 0 && result.failed == 0
+                                ? 'No attempts'
+                                : '${result.failed} failed · ${result.open} pending',
+                            'Failed attempts may be retried by Store-Carry-Forward. Pending attempts have no recorded confirmation.',
                           ),
                         ],
                       ),
@@ -465,7 +624,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     'How messages travelled',
                     'Hops count the phone-to-phone steps in a message’s journey.',
                     [
-                      Wrap(
+                      grid(
                         spacing: 12,
                         runSpacing: 12,
                         children: [
@@ -490,7 +649,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     'Discovery and backup connections',
                     'These results describe how phones found peers and sent messages.',
                     [
-                      Wrap(
+                      grid(
                         spacing: 16,
                         children: [
                           metric(
@@ -507,32 +666,34 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                       ),
                     ],
                   ),
-                  ExpansionTile(
+                  disclosure(
                     tilePadding: EdgeInsets.zero,
                     title: const Text('Timing and battery details'),
                     subtitle: const Text(
                       'Slower transfers, total travel time and battery readings',
                     ),
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: metric(
-                          'Handoff timing',
-                          'Typical: ${ms(result.latency.median)}',
-                          result.latency.count == 0
-                              ? 'No confirmed transfer timing is recorded.'
-                              : 'Average: ${ms(result.latency.mean)}. 95% completed within ${ms(result.latency.p95)}. Fastest: ${ms(result.latency.values.firstOrNull)}. Slowest: ${ms(result.latency.values.lastOrNull)}. Based on ${result.latency.count} confirmations.',
-                        ),
+                      grid(
+                        children: [
+                          metric(
+                            'Handoff timing',
+                            ms(result.latency.median),
+                            result.latency.count == 0
+                                ? 'No confirmed transfer timing is recorded.'
+                                : 'Median of ${result.latency.count} confirmations. Average ${ms(result.latency.mean)}; 95% within ${ms(result.latency.p95)}.',
+                          ),
+                          metric(
+                            'Total SOS travel time',
+                            ms(result.propagation.median),
+                            result.propagation.count == 0
+                                ? 'A final SOS receipt is needed to measure total travel time.'
+                                : 'Median across ${result.propagation.count} final receipts. Average ${ms(result.propagation.mean)}. Estimates may be affected by differences between phone clocks.',
+                          ),
+                        ],
                       ),
+                      const SizedBox(height: 16),
                       bars('Handoff time distribution', histogram),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: metric(
-                          'Total SOS travel time',
-                          ms(result.propagation.median),
-                          'Median across ${result.propagation.count} final receipts. Average: ${ms(result.propagation.mean)}; 95th percentile: ${ms(result.propagation.p95)}. Phone clocks are not synchronized, so these times are estimates.',
-                        ),
-                      ),
+                      const SizedBox(height: 24),
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(
@@ -559,11 +720,11 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                                     : '${result.battery[entry.key]!.toStringAsFixed(2)} percentage points used per hour.',
                               ),
                               const Text(
-                                'Vertical scale: 0–100%. Horizontal scale: time. Orange marks charging.',
+                                'Battery level over time · orange dots indicate charging.',
                               ),
                               SizedBox(
-                                height: 110,
-                                width: 600,
+                                height: 200,
+                                width: double.infinity,
                                 child: CustomPaint(
                                   painter: _BatteryPainter(entry.value),
                                 ),
@@ -590,7 +751,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                         ),
                     ],
                   ),
-                  ExpansionTile(
+                  disclosure(
                     tilePadding: EdgeInsets.zero,
                     title: const Text('How to interpret these results'),
                     subtitle: const Text(
@@ -630,7 +791,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                         ),
                     ],
                   ),
-                  ExpansionTile(
+                  disclosure(
                     tilePadding: EdgeInsets.zero,
                     title: const Text('Detailed records'),
                     subtitle: Text(
@@ -712,22 +873,62 @@ class _BatteryPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final sorted = [...samples]..sort((a, b) => a.time!.compareTo(b.time!));
     if (sorted.isEmpty) return;
+    final plot = Rect.fromLTRB(46, 16, size.width - 16, size.height - 34);
+    if (plot.width <= 0) return;
+    void label(String text, Offset at, {bool right = false}) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AdminTheme.muted,
+            fontFamily: AdminTheme.fontFamily,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      painter.paint(
+        canvas,
+        Offset(right ? at.dx - painter.width : at.dx, at.dy),
+      );
+    }
+
+    final grid = Paint()
+      ..color = AdminTheme.border
+      ..strokeWidth = 1;
+    for (final percent in [0, 25, 50, 75, 100]) {
+      final y = plot.bottom - percent / 100 * plot.height;
+      canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), grid);
+      label('$percent%', Offset(0, y - 7));
+    }
+    String clock(DateTime value) {
+      final time = value.toUtc().add(const Duration(hours: 8));
+      return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:${time.second.toString().padLeft(2, '0')}';
+    }
+
+    label(clock(sorted.first.time!), Offset(plot.left, plot.bottom + 12));
+    if (sorted.last.time != sorted.first.time) {
+      label(
+        clock(sorted.last.time!),
+        Offset(plot.right, plot.bottom + 12),
+        right: true,
+      );
+    }
     final span = max(
       1,
       sorted.last.time!.difference(sorted.first.time!).inMilliseconds,
     );
-    final paint = Paint()
-      ..color = Colors.blue
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
     final path = Path();
     for (var i = 0; i < sorted.length; i++) {
-      final r = sorted[i];
+      final record = sorted[i];
       final x =
-          r.time!.difference(sorted.first.time!).inMilliseconds /
-          span *
-          size.width;
-      final y = (1 - (r.data['battery_percent'] as num) / 100) * size.height;
+          plot.left +
+          record.time!.difference(sorted.first.time!).inMilliseconds /
+              span *
+              plot.width;
+      final y =
+          plot.bottom -
+          (record.data['battery_percent'] as num) / 100 * plot.height;
       if (i == 0) {
         path.moveTo(x, y);
       } else {
@@ -737,10 +938,18 @@ class _BatteryPainter extends CustomPainter {
         Offset(x, y),
         3,
         Paint()
-          ..color = r.data['is_charging'] == true ? Colors.orange : Colors.blue,
+          ..color = record.data['is_charging'] == true
+              ? AdminTheme.charging
+              : AdminTheme.chartLine,
       );
     }
-    canvas.drawPath(path, paint);
+    canvas.drawPath(
+      path,
+      Paint()
+        ..color = AdminTheme.chartLine
+        ..strokeWidth = 2
+        ..style = PaintingStyle.stroke,
+    );
   }
 
   @override
