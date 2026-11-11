@@ -10,6 +10,7 @@ import 'package:shadownetwork/features/admin_validation/domain/validation_import
 import 'package:shadownetwork/features/admin_validation/presentation/providers/validation_analysis_provider.dart';
 import 'package:shadownetwork/features/admin_validation/presentation/providers/validation_import_provider.dart';
 import 'package:shadownetwork/features/admin_validation/presentation/validation_analysis_dashboard.dart';
+import 'package:shadownetwork/features/admin/presentation/theme/admin_theme.dart';
 
 class FixtureImports extends ValidationImportController {
   @override
@@ -63,13 +64,20 @@ void main() {
               ),
             ],
             child: MaterialApp(
-              theme: ThemeData(fontFamily: 'Arial'),
+              theme: AdminTheme.light.copyWith(
+                textTheme: AdminTheme.light.textTheme.apply(
+                  fontFamily: 'Arial',
+                ),
+              ),
               home: Scaffold(
                 body: RepaintBoundary(
                   key: key,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: const ValidationAnalysisDashboard(),
+                  child: ColoredBox(
+                    color: AdminTheme.background,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: const ValidationAnalysisDashboard(),
+                    ),
                   ),
                 ),
               ),
@@ -82,15 +90,24 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(
-          find.textContaining('0 recipient/message pairs'),
-          findsOneWidget,
+        expect(find.text('SOS alerts received'), findsOneWidget);
+        expect(find.text('1 phone imported'), findsOneWidget);
+        expect(find.text('Not enough data'), findsWidgets);
+        expect(find.text('Filter results'), findsOneWidget);
+        expect(find.text('Detailed records'), findsOneWidget);
+        expect(find.byType(TextField), findsNothing);
+        await tester.ensureVisible(find.text('How to interpret these results'));
+        await tester.tap(find.text('How to interpret these results'));
+        await tester.pumpAndSettle();
+        expect(find.text('Import every participating phone'), findsOneWidget);
+        await tester.tap(find.text('How to interpret these results'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('What this test shows'),
+          -500,
+          scrollable: find.byType(Scrollable).first,
         );
-        expect(
-          find.textContaining('Expected participants: Unknown'),
-          findsOneWidget,
-        );
-        expect(find.text('Unavailable: no eligible attempts'), findsWidgets);
+        await tester.pumpAndSettle();
         if (width == 1440) {
           final boundary =
               key.currentContext!.findRenderObject()! as RenderRepaintBoundary;

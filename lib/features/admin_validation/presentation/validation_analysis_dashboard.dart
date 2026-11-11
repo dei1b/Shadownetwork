@@ -26,10 +26,13 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
   String short(String value) =>
       value.length > 18 ? '${value.substring(0, 18)}…' : value;
   String rate(int n, int d) => d == 0
-      ? 'Unavailable: no eligible attempts'
-      : '${(100 * n / d).toStringAsFixed(1)}% ($n/$d)';
-  String ms(double? value) =>
-      value == null ? 'Unavailable' : '${value.toStringAsFixed(0)} ms';
+      ? 'Not enough data'
+      : '${(100 * n / d).toStringAsFixed(0)}% · $n of $d';
+  String ms(double? value) => value == null
+      ? 'Not recorded'
+      : value >= 1000
+      ? '${(value / 1000).toStringAsFixed(2)} seconds'
+      : '${value.toStringAsFixed(0)} ms';
   String local(DateTime? date) => date == null
       ? 'Unknown'
       : '${date.toUtc().add(const Duration(hours: 8)).toIso8601String().replaceFirst('T', ' ').split('.').first} Manila (UTC+8)';
@@ -40,6 +43,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
     List<String> values,
     ValueChanged<String?> change, {
     bool all = true,
+    Map<String, String> labels = const {},
   }) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 270),
     child: DropdownButtonFormField<String>(
@@ -52,11 +56,23 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
         ...values.map(
           (v) => DropdownMenuItem(
             value: v,
-            child: Text(switch (v) {
-              'bluetooth' => 'BLE',
-              'wifi_direct' => 'Wi-Fi Direct',
-              _ => short(v),
-            }, overflow: TextOverflow.ellipsis),
+            child: Text(
+              labels[v] ??
+                  switch (v) {
+                    'bluetooth' => 'Bluetooth (BLE)',
+                    'civilian' => 'Resident',
+                    'relay' => 'Relay phone',
+                    'responder' => 'Responder',
+                    'admin' => 'Administrator',
+                    'message_events' => 'Message activity',
+                    'sos_receipts' => 'Received SOS alerts',
+                    'discovery_attempts' => 'Nearby phone searches',
+                    'battery_samples' => 'Battery readings',
+                    'wifi_direct' => 'Wi-Fi Direct',
+                    _ => short(v),
+                  },
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ),
       ],
@@ -67,22 +83,60 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
     ),
   );
 
-  Widget tile(String label, String value) => Container(
-    width: 250,
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Theme.of(context).colorScheme.surfaceContainerLow,
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label),
-        const SizedBox(height: 8),
-        Text(value, style: Theme.of(context).textTheme.titleMedium),
-      ],
+  Widget metric(String label, String value, String explanation) => SizedBox(
+    width: 430,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(0, 12, 24, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          Text(explanation, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
     ),
   );
+
+  Widget section(String title, String explanation, List<Widget> children) =>
+      Padding(
+        padding: const EdgeInsets.only(top: 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            Text(explanation),
+            const SizedBox(height: 12),
+            ...children,
+          ],
+        ),
+      );
+
+  String radio(String value) => switch (value) {
+    'bluetooth' || 'ble' => 'Bluetooth (BLE)',
+    'wifi_direct' => 'Wi-Fi Direct',
+    'unknown' => 'Not recorded',
+    'mock' => 'Simulation',
+    _ => value,
+  };
 
   Widget bars(String title, Map<String, int> values) {
     final total = values.values.fold(0, (a, b) => a + b);
@@ -96,25 +150,26 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
             children: [
               Text(title, style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              if (total == 0)
-                const Text('Unavailable: no eligible observations'),
-              ...values.entries.map(
-                (e) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${e.key}: ${e.value} (${total == 0 ? 0 : (100 * e.value / total).toStringAsFixed(1)}%)',
+              if (total == 0) const Text('No measurements for this selection.'),
+              ...values.entries
+                  .where((e) => e.value > 0)
+                  .map(
+                    (e) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${radio(e.key)}: ${e.value} (${total == 0 ? 0 : (100 * e.value / total).toStringAsFixed(0)}%)',
+                          ),
+                          LinearProgressIndicator(
+                            value: total == 0 ? 0 : e.value / total,
+                            semanticsLabel: '${e.key}: ${e.value} of $total',
+                          ),
+                        ],
                       ),
-                      LinearProgressIndicator(
-                        value: total == 0 ? 0 : e.value / total,
-                        semanticsLabel: '${e.key}: ${e.value} of $total',
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
             ],
           ),
         ),
@@ -180,7 +235,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
             return const Padding(
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Text(
-                'Import schema 2 phone exports to view run analysis. Legacy imports remain listed below.',
+                'Import phone exports to see the test results. Older files without the required measurements remain available below.',
               ),
             );
           }
@@ -276,217 +331,372 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 24),
-                  Text(
-                    'Run analysis',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
                   Wrap(
-                    spacing: 12,
+                    spacing: 20,
                     runSpacing: 12,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      picker('Run', selectedRun, runs, (v) {
+                      picker('Test run', selectedRun, runs, (v) {
                         run = v;
                         device = null;
                       }, all: false),
-                      picker(
-                        'Device',
-                        selectedDevice,
-                        devices,
-                        (v) => device = v,
+                      Text(
+                        '${devices.length} ${devices.length == 1 ? 'phone imported' : 'phones imported'}',
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      picker('Role', role, const [
-                        'civilian',
-                        'relay',
-                        'responder',
-                        'admin',
-                      ], (v) => role = v),
-                      picker('Transport', transport, const [
-                        'bluetooth',
-                        'wifi_direct',
-                        'mock',
-                        'unknown',
-                      ], (v) => transport = v),
                     ],
                   ),
-                  Wrap(
-                    spacing: 12,
+                  const SizedBox(height: 12),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Filter results'),
+                    subtitle: Text(
+                      selectedDevice == null &&
+                              role == null &&
+                              transport == null &&
+                              start == null
+                          ? 'All phones, connection types and dates'
+                          : 'Filters applied · expand to adjust',
+                    ),
                     children: [
-                      TextButton(
-                        onPressed: dates,
-                        child: Text(
-                          start == null
-                              ? 'All dates (Manila)'
-                              : '${local(start)} to ${local(end)} exclusive',
-                        ),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          picker(
+                            'Phone',
+                            selectedDevice,
+                            devices,
+                            (v) => device = v,
+                            labels: {
+                              for (var i = 0; i < devices.length; i++)
+                                devices[i]: 'Phone ${i + 1}',
+                            },
+                          ),
+                          picker('Phone role', role, const [
+                            'civilian',
+                            'relay',
+                            'responder',
+                            'admin',
+                          ], (v) => role = v),
+                          picker('Connection type', transport, const [
+                            'bluetooth',
+                            'wifi_direct',
+                            'mock',
+                            'unknown',
+                          ], (v) => transport = v),
+                        ],
                       ),
-                      if (start != null)
-                        TextButton(
-                          onPressed: () => setState(() {
-                            start = null;
-                            end = null;
-                            page = 0;
+                      Wrap(
+                        spacing: 12,
+                        children: [
+                          TextButton.icon(
+                            onPressed: dates,
+                            icon: const Icon(Icons.date_range_outlined),
+                            label: Text(
+                              start == null
+                                  ? 'All dates (Manila)'
+                                  : '${MaterialLocalizations.of(context).formatMediumDate(start!.add(const Duration(hours: 8)))} – ${MaterialLocalizations.of(context).formatMediumDate(end!.add(const Duration(hours: 8)).subtract(const Duration(days: 1)))} (Manila)',
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() {
+                              device = null;
+                              role = null;
+                              transport = null;
+                              start = null;
+                              end = null;
+                              page = 0;
+                            }),
+                            child: const Text('Reset filters'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  if (result.issues.any(
+                    (v) => !v.startsWith('Clocks unsynchronized'),
+                  ))
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text(
+                        'Some records need review. See “How to interpret these results” for details.',
+                      ),
+                    ),
+                  section(
+                    'What this test shows',
+                    'Results from the imported phone files for $selectedRun.',
+                    [
+                      Wrap(
+                        spacing: 16,
+                        runSpacing: 4,
+                        children: [
+                          metric(
+                            'SOS alerts received',
+                            '${result.receipts.length}',
+                            result.receipts.isEmpty
+                                ? 'No final SOS receipt is recorded in these files. Import the receiving phone’s file to check delivery.'
+                                : '${result.receipts.map((r) => r.hash).toSet().length} different SOS messages received by responders. Each receiving phone is counted separately.',
+                          ),
+                          metric(
+                            'Phone-to-phone handoffs',
+                            rate(result.acknowledged, result.offered),
+                            result.offered == 0
+                                ? 'No outgoing attempts available to measure.'
+                                : '${result.acknowledged} of ${result.offered} attempts confirmed storage on the next phone. This does not confirm arrival at the final recipient.',
+                          ),
+                          metric(
+                            'Typical handoff time',
+                            ms(result.latency.median),
+                            result.latency.count == 0
+                                ? 'A confirmed transfer is needed to measure this.'
+                                : 'The middle value from ${result.latency.count} confirmed transfers, including connection setup and storage confirmation.',
+                          ),
+                          metric(
+                            'Transfer attempts needing attention',
+                            '${result.failed} failed · ${result.open} awaiting confirmation',
+                            'A failed attempt can be retried by Store-Carry-Forward. Awaiting confirmation means no recorded outcome yet.',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  section(
+                    'How messages travelled',
+                    'Hops count the phone-to-phone steps in a message’s journey.',
+                    [
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          bars('Steps to the receiving responder (hop count)', {
+                            for (final e in result.hops.entries)
+                              '${e.key} ${e.key == '1' ? 'hop' : 'hops'}':
+                                  e.value,
                           }),
-                          child: const Text('Clear dates'),
+                          bars(
+                            'Connections used to send messages',
+                            result.transports,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Connection counts describe outgoing transfers, including repeat sends. They do not compare radio speed or range.',
+                      ),
+                    ],
+                  ),
+                  section(
+                    'Discovery and backup connections',
+                    'These results describe how phones found peers and sent messages.',
+                    [
+                      Wrap(
+                        spacing: 16,
+                        children: [
+                          metric(
+                            'Nearby phone searches',
+                            rate(result.discoverySuccess, result.discovery),
+                            '${result.discoverySuccess} of ${result.discovery} searches found a nearby phone. Finding a phone does not confirm message delivery.',
+                          ),
+                          metric(
+                            'Backup connection use',
+                            rate(result.fallback, result.sent),
+                            'Recorded fallback during sending: ${result.fallback} of ${result.sent} outgoing transfers. An earlier connection change may not be recorded here.',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Timing and battery details'),
+                    subtitle: const Text(
+                      'Slower transfers, total travel time and battery readings',
+                    ),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: metric(
+                          'Handoff timing',
+                          'Typical: ${ms(result.latency.median)}',
+                          result.latency.count == 0
+                              ? 'No confirmed transfer timing is recorded.'
+                              : 'Average: ${ms(result.latency.mean)}. 95% completed within ${ms(result.latency.p95)}. Fastest: ${ms(result.latency.values.firstOrNull)}. Slowest: ${ms(result.latency.values.lastOrNull)}. Based on ${result.latency.count} confirmations.',
+                        ),
+                      ),
+                      bars('Handoff time distribution', histogram),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: metric(
+                          'Total SOS travel time',
+                          ms(result.propagation.median),
+                          'Median across ${result.propagation.count} final receipts. Average: ${ms(result.propagation.mean)}; 95th percentile: ${ms(result.propagation.p95)}. Phone clocks are not synchronized, so these times are estimates.',
+                        ),
+                      ),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Battery readings are grouped by phone and session. Connection-type filters do not change this section.',
+                        ),
+                      ),
+                      if (batteryGroups.isEmpty)
+                        const ListTile(
+                          title: Text('No battery readings in this selection.'),
+                        ),
+                      for (final entry in batteryGroups.entries)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Phone ${devices.indexOf(entry.value.first.device) + 1} · battery level',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                result.battery[entry.key] == null
+                                    ? 'Battery drain cannot be measured: at least two readings in time order, without charging or a rising level, are needed.'
+                                    : '${result.battery[entry.key]!.toStringAsFixed(2)} percentage points used per hour.',
+                              ),
+                              const Text(
+                                'Vertical scale: 0–100%. Horizontal scale: time. Orange marks charging.',
+                              ),
+                              SizedBox(
+                                height: 110,
+                                width: 600,
+                                child: CustomPaint(
+                                  painter: _BatteryPainter(entry.value),
+                                ),
+                              ),
+                              ExpansionTile(
+                                title: Text(
+                                  '${entry.value.length} battery readings · view first 50',
+                                ),
+                                children: [
+                                  SelectableText(entry.key),
+                                  ...entry.value
+                                      .take(50)
+                                      .map(
+                                        (r) => ListTile(
+                                          title: Text(
+                                            '${local(r.time)} · ${r.data['battery_percent']}%${r.data['is_charging'] == true ? ' · charging' : ''}',
+                                          ),
+                                        ),
+                                      ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                     ],
                   ),
-                  Text(
-                    '${devices.length} imported devices · Expected participants: Unknown',
-                  ),
-                  const Text(
-                    'Partial evidence: import every participating phone. Next-hop ACKs do not establish final-recipient delivery.',
-                  ),
-                  for (final issue in result.issues) Text(issue),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('How to interpret these results'),
+                    subtitle: const Text(
+                      'Data coverage, clock accuracy and calculation notes',
+                    ),
                     children: [
-                      tile(
-                        'Final SOS receipts',
-                        '${result.receipts.length} recipient/message pairs · ${result.receipts.map((r) => r.hash).toSet().length} unique messages',
+                      const ListTile(
+                        title: Text('Import every participating phone'),
+                        subtitle: Text(
+                          'The number of expected participants is not recorded. Imported files alone cannot confirm that this test is complete.',
+                        ),
                       ),
-                      tile(
-                        'Recorded next-hop ACK success',
-                        rate(result.acknowledged, result.offered),
+                      const ListTile(
+                        title: Text('A handoff is one step'),
+                        subtitle: Text(
+                          'The next phone confirms that it stored a message. A final SOS receipt shows that a responder received it.',
+                        ),
                       ),
-                      tile(
-                        'Failed / open outgoing attempts',
-                        '${result.failed} failed / ${result.open} open',
+                      const ListTile(
+                        title: Text('Phone clocks may differ'),
+                        subtitle: Text(
+                          'Total travel times use phone timestamps. Clock differences can affect them. Handoff timing uses a separate elapsed-time measurement.',
+                        ),
                       ),
-                      tile(
-                        'Node latency (n=${result.latency.count})',
-                        'Median ${ms(result.latency.median)} · P95 ${ms(result.latency.p95)}\nMean ${ms(result.latency.mean)}\nMin ${ms(result.latency.values.firstOrNull)} · Max ${ms(result.latency.values.lastOrNull)}',
-                      ),
-                      tile(
-                        'Recorded send-stage fallback',
-                        rate(result.fallback, result.sent),
-                      ),
-                      tile(
-                        'Peer discovery success',
-                        rate(result.discoverySuccess, result.discovery),
-                      ),
-                      tile(
-                        'Propagation: clock-uncertain (n=${result.propagation.count})',
-                        'Mean ${ms(result.propagation.mean)} · Median ${ms(result.propagation.median)} · P95 ${ms(result.propagation.p95)}',
-                      ),
+                      for (final issue in result.issues.where(
+                        (v) => !v.startsWith('Clocks unsynchronized'),
+                      ))
+                        ListTile(title: Text(issue)),
+                      if (result.issues.any(
+                        (v) => !v.startsWith('Clocks unsynchronized'),
+                      ))
+                        const ListTile(
+                          title: Text('Some records need review'),
+                          subtitle: Text(
+                            'Review the notes above before presenting percentages as complete results.',
+                          ),
+                        ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    title: const Text('Detailed records'),
+                    subtitle: Text(
+                      '${rows.length} records · search messages and inspect the evidence',
+                    ),
                     children: [
-                      bars('Final SOS hop distribution', result.hops),
-                      bars('Outgoing transport usage', result.transports),
-                      bars('Acknowledged node latency', histogram),
-                    ],
-                  ),
-                  const Text(
-                    'Battery by device/session · unaffected by transport filter',
-                  ),
-                  for (final entry in batteryGroups.entries)
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      TextField(
+                        decoration: const InputDecoration(
+                          labelText: 'Search message or transfer ID',
+                        ),
+                        onChanged: (v) => setState(() {
+                          search = v;
+                          page = 0;
+                        }),
+                      ),
+                      picker(
+                        'Record type',
+                        kind,
+                        const [
+                          'All',
+                          'message_events',
+                          'sos_receipts',
+                          'discovery_attempts',
+                          'battery_samples',
+                        ],
+                        (v) => kind = v ?? 'All',
+                        all: false,
+                      ),
+                      Text(
+                        '${rows.length} records · Page ${current + 1} of $pages',
+                      ),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: current == 0
+                                ? null
+                                : () => setState(() => page = current - 1),
+                            child: const Text('Previous'),
+                          ),
+                          TextButton(
+                            onPressed: current + 1 >= pages
+                                ? null
+                                : () => setState(() => page = current + 1),
+                            child: const Text('Next'),
+                          ),
+                        ],
+                      ),
+                      for (final r in rows.skip(current * 50).take(50))
+                        ExpansionTile(
+                          title: Text(
+                            '${r.type} · Phone ${devices.indexOf(r.device) + 1} · ${radio(r.transport)}',
+                          ),
+                          subtitle: Text(
+                            '${local(r.time)} · hop ${r.data['hop_count'] ?? '—'} · latency ${r.data['latency_ms'] ?? '—'} ms',
+                          ),
                           children: [
-                            SelectableText(entry.key),
-                            Text(
-                              result.battery[entry.key] == null
-                                  ? 'Drain unavailable: needs increasing timestamps and non-charging, non-rising samples.'
-                                  : '${result.battery[entry.key]!.toStringAsFixed(2)} percentage points/hour',
-                            ),
-                            SizedBox(
-                              height: 110,
-                              width: 600,
-                              child: CustomPaint(
-                                painter: _BatteryPainter(entry.value),
+                            Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: SelectableText(
+                                'Device: ${r.device}\nSession: ${r.session}\nMessage: ${r.hash ?? 'Not recorded'}\nTransfer: ${r.transfer ?? 'Not recorded'}\n${r.data}',
                               ),
-                            ),
-                            ExpansionTile(
-                              title: Text(
-                                '${entry.value.length} samples · percent over time · first 50 listed',
-                              ),
-                              children: entry.value
-                                  .take(50)
-                                  .map(
-                                    (r) => ListTile(
-                                      title: Text(
-                                        '${local(r.time)} · ${r.data['battery_percent']}%${r.data['is_charging'] == true ? ' · charging' : ''}',
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Evidence records',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  TextField(
-                    decoration: const InputDecoration(
-                      labelText: 'Search full message hash or transfer ID',
-                    ),
-                    onChanged: (v) => setState(() {
-                      search = v;
-                      page = 0;
-                    }),
-                  ),
-                  picker(
-                    'Record type',
-                    kind,
-                    const [
-                      'All',
-                      'message_events',
-                      'sos_receipts',
-                      'discovery_attempts',
-                      'battery_samples',
-                    ],
-                    (v) => kind = v ?? 'All',
-                    all: false,
-                  ),
-                  Text(
-                    '${rows.length} records · Page ${current + 1} of $pages',
-                  ),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: current == 0
-                            ? null
-                            : () => setState(() => page = current - 1),
-                        child: const Text('Previous'),
-                      ),
-                      TextButton(
-                        onPressed: current + 1 >= pages
-                            ? null
-                            : () => setState(() => page = current + 1),
-                        child: const Text('Next'),
-                      ),
                     ],
                   ),
-                  for (final r in rows.skip(current * 50).take(50))
-                    ExpansionTile(
-                      title: Text(
-                        '${r.type} · ${short(r.device)} · ${r.transport}',
-                      ),
-                      subtitle: Text(
-                        '${local(r.time)} · hop ${r.data['hop_count'] ?? '—'} · latency ${r.data['latency_ms'] ?? '—'} ms',
-                      ),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: SelectableText(
-                            'Device: ${r.device}\nSession: ${r.session}\nMessage: ${r.hash ?? 'Unavailable'}\nTransfer: ${r.transfer ?? 'Unavailable'}\n${r.data}',
-                          ),
-                        ),
-                      ],
-                    ),
                 ],
               );
             },

@@ -55,7 +55,7 @@ class _ImportContents extends ConsumerWidget {
       padding: const EdgeInsets.all(24),
       children: [
         Text(
-          'Validation data',
+          'Validation results',
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.w700,
             color: _darkRed,
@@ -63,7 +63,7 @@ class _ImportContents extends ConsumerWidget {
         ),
         const SizedBox(height: 8),
         const Text(
-          'Import phone exports for a shared test run. Review each file before saving it to this computer.',
+          'Review how SOS messages moved between phones during your field test.',
         ),
         const SizedBox(height: 16),
         Wrap(
@@ -120,15 +120,33 @@ class _ImportContents extends ConsumerWidget {
               title: 'Import result',
             ),
           ),
-        const SizedBox(height: 16),
-        const _Notice(
-          text:
-              'Data completeness: collect exports from every participating sender, relay and recipient for the same run. Missing files and unsynchronized clocks limit conclusions. Counts below do not establish delivery success, propagation time or wireless performance.',
-        ),
-        const Text(
-          'A schema 2 checksum detects changes; it does not authenticate a phone or approve a device. Original JSON is retained locally for reproducibility. Keep your source files as a separate backup.',
-        ),
         const ValidationAnalysisDashboard(),
+        const SizedBox(height: 24),
+        const ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text('About imported files'),
+          subtitle: Text('Data coverage, file checks and backups'),
+          children: [
+            ListTile(
+              title: Text('Use files from the same test run'),
+              subtitle: Text(
+                'Collect exports from every sender, relay and receiving phone. Missing files and differences between phone clocks limit what the results can show.',
+              ),
+            ),
+            ListTile(
+              title: Text('File checks detect changes'),
+              subtitle: Text(
+                'A verified checksum means the file has not changed since export. It does not identify or approve a phone.',
+              ),
+            ),
+            ListTile(
+              title: Text('Keep the original files'),
+              subtitle: Text(
+                'Imported JSON stays on this computer for review. Keep your original exports as a separate backup.',
+              ),
+            ),
+          ],
+        ),
         if (preview != null) ...[
           const SizedBox(height: 24),
           Text(
@@ -153,7 +171,7 @@ class _ImportContents extends ConsumerWidget {
         ],
         const SizedBox(height: 24),
         Text(
-          'Imported datasets (${state.datasets.length})',
+          'Imported phone files (${state.datasets.length})',
           style: Theme.of(context).textTheme.titleLarge,
         ),
         const SizedBox(height: 8),
@@ -261,7 +279,7 @@ class _DatasetCard extends ConsumerWidget {
           children: [
             Expanded(
               child: Text(
-                dataset.filename,
+                '${dataset.runId ?? 'Older test'} · ${dataset.role == 'civilian' ? 'Resident' : dataset.role}',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
@@ -272,9 +290,19 @@ class _DatasetCard extends ConsumerWidget {
             ),
           ],
         ),
-        _DatasetMetadata(dataset: dataset),
-        if (dataset.importedAt != null)
-          Text('Imported ${dataset.importedAt!.toUtc().toIso8601String()}'),
+        Text(
+          '${dataset.recordCount} recorded entries · ${dataset.receiptCount} SOS receipts',
+        ),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: const Text('File details'),
+          children: [
+            SelectableText(dataset.filename),
+            _DatasetMetadata(dataset: dataset),
+            if (dataset.importedAt != null)
+              Text('Imported ${dataset.importedAt!.toUtc().toIso8601String()}'),
+          ],
+        ),
       ],
     ),
   );
