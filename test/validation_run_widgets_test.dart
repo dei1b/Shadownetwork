@@ -65,7 +65,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
-      await tester.tap(find.text('START VALIDATION SESSION'));
+      await tester.tap(find.text('Set up test'));
       await repo.getSessions();
     });
     await tester.pumpAndSettle();

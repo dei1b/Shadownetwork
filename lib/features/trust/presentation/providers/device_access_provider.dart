@@ -14,6 +14,32 @@ final deviceAccessResolverProvider = Provider<DeviceAccessResolver>(
   (ref) => const DeviceAccessResolver(),
 );
 
+final canReceiveSosProvider = Provider<Future<bool> Function()>((ref) {
+  return () async {
+    // The background relay can run for hours after the UI resolved its role.
+    final bundle = await ref.read(trustBundleStoreProvider).loadBundle();
+    if (bundle?.isSignatureVerified != true ||
+        bundle!.isExpiredAt(DateTime.now())) {
+      return false;
+    }
+    final peer = await ref.read(localPeerProvider.future);
+    final identity = await ref.read(deviceCryptoIdentityProvider.future);
+    final signingIdentity = await ref.read(
+      deviceSigningIdentityProvider.future,
+    );
+    return ref
+        .read(deviceAccessResolverProvider)
+        .resolve(
+          deviceId: peer.id,
+          publicKey: identity.encodedPublicKey,
+          keyVersion: identity.keyVersion,
+          signingPublicKey: signingIdentity.encodedPublicKey,
+          bundle: bundle,
+        )
+        .canAccessResponderInterface;
+  };
+});
+
 final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
   ref,
 ) async {

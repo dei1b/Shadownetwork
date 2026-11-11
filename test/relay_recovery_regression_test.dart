@@ -21,6 +21,7 @@ import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart'
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
+import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 import 'support/database_migration_test_harness.dart';
 
 const sender = Peer(
@@ -46,6 +47,9 @@ ProviderContainer runtimeContainer(
       localMessagingDatabaseProvider.overrideWith((ref) async => db),
       scfTransportProvider.overrideWithValue(transport),
       incomingMessageNotificationsProvider.overrideWithValue(notifications),
+      canReceiveSosProvider.overrideWithValue(
+        () async => transport.localPeerId == receiver.id,
+      ),
       deviceIdentityStoreProvider.overrideWithValue(
         DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
       ),

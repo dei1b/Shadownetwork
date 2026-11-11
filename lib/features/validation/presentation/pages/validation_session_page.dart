@@ -26,7 +26,7 @@ class ValidationSessionPage extends ConsumerWidget {
     final isResponder = access.valueOrNull?.canAccessResponderInterface == true;
     if (!isResponder) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Validation Metrics')),
+        appBar: AppBar(title: const Text('SOS field test')),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(28),
@@ -47,7 +47,7 @@ class ValidationSessionPage extends ConsumerWidget {
         foregroundColor: _validationDark,
         elevation: 0,
         title: const Text(
-          'VALIDATION METRICS',
+          'SOS field test',
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
         ),
         actions: [
@@ -98,16 +98,17 @@ class ValidationSessionPage extends ConsumerWidget {
               if (data.activeSummary != null) ...[
                 const SizedBox(height: 18),
                 _SectionTitle(
-                  title: 'LIVE RESULTS',
-                  subtitle: 'Calculated only from persisted session records',
+                  title: 'Activity on this phone',
+                  subtitle:
+                      'Import every test phone’s file in the Windows admin for the delivery rate.',
                 ),
                 const SizedBox(height: 10),
                 _MetricsGrid(summary: data.activeSummary!),
               ],
               const SizedBox(height: 20),
               const _SectionTitle(
-                title: 'SESSION HISTORY',
-                subtitle: 'Stored locally and available after restart',
+                title: 'Past recordings',
+                subtitle: 'Open a recording to share its file with the admin.',
               ),
               const SizedBox(height: 10),
               if (data.sessions.isEmpty)
@@ -319,7 +320,7 @@ class _SessionHero extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  active == null ? 'FIELD VALIDATION READY' : 'RECORDING NOW',
+                  active == null ? 'Ready to record' : 'Recording now',
                   style: const TextStyle(
                     color: Color(0xFFFFB5B1),
                     fontSize: 11,
@@ -329,7 +330,7 @@ class _SessionHero extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  active?.name ?? 'Capture evidence without internet',
+                  active?.name ?? 'Test SOS delivery without internet',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -339,7 +340,7 @@ class _SessionHero extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   active == null
-                      ? 'Start a named session before the three-device test.'
+                      ? 'Start recording on each approved test phone with the same run code.'
                       : '${_duration(active.elapsedAt(state.now))} elapsed',
                   style: const TextStyle(
                     color: Color(0xFFD8CECA),
@@ -368,7 +369,7 @@ class _StartSessionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'NO ACTIVE SESSION',
+            'Before you send an SOS',
             style: TextStyle(
               color: _validationMuted,
               fontSize: 11,
@@ -378,7 +379,7 @@ class _StartSessionCard extends StatelessWidget {
           ),
           const SizedBox(height: 7),
           const Text(
-            'Messaging remains fully operational. Metrics are recorded only after you deliberately start a validation session.',
+            'Start recording, then use Send SOS on the map. At the end of the test, stop and share each phone’s recording.',
             style: TextStyle(fontSize: 13, height: 1.45),
           ),
           const SizedBox(height: 15),
@@ -391,7 +392,7 @@ class _StartSessionCard extends StatelessWidget {
               ),
               onPressed: onStart,
               icon: const Icon(Icons.fiber_manual_record_rounded, size: 18),
-              label: const Text('START VALIDATION SESSION'),
+              label: const Text('Set up test'),
             ),
           ),
         ],
@@ -490,7 +491,7 @@ class _ActiveSessionCard extends StatelessWidget {
               style: FilledButton.styleFrom(backgroundColor: _validationDark),
               onPressed: onStop,
               icon: const Icon(Icons.stop_rounded),
-              label: const Text('STOP AND COMPLETE SESSION'),
+              label: const Text('Stop recording'),
             ),
           ),
         ],
@@ -507,6 +508,20 @@ class _MetricsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final metrics = _metricItems(summary);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _grid(metrics.take(3)),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: const Text('Technical details'),
+          children: [_grid(metrics.skip(3))],
+        ),
+      ],
+    );
+  }
+
+  Widget _grid(Iterable<_MetricItem> metrics) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 620 ? 3 : 2;
@@ -677,8 +692,6 @@ class _SessionDetailsSheet extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           ValidationRunIdentityPanel(testRunId: data.session.testRunId),
-          _MetricsGrid(summary: summary),
-          const SizedBox(height: 16),
           ValidationBundleShareButton(session: data.session),
           const SizedBox(height: 12),
           Row(
@@ -701,6 +714,8 @@ class _SessionDetailsSheet extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          _MetricsGrid(summary: summary),
         ],
       ),
     );
@@ -843,27 +858,27 @@ class _MetricItem {
 
 List<_MetricItem> _metricItems(ValidationSummary summary) => [
   _MetricItem(
-    'MESSAGES RECEIVED HERE',
+    'Messages received here',
     '${summary.deliveredMessageCount}',
     Icons.inbox_outlined,
   ),
   _MetricItem(
-    'OUTGOING CONFIRMATION RATE',
+    'Handoffs confirmed',
     _percent(summary.deliverySuccessRate, empty: 'No outgoing attempts'),
     Icons.task_alt_rounded,
   ),
   _MetricItem(
-    'PEER DISCOVERY SUCCESS',
-    _percent(summary.discoverySuccessRate, empty: 'No attempts'),
-    Icons.radar_rounded,
-  ),
-  _MetricItem(
-    'OUTGOING CONFIRMATION TIME',
+    'Average handoff time',
     _milliseconds(
       summary.averageNodeLatencyMs,
       empty: 'No timed confirmations',
     ),
     Icons.speed_rounded,
+  ),
+  _MetricItem(
+    'Nearby phone searches',
+    _percent(summary.discoverySuccessRate, empty: 'No attempts'),
+    Icons.radar_rounded,
   ),
   _MetricItem(
     'END-TO-END PROPAGATION',

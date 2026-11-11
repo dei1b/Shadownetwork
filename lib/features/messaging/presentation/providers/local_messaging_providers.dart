@@ -43,6 +43,7 @@ import '../../../trust/data/repositories/sqlite_trust_repository.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
 import '../../../trust/domain/entities/device_trust_status.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
+import '../../../trust/presentation/providers/device_access_provider.dart';
 import '../../../validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
 import '../../../validation/domain/entities/validation_event.dart';
@@ -193,6 +194,22 @@ final sosMessagesProvider = FutureProvider<List<SosMessage>>((ref) async {
   return repository.getMessages();
 });
 
+final setSosRespondedProvider =
+    Provider<Future<bool> Function(String, {required bool responded})>((ref) {
+      return (messageId, {required responded}) async {
+        if (!await ref.read(canReceiveSosProvider)()) return false;
+        final localPeer = await ref.read(localPeerProvider.future);
+        final repository = await ref.read(sosMessageRepositoryProvider.future);
+        final changed = await repository.setResponded(
+          messageId: messageId,
+          localPeerId: localPeer.id,
+          responded: responded,
+        );
+        ref.invalidate(sosMessagesProvider);
+        return changed;
+      };
+    });
+
 final conversationsProvider = FutureProvider<List<Conversation>>((ref) async {
   final localPeer = await ref.watch(localPeerProvider.future);
   final repository = await ref.watch(chatRepositoryProvider.future);
@@ -228,10 +245,32 @@ final openConversationProvider = Provider<OpenConversation>((ref) {
 });
 
 typedef SendChatMessage =
-    Future<void> Function(Conversation conversation, String body);
+    Future<void> Function(
+      Conversation conversation,
+      String body, {
+      String? relatedSosMessageHash,
+    });
+
+final registeredChatPeersProvider =
+    FutureProvider.autoDispose<List<TrustedDevice>>((ref) async {
+      final localPeer = await ref.watch(localPeerProvider.future);
+      final bundle = await ref.watch(trustBundleStoreProvider).loadBundle();
+      if (bundle?.isSignatureVerified != true ||
+          bundle!.isExpiredAt(DateTime.now())) {
+        return const [];
+      }
+      return bundle.approvedDevices.where((device) {
+        return device.deviceId.toLowerCase() != localPeer.id.toLowerCase() &&
+            device.status == 'approved' &&
+            device.publicKey?.trim().isNotEmpty == true;
+      }).toList()..sort(
+        (a, b) =>
+            a.ownerName.toLowerCase().compareTo(b.ownerName.toLowerCase()),
+      );
+    });
 
 final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
-  return (conversation, body) async {
+  return (conversation, body, {relatedSosMessageHash}) async {
     final trimmedBody = body.trim();
     if (trimmedBody.isEmpty) {
       return;
@@ -252,7 +291,7 @@ final sendChatMessageProvider = Provider<SendChatMessage>((ref) {
       body: trimmedBody,
       status: MessageStatus.queued,
       createdAt: now,
-      relatedSosMessageHash: conversation.relatedSosMessageHash,
+      relatedSosMessageHash: relatedSosMessageHash,
       trustStatus: senderTrust.status,
       trustRole: senderTrust.role,
       trustOwnerName: senderTrust.ownerName,
@@ -320,10 +359,50 @@ final markConversationReadProvider = Provider<Future<void> Function(String)>((
   };
 });
 
+final approvedSosRescuersProvider =
+    Provider<Future<List<TrustedDevice>> Function(String)>((ref) {
+      return (senderId) async {
+        final bundle = await ref.read(trustBundleStoreProvider).loadBundle();
+        if (bundle?.isSignatureVerified != true ||
+            bundle!.isExpiredAt(DateTime.now())) {
+          return const [];
+        }
+        return bundle.approvedDevices
+            .where((device) {
+              final role = device.role.trim().toLowerCase();
+              return device.deviceId.toLowerCase() != senderId.toLowerCase() &&
+                  device.status == 'approved' &&
+                  (role == 'responder' || role == 'rescuer') &&
+                  device.publicKey?.trim().isNotEmpty == true &&
+                  device.signingPublicKey?.trim().isNotEmpty == true;
+            })
+            .toList(growable: false);
+      };
+    });
+
+class SosRecipientUnavailableException implements Exception {
+  const SosRecipientUnavailableException();
+
+  String get message => 'Choose an approved rescuer or broadcast to rescuers.';
+}
+
 final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
   ref,
 ) {
   return (message) async {
+    TrustedDevice? recipient;
+    final target = message.recipient;
+    if (target != null) {
+      final rescuers = await ref.read(approvedSosRescuersProvider)(
+        message.sender.id,
+      );
+      recipient = rescuers
+          .where((device) => device.deviceId == target.id)
+          .firstOrNull;
+      if (recipient == null) {
+        throw const SosRecipientUnavailableException();
+      }
+    }
     final repository = await ref.read(sosMessageRepositoryProvider.future);
     final scfService = await ref.read(scfServiceProvider.future);
     final spamDetectionService = ref.read(spamDetectionServiceProvider);
@@ -346,9 +425,6 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
       priorMessages: recentMessages.map(_sosSimilaritySample),
     );
     final moderatedMessage = _withSosModeration(trustedMessage, moderation);
-    final recipient = trustedMessage.recipient == null
-        ? null
-        : await _trustedRecipient(trustedMessage.recipient!.id);
     final prepared = await SecureSosMessagePayload.prepare(
       moderatedMessage,
       encryptionService: ref.read(messageEncryptionServiceProvider),

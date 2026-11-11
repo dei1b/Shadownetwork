@@ -95,9 +95,12 @@ class _ValidationSessionStartDialogState
               TextFormField(
                 key: const ValueKey('validation-session-name'),
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'Session name'),
+                decoration: const InputDecoration(
+                  labelText: 'Test name',
+                  hintText: 'Community and scenario',
+                ),
                 validator: (value) => value == null || value.trim().isEmpty
-                    ? 'Enter a session name.'
+                    ? 'Enter a test name.'
                     : null,
               ),
               const SizedBox(height: 14),

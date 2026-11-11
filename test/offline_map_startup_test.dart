@@ -92,11 +92,29 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (_) async => false);
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     final messages = Completer<List<SosMessage>>();
+    final archived = StateProvider<bool>((ref) => false);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           nearbyPeersProvider.overrideWith((ref) async => []),
-          sosMessagesProvider.overrideWith((ref) => messages.future),
+          sosMessagesProvider.overrideWith((ref) async {
+            final isArchived = ref.watch(archived);
+            final items = await messages.future;
+            return [
+              for (final message in items)
+                if (message.id == 'emergency' && isArchived)
+                  message.copyWith(respondedAt: DateTime.utc(2026, 11, 11))
+                else
+                  message,
+            ];
+          }),
+          setSosRespondedProvider.overrideWith((ref) {
+            return (id, {required responded}) async {
+              expect(id, 'emergency');
+              ref.read(archived.notifier).state = responded;
+              return true;
+            };
+          }),
           conversationsProvider.overrideWith((ref) async => []),
           relayRuntimeProvider.overrideWith(_ScannedRelayRuntime.new),
           mapTileCacheStoreProvider.overrideWith(
@@ -188,6 +206,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('SOS details'), findsOneWidget);
     expect(find.text('Message sender'), findsNothing);
+    expect(find.text('Mark responded'), findsNothing);
     expect(find.text('Created on this phone'), findsOneWidget);
     expect(find.text('Moderation'), findsNothing);
     expect(find.text('Saved on this phone · Delivery pending'), findsWidgets);
@@ -200,7 +219,23 @@ void main() {
     await tester.tap(incomingCard);
     await tester.pumpAndSettle();
     expect(find.text('Message sender'), findsOneWidget);
-    await tester.tap(find.byTooltip('Close SOS details'));
+    expect(find.text('Mark responded'), findsOneWidget);
+    await tester.tap(find.text('Mark responded'));
+    await tester.pumpAndSettle();
+    expect(incomingCard, findsNothing);
+    final archiveFilter = find.text('Archive');
+    await tester.ensureVisible(archiveFilter);
+    await tester.tap(archiveFilter);
+    await tester.pumpAndSettle();
+    expect(incomingCard, findsOneWidget);
+    await tester.ensureVisible(incomingCard);
+    await tester.tap(incomingCard);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore alert'));
+    await tester.pumpAndSettle();
+    expect(incomingCard, findsNothing);
+    expect(find.text('SOS restored to active alerts.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 9));
     await tester.pumpAndSettle();
     final spamFilter = find.text('Spam');
     await tester.ensureVisible(spamFilter);

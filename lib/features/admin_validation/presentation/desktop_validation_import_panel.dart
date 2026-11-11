@@ -65,7 +65,7 @@ class _ImportContents extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Review how SOS messages moved between phones during your field test.',
+              'Import the JSON export from each test phone. Use the same run code on every phone in a field test.',
             ),
             const SizedBox(height: 16),
             Wrap(

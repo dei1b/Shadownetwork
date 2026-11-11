@@ -29,6 +29,7 @@ class SosMessageModel {
       createdAt: DateTime.parse(map['created_at']! as String).toUtc(),
       updatedAt: _dateTimeFromMap(map['updated_at']),
       receivedAt: _dateTimeFromMap(map['received_at']),
+      respondedAt: _dateTimeFromMap(map['responded_at']),
       receivedFromPeerId: map['received_from_peer_id'] as String?,
       receivedTransport: map['received_transport'] as String?,
       transferId: map['transfer_id'] as String?,

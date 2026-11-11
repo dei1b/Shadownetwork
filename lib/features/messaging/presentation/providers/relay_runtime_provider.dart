@@ -31,6 +31,7 @@ import '../../../security/data/services/message_encryption_service.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../trust/domain/repositories/trust_repository.dart';
 import '../../../trust/domain/entities/device_trust_status.dart';
+import '../../../trust/presentation/providers/device_access_provider.dart';
 import '../../../validation/domain/entities/validation_event.dart';
 import '../../../validation/domain/repositories/validation_metrics_repository.dart';
 import 'local_messaging_providers.dart';
@@ -460,6 +461,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   }) async {
     var storedCount = 0;
     final notifications = ref.read(incomingMessageNotificationsProvider);
+    bool? canReceiveSos;
     for (final envelope in envelopes) {
       try {
         final isChat = await RelayPayloadCodec.decodeFields(
@@ -573,6 +575,12 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           if (!inserted) continue;
           ref.invalidate(chatMessagesProvider(conversation.id));
           storedCount++;
+          continue;
+        }
+        canReceiveSos ??= await ref.read(canReceiveSosProvider)();
+        if (!canReceiveSos) {
+          // Keep the forwarding copy so a rescuer can receive it later.
+          await scfService.discardPendingMessage(envelope.messageHash);
           continue;
         }
         final isSecureSos = SecureSosMessagePayload.supportsVersion(

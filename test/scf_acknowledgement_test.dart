@@ -18,6 +18,7 @@ import 'package:shadownetwork/features/messaging/presentation/providers/local_me
 import 'package:shadownetwork/features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
+import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 import 'package:shadownetwork/features/validation/data/repositories/sqlite_validation_metrics_repository.dart';
 import 'package:shadownetwork/features/validation/domain/entities/validation_event.dart';
 import 'package:shadownetwork/features/validation/domain/services/validation_metrics_calculator.dart';
@@ -58,11 +59,16 @@ void main() {
           createdAt: DateTime.now().toUtc(),
         ),
       );
+      final reverseHash =
+          (await f.scfB.getStoredEnvelopes()).single.messageHash;
       ProviderContainer container(Database db, ScfTransport transport) {
         final result = ProviderContainer(
           overrides: [
             localMessagingDatabaseProvider.overrideWith((ref) async => db),
             scfTransportProvider.overrideWithValue(transport),
+            canReceiveSosProvider.overrideWithValue(
+              () async => transport.localPeerId == receiver.id,
+            ),
             deviceIdentityStoreProvider.overrideWithValue(
               DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
             ),
@@ -85,7 +91,14 @@ void main() {
       expect(b.read(relayRuntimeProvider).lastRelayedCount, greaterThan(0));
       final repoA = await a.read(sosMessageRepositoryProvider.future);
       final repoB = await b.read(sosMessageRepositoryProvider.future);
-      expect((await repoA.getMessages()).single.id, 'reverse-sos');
+      expect(await repoA.getMessages(), isEmpty);
+      final onward = await f.scfA.prepareOutboundForPeer('next-rescuer');
+      expect(
+        onward
+            .singleWhere((envelope) => envelope.messageHash == reverseHash)
+            .hopCount,
+        2,
+      );
       final receipt = (await repoB.getMessages()).single;
       expect(receipt.id, 'sos');
       expect(receipt.receivedAt, isNotNull);
@@ -122,6 +135,7 @@ void main() {
       overrides: [
         localMessagingDatabaseProvider.overrideWith((ref) async => reopened),
         scfTransportProvider.overrideWithValue(offline),
+        canReceiveSosProvider.overrideWithValue(() async => true),
         deviceIdentityStoreProvider.overrideWithValue(
           DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
         ),

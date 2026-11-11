@@ -9,4 +9,9 @@ abstract class SosMessageRepository {
 
   /// Saves the message and returns whether it is new to this phone.
   Future<bool> saveMessage(SosMessage message);
+  Future<bool> setResponded({
+    required String messageId,
+    required String localPeerId,
+    required bool responded,
+  });
 }

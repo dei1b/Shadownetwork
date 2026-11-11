@@ -11,12 +11,13 @@ import '../utils/sos_timing_labels.dart';
 import 'sos_receipt_summary.dart';
 import 'sos_send_status.dart';
 
-Future<void> showSosDetailSheet(
+Future<bool?> showSosDetailSheet(
   BuildContext context, {
   required SosMessage message,
   VoidCallback? onMessageSender,
   String? ownSenderLabel,
-}) => showModalBottomSheet<void>(
+  bool canUpdateResponse = false,
+}) => showModalBottomSheet<bool>(
   context: context,
   isScrollControlled: true,
   useSafeArea: true,
@@ -25,6 +26,9 @@ Future<void> showSosDetailSheet(
   builder: (sheetContext) => SosDetailSheet(
     message: message,
     ownSenderLabel: ownSenderLabel,
+    onUpdateResponse: canUpdateResponse
+        ? () => Navigator.of(sheetContext).pop(true)
+        : null,
     onMessageSender: onMessageSender == null
         ? null
         : () {
@@ -40,11 +44,13 @@ class SosDetailSheet extends StatelessWidget {
     required this.message,
     this.onMessageSender,
     this.ownSenderLabel,
+    this.onUpdateResponse,
   });
 
   final SosMessage message;
   final VoidCallback? onMessageSender;
   final String? ownSenderLabel;
+  final VoidCallback? onUpdateResponse;
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +113,30 @@ class SosDetailSheet extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 14),
+                  ],
+                  if (message.respondedAt != null)
+                    _DetailRow(
+                      label: 'Responded',
+                      value: SosTimingLabels.timestamp(message.respondedAt),
+                    ),
+                  if (onUpdateResponse != null) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: onUpdateResponse,
+                        icon: Icon(
+                          message.respondedAt == null
+                              ? Icons.check_circle_outline
+                              : Icons.unarchive_outlined,
+                        ),
+                        label: Text(
+                          message.respondedAt == null
+                              ? 'Mark responded'
+                              : 'Restore alert',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                   ],
                   if (ownSenderLabel != null)
                     SosSendStatus(message: message)

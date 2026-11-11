@@ -33,6 +33,56 @@ ValidationRunAnalysis calculate(
 ], filter);
 void main() {
   test(
+    'SOS success counts matching messages once and checks the recipient',
+    () {
+      AnalysisRecord queued(String hash, {String? target}) =>
+          AnalysisRecord('run', 'sender', 'responder', 's', 'message_events', {
+            'id': hash,
+            'event_type': 'sosQueued',
+            'message_hash': hash,
+            'peer_id': target,
+            'occurred_at': '2026-11-11T00:00:00Z',
+          });
+      AnalysisRecord receipt(
+        String hash,
+        String device, {
+        String run = 'run',
+      }) => AnalysisRecord(run, device, 'responder', 's', 'sos_receipts', {
+        'message_hash': hash,
+        'created_at': '2026-11-11T00:00:00Z',
+        'received_at': '2026-11-11T00:00:01Z',
+      });
+      final broadcast = queued('broadcast');
+      final result = calculate([
+        broadcast,
+        broadcast,
+        queued('targeted', target: 'target'),
+        queued('missing', target: 'target'),
+        receipt('broadcast', 'sender'),
+        receipt('broadcast', 'target'),
+        receipt('broadcast', 'other'),
+        receipt('targeted', 'other'),
+        receipt('missing', 'target', run: 'another-run'),
+        receipt('untracked', 'target'),
+        event('offer', 'envelopeOffered', hash: 'broadcast'),
+        event('ack', 'envelopeAcknowledged', hash: 'broadcast', latency: 1500),
+        event('chat-offer', 'envelopeOffered', transfer: 'chat'),
+        event('chat-ack', 'envelopeAcknowledged', transfer: 'chat'),
+      ]);
+      expect(result.sosStarted, 3);
+      expect(result.sosConfirmed, 1);
+      expect(result.sosHandoffTime.values, [1500]);
+      expect(
+        calculate([
+          queued('targeted', target: 'target'),
+          receipt('targeted', 'target'),
+        ]).sosConfirmed,
+        1,
+      );
+    },
+  );
+
+  test(
     'failure after window closes offer and uncorrelated failures stay visible',
     () {
       final result = calculate(

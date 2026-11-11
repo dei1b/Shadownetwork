@@ -49,7 +49,11 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
     }
     setState(() => _isSending = true);
     try {
-      await ref.read(sendChatMessageProvider)(widget.conversation, body);
+      await ref.read(sendChatMessageProvider)(
+        widget.conversation,
+        body,
+        relatedSosMessageHash: widget.linkedSosMessage?.messageHash,
+      );
       _composer.clear();
       await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
       ref.invalidate(chatMessagesProvider(widget.conversation.id));
@@ -93,7 +97,7 @@ class _ConversationPageState extends ConsumerState<ConversationPage> {
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             Text(
-              '${(widget.conversation.latestTrustStatus ?? DeviceTrustStatus.unknown).displayLabel} - ${remote.isConnected ? 'Connected nearby' : 'Offline relay available'}',
+              '${widget.conversation.latestTrustStatus?.displayLabel ?? 'Private chat'} - ${remote.isConnected ? 'Connected nearby' : 'Offline relay available'}',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,

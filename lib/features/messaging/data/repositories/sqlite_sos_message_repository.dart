@@ -126,6 +126,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
           'received_from_peer_id',
           'received_transport',
           'transfer_id',
+          'responded_at',
         ],
         where: 'id = ?',
         whereArgs: [message.id],
@@ -136,6 +137,8 @@ class SqliteSosMessageRepository implements SosMessageRepository {
       if (existing.isNotEmpty && existing.single['received_at'] != null) {
         row.addAll(existing.single);
       }
+      // Replayed envelopes cannot reopen an alert closed on this phone.
+      row['responded_at'] = existing.firstOrNull?['responded_at'];
       await transaction.insert(
         LocalMessagingDatabase.sosMessagesTable,
         row,
@@ -148,5 +151,30 @@ class SqliteSosMessageRepository implements SosMessageRepository {
       );
       return existing.isEmpty;
     });
+  }
+
+  @override
+  Future<bool> setResponded({
+    required String messageId,
+    required String localPeerId,
+    required bool responded,
+  }) async {
+    final changed = await _database.update(
+      LocalMessagingDatabase.sosMessagesTable,
+      {
+        'responded_at': responded
+            ? DateTime.now().toUtc().toIso8601String()
+            : null,
+      },
+      where:
+          '''
+        id = ? AND lower(sender_peer_id) != lower(?)
+        AND (received_at IS NOT NULL OR status = ?)
+        AND trust_status != 'revoked'
+        AND ${responded ? "moderation_status = 'normal' AND responded_at IS NULL" : "responded_at IS NOT NULL"}
+      ''',
+      whereArgs: [messageId, localPeerId, MessageStatus.received.name],
+    );
+    return changed == 1;
   }
 }

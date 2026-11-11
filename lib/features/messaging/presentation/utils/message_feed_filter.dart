@@ -13,6 +13,10 @@ bool shouldShowSosMessageForFilter({
   final isSpam =
       !isOutgoing && message.moderationStatus == MessageModerationStatus.spam;
   final isRevoked = message.trustStatus == DeviceTrustStatus.revoked;
+  if (activeFilter == 'ARCHIVE') {
+    return message.respondedAt != null && !isRevoked;
+  }
+  if (message.respondedAt != null && activeFilter != 'QUARANTINE') return false;
   return switch (activeFilter) {
     'ALL' => !isSpam && !isRevoked,
     'SPAM' => isSpam && !isRevoked,
@@ -40,7 +44,8 @@ bool shouldShowSosMessageOnMap({
   required SosMessage message,
   required Set<Category> visibleCategories,
 }) {
-  return message.moderationStatus != MessageModerationStatus.spam &&
+  return message.respondedAt == null &&
+      message.moderationStatus != MessageModerationStatus.spam &&
       message.trustStatus != DeviceTrustStatus.revoked &&
       (visibleCategories.contains(message.category) ||
           visibleCategories.contains(message.category.sosCategory)) &&

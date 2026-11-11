@@ -25,7 +25,7 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
       title: 'Send an SOS',
       body:
           'On Home, tap Send SOS Message. Choose what happened, check the '
-          'location, and send your alert. You can broadcast an SOS before '
+          'location, and alert rescuers. You can broadcast an SOS before '
           'your phone is registered.',
     ),
     (

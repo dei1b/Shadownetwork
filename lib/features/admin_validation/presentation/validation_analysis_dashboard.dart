@@ -7,9 +7,33 @@ import '../../admin/presentation/theme/admin_theme.dart';
 import 'providers/validation_analysis_provider.dart';
 import 'providers/validation_import_provider.dart';
 
-ValidationRunAnalysis _calculate(
+typedef _RunResults = ({
+  ValidationRunAnalysis summary,
+  ValidationRunAnalysis details,
+});
+
+_RunResults _calculate(
   (List<ValidationAnalysisInput>, ValidationAnalysisFilter) args,
-) => const ValidationAnalysisCalculator().calculate(args.$1, args.$2);
+) {
+  const calculator = ValidationAnalysisCalculator();
+  final (inputs, filter) = args;
+  final details = calculator.calculate(inputs, filter);
+  final hasFilters =
+      filter.device != null ||
+      filter.role != null ||
+      filter.transport != null ||
+      filter.start != null ||
+      filter.end != null;
+  return (
+    summary: hasFilters
+        ? calculator.calculate(
+            inputs,
+            ValidationAnalysisFilter(run: filter.run),
+          )
+        : details,
+    details: details,
+  );
+}
 
 class ValidationAnalysisDashboard extends ConsumerStatefulWidget {
   const ValidationAnalysisDashboard({super.key});
@@ -23,7 +47,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
   String search = '', kind = 'All';
   int page = 0;
   int? calculationKey;
-  Future<ValidationRunAnalysis>? calculation;
+  Future<_RunResults>? calculation;
   String short(String value) =>
       value.length > 18 ? '${value.substring(0, 18)}…' : value;
   String rate(int n, int d) => d == 0
@@ -236,6 +260,38 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
         ),
       );
 
+  Widget objectiveSummary(ValidationRunAnalysis result) {
+    final handoff = result.sosHandoffTime;
+    return section(
+      'SOS field test',
+      'Can an SOS reach a responder across the last-mile gap without internet?',
+      [
+        grid(
+          children: [
+            metric(
+              'SOS delivery success rate',
+              rate(result.sosConfirmed, result.sosStarted),
+              result.sosStarted == 0
+                  ? 'Import the sending phone’s file to count the SOS messages started in this test.'
+                  : 'Responder files confirm ${result.sosConfirmed} of ${result.sosStarted} recorded SOS messages. Each SOS counts once.',
+            ),
+            metric(
+              'Typical phone-to-phone wait',
+              ms(handoff.median),
+              handoff.count == 0
+                  ? 'Import a phone file with a confirmed SOS handoff to measure this.'
+                  : 'Based on ${handoff.count} timed SOS ${handoff.count == 1 ? 'handoff' : 'handoffs'}. The timer runs from transfer start until the next phone confirms storage.',
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Import every test phone’s export to verify the full run. Missing receipts leave delivery unconfirmed. Handoff timing excludes time spent waiting for another phone to come into range.',
+        ),
+      ],
+    );
+  }
+
   String radio(String value) => switch (value) {
     'bluetooth' || 'ble' => 'Bluetooth (BLE)',
     'wifi_direct' => 'Wi-Fi Direct',
@@ -424,7 +480,17 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
             calculationKey = nextKey;
             calculation = compute(_calculate, (inputs, filter));
           }
-          return FutureBuilder<ValidationRunAnalysis>(
+          final runLabels = <String, String>{};
+          for (final id in runs) {
+            final names = inputs
+                .where((input) => input.runId == id)
+                .map((input) => input.runName?.trim())
+                .whereType<String>()
+                .where((name) => name.isNotEmpty)
+                .toSet();
+            runLabels[id] = names.length == 1 ? '${names.single} ($id)' : id;
+          }
+          return FutureBuilder<_RunResults>(
             future: calculation,
             builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
@@ -438,7 +504,8 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                   'Unable to calculate run metrics. Reopen Validation data to retry.',
                 );
               }
-              final result = snapshot.data!;
+              final results = snapshot.data!;
+              final result = results.details;
               final rows =
                   result.records
                       .where(
@@ -493,20 +560,27 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     runSpacing: 12,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      picker('Test run', selectedRun, runs, (v) {
-                        run = v;
-                        device = null;
-                      }, all: false),
+                      picker(
+                        'Test run',
+                        selectedRun,
+                        runs,
+                        (v) {
+                          run = v;
+                          device = null;
+                        },
+                        all: false,
+                        labels: runLabels,
+                      ),
                       Text(
                         '${devices.length} ${devices.length == 1 ? 'phone imported' : 'phones imported'}',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  objectiveSummary(results.summary),
                   disclosure(
                     tilePadding: EdgeInsets.zero,
-                    title: const Text('Filter results'),
+                    title: const Text('Filter technical details'),
                     subtitle: Text(
                       selectedDevice == null &&
                               role == null &&
@@ -580,10 +654,12 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                         'Some records need review. See “How to interpret these results” for details.',
                       ),
                     ),
-                  section(
-                    'What this test shows',
-                    'Confirmed transfers and final SOS receipts, shown separately.',
-                    [
+                  disclosure(
+                    title: const Text('Transfer details'),
+                    subtitle: const Text(
+                      'Responder receipts, handoffs, hops and connections',
+                    ),
+                    children: [
                       grid(
                         spacing: 16,
                         runSpacing: 4,
@@ -600,7 +676,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                             rate(result.acknowledged, result.offered),
                             result.offered == 0
                                 ? 'No outgoing attempts available to measure.'
-                                : '${result.acknowledged} of ${result.offered} attempts confirmed storage on the next phone. This does not confirm arrival at the final recipient.',
+                                : '${result.acknowledged} of ${result.offered} attempts confirmed storage on the next phone.',
                           ),
                           metric(
                             'Typical handoff time',
@@ -618,12 +694,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                  section(
-                    'How messages travelled',
-                    'Hops count the phone-to-phone steps in a message’s journey.',
-                    [
+                      const SizedBox(height: 16),
                       grid(
                         spacing: 12,
                         runSpacing: 12,
@@ -641,14 +712,13 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Connection counts describe outgoing transfers, including repeat sends. They do not compare radio speed or range.',
+                        'Hops count phone-to-phone steps. Connection counts include repeat sends.',
                       ),
                     ],
                   ),
-                  section(
-                    'Discovery and backup connections',
-                    'These results describe how phones found peers and sent messages.',
-                    [
+                  disclosure(
+                    title: const Text('Discovery and backup connections'),
+                    children: [
                       grid(
                         spacing: 16,
                         children: [

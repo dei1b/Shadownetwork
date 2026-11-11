@@ -24,9 +24,15 @@ class AnalysisRecord {
 }
 
 class ValidationAnalysisInput {
-  const ValidationAnalysisInput(this.records, this.issues);
+  const ValidationAnalysisInput(
+    this.records,
+    this.issues, {
+    this.runId,
+    this.runName,
+  });
   final List<AnalysisRecord> records;
   final List<String> issues;
+  final String? runId, runName;
 }
 
 class ValidationAnalysisDecoder {
@@ -34,7 +40,8 @@ class ValidationAnalysisDecoder {
   ValidationAnalysisInput decode(String source) {
     final json = const ValidationBundleCodec().decodeJson(source).toJson();
     final device = json['device']! as Map;
-    final run = (json['test_run']! as Map)['id'] as String;
+    final testRun = json['test_run']! as Map;
+    final run = testRun['id'] as String;
     final session = (json['session']! as Map)['id'] as String;
     final records = <AnalysisRecord>[];
     for (final kind in [
@@ -56,7 +63,12 @@ class ValidationAnalysisDecoder {
         );
       }
     }
-    return ValidationAnalysisInput(List.unmodifiable(records), const []);
+    return ValidationAnalysisInput(
+      List.unmodifiable(records),
+      const [],
+      runId: run,
+      runName: testRun['name'] as String,
+    );
   }
 }
 
@@ -104,6 +116,9 @@ class ValidationRunAnalysis {
     required this.latency,
     required this.propagation,
     required this.battery,
+    required this.sosStarted,
+    required this.sosConfirmed,
+    required this.sosHandoffTime,
   });
   final List<AnalysisRecord> records;
   final List<String> issues;
@@ -119,6 +134,8 @@ class ValidationRunAnalysis {
   final Map<String, int> hops, transports;
   final AnalysisStatistics latency, propagation;
   final Map<String, double?> battery;
+  final int sosStarted, sosConfirmed;
+  final AnalysisStatistics sosHandoffTime;
 }
 
 class ValidationAnalysisCalculator {
@@ -273,7 +290,8 @@ class ValidationAnalysisCalculator {
       if (!validReceipt(r)) invalidReceipts++;
       if (old == null ||
           (validReceipt(r) && !validReceipt(old)) ||
-          (validReceipt(r) == validReceipt(old) && r.time!.isBefore(old.time!))) {
+          (validReceipt(r) == validReceipt(old) &&
+              r.time!.isBefore(old.time!))) {
         receipts[key] = r;
       }
     }
@@ -282,6 +300,33 @@ class ValidationAnalysisCalculator {
         '$invalidReceipts invalid receipt time observations excluded from propagation.',
       );
     }
+    final startedSos = <String, AnalysisRecord>{};
+    for (final r in selected.where((r) => r.type == 'sosQueued')) {
+      final hash = r.hash;
+      if (hash != null && hash.isNotEmpty) {
+        startedSos.putIfAbsent(hash, () => r);
+      }
+    }
+    final confirmedSos = <String>{};
+    for (final receipt in receipts.values) {
+      final origin = startedSos[receipt.hash];
+      if (origin == null || origin.device == receipt.device) continue;
+      final target = origin.data['peer_id'];
+      if (target == null || target == receipt.device) {
+        confirmedSos.add(receipt.hash!);
+      }
+    }
+    final sosHandoffTime = AnalysisStatistics(
+      acks.values
+          .where(
+            (r) =>
+                r.data['payload_type'] == 'sos_message' ||
+                startedSos.containsKey(r.hash),
+          )
+          .map((r) => r.data['latency_ms'])
+          .whereType<num>()
+          .where((n) => n >= 0),
+    );
     final hops = <String, int>{}, transports = <String, int>{};
     void count(Map<String, int> map, String key) =>
         map.update(key, (v) => v + 1, ifAbsent: () => 1);
@@ -362,6 +407,9 @@ class ValidationAnalysisCalculator {
       ),
       propagation: AnalysisStatistics(propagation),
       battery: battery,
+      sosStarted: startedSos.length,
+      sosConfirmed: confirmedSos.length,
+      sosHandoffTime: sosHandoffTime,
     );
   }
 }

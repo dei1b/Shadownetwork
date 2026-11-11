@@ -15,6 +15,7 @@ import 'package:shadownetwork/features/messaging/presentation/providers/relay_ru
 import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
 import 'package:shadownetwork/features/security/data/services/message_encryption_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -69,6 +70,7 @@ void main() {
               (ref) async => database,
             ),
             scfTransportProvider.overrideWithValue(transport),
+            canReceiveSosProvider.overrideWithValue(() async => !localOrigin),
             deviceIdentityStoreProvider.overrideWithValue(identityStore),
           ],
         );
@@ -94,6 +96,12 @@ void main() {
               )
             : null;
         final hash = prepared?.hash ?? SosMessagePayload.messageHash(message);
+        final repository = await container.read(
+          sosMessageRepositoryProvider.future,
+        );
+        if (localOrigin) {
+          await repository.saveMessage(message.copyWith(messageHash: hash));
+        }
         network.send(
           fromPeerId: relay.id,
           toPeerId: rescuer.id,
@@ -114,9 +122,6 @@ void main() {
         await container.read(relayRuntimeProvider.notifier).syncNow();
         final after = DateTime.now().toUtc();
         expect(container.read(relayRuntimeProvider).lastError, isNull);
-        final repository = await container.read(
-          sosMessageRepositoryProvider.future,
-        );
         final stored = (await repository.getMessages()).single;
         expect(stored.body, message.body);
         expect(stored.createdAt, createdAt);

@@ -14,6 +14,7 @@ class SosMessage {
     required this.createdAt,
     this.updatedAt,
     this.receivedAt,
+    this.respondedAt,
     this.receivedFromPeerId,
     this.receivedTransport,
     this.transferId,
@@ -43,6 +44,9 @@ class SosMessage {
 
   /// Local receipt metadata; never included in the originating SOS payload.
   final DateTime? receivedAt;
+
+  /// Time this phone's rescuer moved the alert to the archive.
+  final DateTime? respondedAt;
   final String? receivedFromPeerId;
   final String? receivedTransport;
   final String? transferId;
@@ -78,6 +82,7 @@ class SosMessage {
     DateTime? createdAt,
     DateTime? updatedAt,
     Object? receivedAt = _sentinel,
+    Object? respondedAt = _sentinel,
     Object? receivedFromPeerId = _sentinel,
     Object? receivedTransport = _sentinel,
     Object? transferId = _sentinel,
@@ -107,6 +112,9 @@ class SosMessage {
       receivedAt: identical(receivedAt, _sentinel)
           ? this.receivedAt
           : receivedAt as DateTime?,
+      respondedAt: identical(respondedAt, _sentinel)
+          ? this.respondedAt
+          : respondedAt as DateTime?,
       receivedFromPeerId: identical(receivedFromPeerId, _sentinel)
           ? this.receivedFromPeerId
           : receivedFromPeerId as String?,

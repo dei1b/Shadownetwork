@@ -16,7 +16,6 @@ import 'package:shadownetwork/features/app_update/presentation/providers/app_upd
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
-import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 import 'package:shadownetwork/features/security/data/services/message_encryption_service.dart';
 
 import '../../domain/entities/category.dart' as messaging;
@@ -28,6 +27,7 @@ import '../../domain/entities/peer_type.dart' as messaging;
 import '../../domain/entities/sos_message.dart' as messaging;
 import '../../domain/entities/conversation.dart' as messaging;
 import '../../data/services/offline_panabo_tile_server.dart';
+import 'chat_recipient_page.dart';
 import 'conversation_page.dart';
 import '../providers/local_messaging_providers.dart';
 import '../providers/peer_location_providers.dart';
@@ -63,6 +63,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _isSyncingRelay = false;
   bool _isSharingLocation = false;
   bool _sosComposerOpen = false;
+  bool _chatPickerOpen = false;
 
   bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
 
@@ -501,16 +502,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     var trustedRecipients = const <TrustedDevice>[];
     var approvalUnavailable = false;
     try {
-      final bundle = await ref.read(trustBundleStoreProvider).loadBundle();
+      final localPeer = await ref.read(localPeerProvider.future);
       if (!mounted) return;
-      if (bundle != null &&
-          bundle.isSignatureVerified &&
-          !bundle.isExpiredAt(DateTime.now())) {
-        final localPeer = await ref.read(localPeerProvider.future);
-        trustedRecipients = bundle.approvedDevices
-            .where((device) => device.deviceId != localPeer.id)
-            .toList(growable: false);
-      }
+      trustedRecipients = await ref.read(approvedSosRescuersProvider)(
+        localPeer.id,
+      );
     } catch (_) {
       approvalUnavailable = true;
     }
@@ -538,7 +534,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       await _showTaskCompletionPopup(
         title: 'SOS Created',
         message:
-            'Saved on this phone. It can pass through nearby phones. Delivery is still pending.',
+            'Saved on this phone. Nearby phones can relay it to rescuers. Delivery is still pending.',
         icon: Icons.check_rounded,
       );
     }
@@ -593,15 +589,8 @@ class _HomePageState extends ConsumerState<HomePage> {
     return messaging.Peer(
       id: device.deviceId,
       name: device.ownerName,
-      type: _peerTypeFromTrustedRole(device.role),
+      type: messaging.PeerType.responder,
       isConnected: false,
-    );
-  }
-
-  messaging.PeerType _peerTypeFromTrustedRole(String role) {
-    return messaging.PeerType.values.firstWhere(
-      (type) => type.name == role,
-      orElse: () => messaging.PeerType.unknown,
     );
   }
 
@@ -625,7 +614,36 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
       ),
     );
-    ref.invalidate(conversationsProvider);
+    if (mounted) ref.invalidate(conversationsProvider);
+  }
+
+  Future<void> _startNewChat() async {
+    if (_chatPickerOpen) return;
+    if (!widget.accessProfile.isApproved) {
+      _showMessage(
+        'Register this phone with your barangay to start a private chat.',
+        kind: FeedbackKind.info,
+      );
+      return;
+    }
+    _chatPickerOpen = true;
+    try {
+      final peer = await Navigator.of(context).push<messaging.Peer>(
+        MaterialPageRoute(builder: (_) => const ChatRecipientPage()),
+      );
+      if (!mounted || peer == null) return;
+      _selectTab(1, messageFilter: 0);
+      await _openConversation(peer);
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Couldn’t open the chat. Try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    } finally {
+      _chatPickerOpen = false;
+    }
   }
 
   void _selectTab(int tab, {int? messageFilter, int? peerFilter}) {
@@ -1039,13 +1057,15 @@ class _HomePageState extends ConsumerState<HomePage> {
     final List<(String, IconData, String)> filters = [
       ('All Messages', Icons.chat_bubble_outline_rounded, 'ALL'),
       ('SOS Alerts', Icons.sos_rounded, 'SOS'),
+      if (_isResponder) ('Archive', Icons.archive_outlined, 'ARCHIVE'),
       ('Requests', Icons.pan_tool_outlined, 'REQUEST'),
       ('Updates', Icons.campaign_outlined, 'UPDATE'),
       ('Spam', Icons.report_gmailerrorred_rounded, 'SPAM'),
       ('Quarantine', Icons.gpp_bad_rounded, 'QUARANTINE'),
     ];
 
-    final String activeType = filters[_selectedMessageFilter].$3;
+    final String activeType =
+        filters[_selectedMessageFilter.clamp(0, filters.length - 1)].$3;
     if (widget.accessProfile.deviceId == 'unknown') {
       ref.watch(localPeerProvider);
     }
@@ -1056,15 +1076,21 @@ class _HomePageState extends ConsumerState<HomePage> {
         _TabHeader(
           title: _isResponder ? 'Alerts' : 'Messages',
           subtitle: _isResponder
-              ? 'Incoming emergency traffic and responder chats'
+              ? 'Incoming SOS alerts and private chats'
               : 'Your SOS updates and conversations',
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _startNewChat,
+          icon: const Icon(Icons.edit_outlined),
+          label: const Text('New message'),
         ),
         const SizedBox(height: 12),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: Row(
             children: List.generate(filters.length, (index) {
-              final active = _selectedMessageFilter == index;
+              final active = activeType == filters[index].$3;
               return Padding(
                 padding: const EdgeInsets.only(right: 10),
                 child: Material(
@@ -1156,7 +1182,9 @@ class _HomePageState extends ConsumerState<HomePage> {
             if (filteredMessages.isEmpty) {
               return _buildEmptyState(
                 icon: Icons.chat_bubble_outline_rounded,
-                message: 'No local messages yet.',
+                message: activeType == 'ARCHIVE'
+                    ? 'No responded SOS alerts yet.'
+                    : 'No local messages yet.',
               );
             }
 
@@ -1644,14 +1672,54 @@ class _HomePageState extends ConsumerState<HomePage> {
       await _openConversation(message.sender, linkedSosMessage: message);
       return;
     }
-    await showSosDetailSheet(
+    final updateResponse = await showSosDetailSheet(
       context,
       message: message,
       ownSenderLabel: _ownSosSenderLabel(message),
+      canUpdateResponse:
+          _isResponder &&
+          !isLocalSender &&
+          (message.receivedAt != null ||
+              message.status == messaging.MessageStatus.received) &&
+          message.trustStatus != DeviceTrustStatus.revoked &&
+          (message.respondedAt != null ||
+              message.moderationStatus ==
+                  messaging.MessageModerationStatus.normal),
       onMessageSender: isLocalSender
           ? null
           : () => _openConversation(message.sender, linkedSosMessage: message),
     );
+    if (!mounted || updateResponse != true) return;
+    final responded = message.respondedAt == null;
+    try {
+      if (!await ref.read(setSosRespondedProvider)(
+        message.id,
+        responded: responded,
+      )) {
+        if (mounted) {
+          _showMessage(
+            'This alert could not be updated.',
+            kind: FeedbackKind.warning,
+          );
+        }
+        return;
+      }
+      if (mounted) {
+        _showMessage(
+          responded
+              ? 'SOS moved to Archive.'
+              : 'SOS restored to active alerts.',
+          kind: FeedbackKind.success,
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Couldn’t update this SOS. Try again.',
+          kind: FeedbackKind.error,
+        );
+      }
+    }
   }
 
   _MessageFeedItem _messageFeedItemFromSosMessage(
@@ -1674,7 +1742,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       description: message.body,
       distance: _distanceTextForMessage(message),
       time: _relativeTime(message.createdAt),
-      badge: type,
+      badge: message.respondedAt == null ? type : 'RESPONDED',
       type: type,
       icon: isSpam
           ? Icons.report_gmailerrorred_rounded
@@ -2079,7 +2147,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Alert your peers in the area',
+                        'Alert rescuers in the area',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -3958,9 +4026,9 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                   DropdownMenuItem(
                     value: 'broadcast',
                     child: _ReceiverDropdownOption(
-                      title: 'Broadcast to all nearby peers',
-                      subtitle: 'Visible to every receiving phone',
-                      roleLabel: 'All',
+                      title: 'Broadcast to rescuers',
+                      subtitle: 'For all approved rescuers',
+                      roleLabel: 'Rescuers',
                       icon: Icons.campaign_rounded,
                     ),
                   ),
@@ -3969,11 +4037,9 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                       value: device.deviceId,
                       child: _ReceiverDropdownOption(
                         title: device.ownerName,
-                        subtitle:
-                            '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
-                        roleLabel:
-                            '${_roleLabelForTrustedDevice(device)} - Verified',
-                        icon: _iconForTrustedDevice(device),
+                        subtitle: _shortDeviceId(device.deviceId),
+                        roleLabel: 'Approved rescuer',
+                        icon: Icons.health_and_safety_rounded,
                       ),
                     ),
                   ),
@@ -3982,19 +4048,17 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                   return [
                     const _ReceiverDropdownOption(
                       title: 'Broadcast',
-                      subtitle: 'All nearby peers',
-                      roleLabel: 'All',
+                      subtitle: 'Approved rescuers',
+                      roleLabel: 'Rescuers',
                       icon: Icons.campaign_rounded,
                       compact: true,
                     ),
                     ...widget.trustedRecipients.map(
                       (device) => _ReceiverDropdownOption(
                         title: device.ownerName,
-                        subtitle:
-                            '${_roleLabelForTrustedDevice(device)} - ${_shortDeviceId(device.deviceId)}',
-                        roleLabel:
-                            '${_roleLabelForTrustedDevice(device)} - Verified',
-                        icon: _iconForTrustedDevice(device),
+                        subtitle: _shortDeviceId(device.deviceId),
+                        roleLabel: 'Approved rescuer',
+                        icon: Icons.health_and_safety_rounded,
                         compact: true,
                       ),
                     ),
@@ -4013,7 +4077,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
               const SizedBox(height: 6),
               Text(
                 _selectedRecipient == null
-                    ? 'Broadcast SOS is visible to every phone that receives it.'
+                    ? 'Nearby phones can pass this SOS along. Only approved rescuers receive the alert in the app.'
                     : 'Targeted SOS is encrypted. Other phones can relay it, but only ${_selectedRecipient!.ownerName} can view it.',
                 style: const TextStyle(color: Color(0xFF777777), fontSize: 12),
               ),
@@ -4173,6 +4237,9 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                     _sending = false;
                                     _sendError =
                                         error is MessageEncryptionException
+                                        ? error.message
+                                        : error
+                                              is SosRecipientUnavailableException
                                         ? error.message
                                         : 'Unable to complete the SOS action. Check ${widget.messageTabLabel} before sending again. Your draft is still here.';
                                   });
@@ -4342,26 +4409,6 @@ class _ReceiverDropdownOption extends StatelessWidget {
       ],
     );
   }
-}
-
-String _roleLabelForTrustedDevice(TrustedDevice device) {
-  return switch (device.role.toLowerCase()) {
-    'responder' => 'Rescuer',
-    'civilian' => 'Civilian',
-    'relay' => 'Relay',
-    'admin' => 'Admin',
-    _ => device.role.isEmpty ? 'Unknown' : device.role,
-  };
-}
-
-IconData _iconForTrustedDevice(TrustedDevice device) {
-  return switch (device.role.toLowerCase()) {
-    'responder' => Icons.health_and_safety_rounded,
-    'civilian' => Icons.person_rounded,
-    'relay' => Icons.hub_rounded,
-    'admin' => Icons.admin_panel_settings_rounded,
-    _ => Icons.devices_other_rounded,
-  };
 }
 
 String _shortDeviceId(String deviceId) {
