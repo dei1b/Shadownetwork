@@ -49,15 +49,23 @@ void main() {
       if (skip) {
         await tester.tap(find.text('Skip'));
       } else {
+        var previousTitle = 'Send an SOS';
         for (final title in [
           'Nearby phones pass it on',
-          'Use the Panabo offline map',
+          'Use the offline map',
           'Register with your barangay',
         ]) {
           await tester.ensureVisible(find.text('Next'));
           await tester.tap(find.text('Next'));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 100));
+          expect(find.text(previousTitle), findsOneWidget);
+          expect(find.text(title), findsOneWidget);
           await tester.pumpAndSettle();
           expect(find.text(title), findsOneWidget);
+          expect(find.text(previousTitle), findsNothing);
+          expect(find.textContaining('Panabo'), findsNothing);
+          previousTitle = title;
         }
         await tester.ensureVisible(find.text('Get started'));
         await tester.tap(find.text('Get started'));

@@ -38,9 +38,9 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
     ),
     (
       icon: Icons.map_outlined,
-      title: 'Use the Panabo offline map',
+      title: 'Use the offline map',
       body:
-          'Open Map to view the built-in Panabo map without internet. '
+          'Open Map to view the offline map without internet. '
           'Turn on location and allow access to see where you are.',
     ),
     (
@@ -87,6 +87,27 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
     final step = _steps[_step];
     final progress = 'Step ${_step + 1} of ${_steps.length}';
     final isLast = _step == _steps.length - 1;
+    final stepContent = Semantics(
+      key: ValueKey(_step),
+      liveRegion: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            step.icon,
+            size: 68,
+            color: _step == 0 ? AppColors.danger : theme.colorScheme.primary,
+          ),
+          const SizedBox(height: 20),
+          Semantics(
+            header: true,
+            child: Text(step.title, style: theme.textTheme.headlineLarge),
+          ),
+          const SizedBox(height: 10),
+          Text(step.body, style: theme.textTheme.bodyMedium),
+        ],
+      ),
+    );
     return PopScope(
       canPop: _step == 0 && !_saving,
       onPopInvokedWithResult: (didPop, _) {
@@ -127,34 +148,22 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
                         ),
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 32),
-                          child: Semantics(
-                            liveRegion: true,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  step.icon,
-                                  size: 68,
-                                  color: _step == 0
-                                      ? AppColors.danger
-                                      : theme.colorScheme.primary,
-                                ),
-                                const SizedBox(height: 20),
-                                Semantics(
-                                  header: true,
-                                  child: Text(
-                                    step.title,
-                                    style: theme.textTheme.headlineLarge,
+                          child: MediaQuery.disableAnimationsOf(context)
+                              ? stepContent
+                              : AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 220),
+                                  switchInCurve: Curves.easeOut,
+                                  switchOutCurve: Curves.easeIn,
+                                  layoutBuilder: (current, previous) => Stack(
+                                    alignment: Alignment.centerLeft,
+                                    children: [
+                                      for (final child in previous)
+                                        ExcludeSemantics(child: child),
+                                      ?current,
+                                    ],
                                   ),
+                                  child: stepContent,
                                 ),
-                                const SizedBox(height: 10),
-                                Text(
-                                  step.body,
-                                  style: theme.textTheme.bodyMedium,
-                                ),
-                              ],
-                            ),
-                          ),
                         ),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -175,13 +184,18 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
                                   : () => setState(() => _step++),
                               child: Text(isLast ? 'Get started' : 'Next'),
                             ),
-                            if (_step > 0)
-                              TextButton(
+                            Visibility(
+                              visible: _step > 0,
+                              maintainState: true,
+                              maintainAnimation: true,
+                              maintainSize: true,
+                              child: TextButton(
                                 onPressed: _saving
                                     ? null
                                     : () => setState(() => _step--),
                                 child: const Text('Back'),
                               ),
+                            ),
                           ],
                         ),
                       ],
