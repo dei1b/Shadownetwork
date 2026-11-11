@@ -1,0 +1,27 @@
+00:00 +0: loading C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart
+00:00 +0: file preview requires explicit import and removal requires confirmation
+══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+The following StateError was thrown running a test:
+Bad state: No element
+
+When the exception was thrown, this was the stack:
+#0      Iterable.single (dart:core/iterable.dart:694:25)
+#1      WidgetController.element (package:flutter_test/src/controller.dart:883:30)
+#2      WidgetController.ensureVisible (package:flutter_test/src/controller.dart:2382:32)
+#3      main.<anonymous closure> (file:///C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart:128:20)
+<asynchronous suspension>
+#4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:192:15)
+<asynchronous suspension>
+#5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1682:5)
+<asynchronous suspension>
+<asynchronous suspension>
+(elided one frame from package:stack_trace)
+
+The test description was:
+  file preview requires explicit import and removal requires confirmation
+════════════════════════════════════════════════════════════════════════════════════════════════════
+00:02 +0 -1: file preview requires explicit import and removal requires confirmation [E]
+  Test failed. See exception logs above.
+  The test description was: file preview requires explicit import and removal requires confirmation
+  
+00:02 +0 -1: Some tests failed.

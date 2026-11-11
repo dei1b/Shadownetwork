@@ -14,6 +14,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'admin_validation_import_repository_test.dart'
     show importFixture, changedBundle;
 import 'support/validation_run_fixtures.dart';
+import 'package:shadownetwork/features/admin_validation/presentation/providers/validation_analysis_provider.dart';
 
 void main() {
   late Directory directory;
@@ -93,6 +94,13 @@ void main() {
       container.read(validationImportControllerProvider).valueOrNull?.busy,
       isFalse,
     );
+    await tester.runAsync(
+      () => container.read(validationAnalysisProvider.future),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 250)),
+    );
     await tester.pumpAndSettle();
   }
 
@@ -121,7 +129,11 @@ void main() {
       await finish(tester);
       expect(await tester.runAsync(repository.listDatasets), hasLength(1));
       expect(find.textContaining('Imported 1'), findsOneWidget);
-      await tester.ensureVisible(find.byTooltip('Remove imported dataset'));
+      await tester.scrollUntilVisible(
+        find.byTooltip('Remove imported dataset'),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.byTooltip('Remove imported dataset'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));

@@ -1,3 +1,4 @@
+import '../theme/admin_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -114,90 +115,158 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
   Widget build(BuildContext context) {
     final identity = ref.watch(adminRecoveryProvider);
     final status = identity.valueOrNull;
-    return ListView(
-      padding: const EdgeInsets.all(24),
-      children: [
-        Text(
-          'Backup & recovery',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'Your administrator registry is saved on this Windows account. Signing keys are protected by Windows. Keep an encrypted backup on a separate drive and keep its password safe.',
-        ),
-        const SizedBox(height: 16),
-        if (identity.isLoading) const LinearProgressIndicator(),
-        if (identity.hasError) ...[
-          const Text(
-            'The saved registry and protected signing identity could not be opened together. No replacement identity was created. Restore the matching original backup or retry.',
-          ),
-          TextButton(
-            onPressed: _busy
-                ? null
-                : () => ref.read(adminRecoveryProvider.notifier).refresh(),
-            child: const Text('Retry identity check'),
-          ),
-        ],
-        if (status != null) ...[
-          Text(
-            status.hasIdentity
-                ? 'Administrator identity ready'
-                : 'Administrator setup required',
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          if (status.fingerprint != null)
-            SelectableText('Identity fingerprint: ${status.fingerprint}'),
-          Text('Latest reserved trust bundle version: ${status.bundleVersion}'),
-        ],
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AdminTheme.pageWidth),
+        child: ListView(
+          padding: const EdgeInsets.all(24),
           children: [
-            if (status != null && !status.hasIdentity)
-              FilledButton(
-                onPressed: _busy ? null : _create,
-                child: const Text('Create administrator identity'),
-              ),
-            OutlinedButton.icon(
-              onPressed: _busy || status?.hasIdentity != true ? null : _backup,
-              icon: const Icon(Icons.save_outlined),
-              label: const Text('Save encrypted backup'),
+            Text(
+              'Backup & recovery',
+              style: Theme.of(context).textTheme.headlineMedium,
             ),
-            OutlinedButton.icon(
-              onPressed: _busy ? null : _restore,
-              icon: const Icon(Icons.restore),
-              label: const Text('Restore encrypted backup'),
+            const SizedBox(height: 12),
+            const Text(
+              'Protect phone approvals and your administrator identity with an encrypted backup.',
+            ),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                Widget panel(List<Widget> children) => Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                    border: Border.all(color: AdminTheme.border),
+                    borderRadius: BorderRadius.circular(AdminTheme.radius),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: children,
+                  ),
+                );
+                final identityPanel = panel([
+                  if (identity.isLoading) const LinearProgressIndicator(),
+                  if (identity.hasError) ...[
+                    const Text(
+                      'The saved registry and protected signing identity could not be opened together. No replacement identity was created. Restore the matching original backup or retry.',
+                    ),
+                    TextButton(
+                      onPressed: _busy
+                          ? null
+                          : () => ref
+                                .read(adminRecoveryProvider.notifier)
+                                .refresh(),
+                      child: const Text('Retry identity check'),
+                    ),
+                  ],
+                  if (status != null) ...[
+                    Text(
+                      status.hasIdentity
+                          ? 'Administrator identity ready'
+                          : 'Administrator setup required',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    if (status.fingerprint != null)
+                      ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        title: const Text('Identity details'),
+                        children: [
+                          SelectableText(
+                            'Identity fingerprint: ${status.fingerprint}',
+                          ),
+                        ],
+                      ),
+                    Text(
+                      'Latest reserved trust bundle version: ${status.bundleVersion}',
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      if (status != null && !status.hasIdentity)
+                        FilledButton(
+                          onPressed: _busy ? null : _create,
+                          child: const Text('Create administrator identity'),
+                        ),
+                      OutlinedButton.icon(
+                        onPressed: _busy || status?.hasIdentity != true
+                            ? null
+                            : _backup,
+                        icon: const Icon(Icons.save_outlined),
+                        label: const Text('Save encrypted backup'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _busy ? null : _restore,
+                        icon: const Icon(Icons.restore),
+                        label: const Text('Restore encrypted backup'),
+                      ),
+                    ],
+                  ),
+                  if (_busy)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: LinearProgressIndicator(),
+                    ),
+                  if (_message != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: ActionStatus(
+                        message: _message!,
+                        kind: _error
+                            ? FeedbackKind.error
+                            : FeedbackKind.success,
+                      ),
+                    ),
+                ]);
+                final guidancePanel = panel([
+                  Text(
+                    'Protect your administrator data',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Signing keys are protected by Windows. Keep an encrypted backup on a separate drive and keep its password safe.',
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'What the backup contains',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Administrator signing identity, registered devices and trust bundle version. Imported validation datasets are separate: keep the original phone JSON files so they can be imported again.',
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Restore requires an empty device registry and a compatible protected identity. It cannot recover a lost browser administrator without its original identity backup. Back up again after publishing trust bundles: an old backup may have a version that existing phones reject.',
+                  ),
+                ]);
+                if (constraints.maxWidth >= 900) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: identityPanel),
+                      const SizedBox(width: 20),
+                      Expanded(child: guidancePanel),
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    identityPanel,
+                    const SizedBox(height: 20),
+                    guidancePanel,
+                  ],
+                );
+              },
             ),
           ],
         ),
-        if (_busy)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 16),
-            child: LinearProgressIndicator(),
-          ),
-        if (_message != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: ActionStatus(
-              message: _message!,
-              kind: _error ? FeedbackKind.error : FeedbackKind.success,
-            ),
-          ),
-        const SizedBox(height: 24),
-        const Text(
-          'What the backup contains',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Administrator signing identity, registered devices and trust bundle version. Imported validation datasets are separate: keep the original phone JSON files so they can be imported again.',
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'Restore requires an empty device registry and a compatible protected identity. It cannot recover a lost browser administrator without its original identity backup. Back up again after publishing trust bundles: an old backup may have a version that existing phones reject.',
-        ),
-      ],
+      ),
     );
   }
 }

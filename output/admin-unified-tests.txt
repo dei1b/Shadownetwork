@@ -1,0 +1,24 @@
+00:00 +0: loading C:/Users/Dave/Desktop/Shadownetwork/test/admin_recovery_ui_test.dart
+00:00 +0: C:/Users/Dave/Desktop/Shadownetwork/test/admin_recovery_ui_test.dart: backup fields stay separated and mismatch is attached at scale 1.0
+00:01 +1: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +2: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +3: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:02 +4: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: verified phone registration fills contact fields and clears old draft
+00:03 +5: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:03 +6: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:04 +7: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:04 +8: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:04 +9: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file preview requires explicit import and removal requires confirmation
+00:05 +10: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: saving disables mutations and recovers after success at 1440.0
+00:05 +11: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: legacy warnings and metadata fit narrow layouts with scaled text
+00:05 +12: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: saving disables mutations and recovers after failure at 1440.0
+00:05 +13: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file picker failure is recoverable and never echoes exception source
+00:06 +14: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: file picker failure is recoverable and never echoes exception source
+00:06 +15: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: device search combines with status and role and can reset
+00:06 +16: C:/Users/Dave/Desktop/Shadownetwork/test/admin_validation_import_panel_test.dart: conflicting files block import without writing any dataset
+00:06 +17: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: registry review is visible immediately at laptop size
+00:07 +18: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: admin supports enlarged text at width 480.0
+00:07 +19: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: admin supports enlarged text at width 900.0
+00:07 +20: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: missing desktop identity gives publication feedback
+00:07 +21: C:/Users/Dave/Desktop/Shadownetwork/test/admin_desktop_dashboard_test.dart: desktop offers webcam scanning and a separate paste fallback
+00:08 +22: All tests passed!

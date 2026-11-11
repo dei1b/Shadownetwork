@@ -1,9 +1,10 @@
+import '../theme/admin_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../../domain/entities/registered_device.dart';
 
-const _mobileRed = Color(0xFFB52B32);
-const _mobileRedDark = Color(0xFF861A1A);
+const _mobileRed = AdminTheme.action;
+const _mobileRedDark = AdminTheme.action;
 const _mobileMuted = Color(0xFF595959);
 const _mobileField = Color(0xFFDDDFE2);
 
@@ -62,7 +63,7 @@ class _AdminDeviceRegistryPanelState extends State<AdminDeviceRegistryPanel> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AdminTheme.radius),
         border: Border.all(color: _mobileField),
       ),
       child: Column(
@@ -240,7 +241,7 @@ class _DeviceRegistryTile extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AdminTheme.radius),
         border: Border.all(color: _mobileField),
       ),
       child: Column(
