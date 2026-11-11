@@ -334,18 +334,26 @@ internal class AndroidTransportBridge(private val context: Context) {
     }
 
     private fun ensurePermissions(): Boolean {
-        val missing = missingPermissions()
-
-        if (missing.isNotEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val activity = attachedActivity.get()
-            if (activity != null && !permissionRequestPending) {
-                permissionRequestPending = true
-                activity.requestPermissions(missing.toTypedArray(), PERMISSION_REQUEST_CODE)
+        val required = missingPermissions()
+        val activity = attachedActivity.get()
+        if (activity != null && !permissionRequestPending) {
+            val requested = required.toMutableList()
+            val preferences = context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE)
+            val requestNotifications = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                !preferences.getBoolean("notification_permission_requested", false)
+            if (requestNotifications) {
+                requested.add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            return false
+            if (requested.isNotEmpty()) {
+                permissionRequestPending = true
+                activity.requestPermissions(requested.toTypedArray(), PERMISSION_REQUEST_CODE)
+                if (requestNotifications) {
+                    preferences.edit().putBoolean("notification_permission_requested", true).apply()
+                }
+            }
         }
-
-        return true
+        return required.isEmpty()
     }
 
     private fun hasRequiredPermissions(): Boolean = missingPermissions().isEmpty()
@@ -374,7 +382,6 @@ internal class AndroidTransportBridge(private val context: Context) {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         return permissions.distinct()

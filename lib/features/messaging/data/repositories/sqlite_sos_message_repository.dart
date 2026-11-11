@@ -103,8 +103,8 @@ class SqliteSosMessageRepository implements SosMessageRepository {
   }
 
   @override
-  Future<void> saveMessage(SosMessage message) async {
-    await _database.transaction((transaction) async {
+  Future<bool> saveMessage(SosMessage message) {
+    return _database.transaction((transaction) async {
       await PeerModel.upsert(
         transaction,
         message.sender,
@@ -146,6 +146,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
         where: 'message_hash = ?',
         whereArgs: [row['message_hash']],
       );
+      return existing.isEmpty;
     });
   }
 }

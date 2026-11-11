@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,6 +11,7 @@ import '../../data/models/secure_chat_message_payload.dart';
 import '../../data/models/secure_sos_message_payload.dart';
 import '../../data/services/scf_service.dart';
 import '../../data/services/android_scf_transport.dart';
+import '../../data/services/incoming_message_notifications.dart';
 import '../../domain/services/relay_power_policy.dart';
 import '../../../validation/presentation/providers/validation_session_provider.dart';
 import '../../domain/entities/chat_message.dart';
@@ -34,6 +36,11 @@ import '../../../validation/domain/repositories/validation_metrics_repository.da
 import 'local_messaging_providers.dart';
 import 'nearby_peer_sightings_provider.dart';
 import 'peer_location_providers.dart';
+
+final incomingMessageNotificationsProvider =
+    Provider<IncomingMessageNotifications?>((ref) {
+      return Platform.isAndroid ? const IncomingMessageNotifications() : null;
+    });
 
 class RelayRuntimeState {
   const RelayRuntimeState({
@@ -452,6 +459,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     required List<ScfEnvelope> envelopes,
   }) async {
     var storedCount = 0;
+    final notifications = ref.read(incomingMessageNotificationsProvider);
     for (final envelope in envelopes) {
       try {
         final isChat = await RelayPayloadCodec.decodeFields(
@@ -545,6 +553,13 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
             incrementUnread: true,
           );
           if (inserted && senderTrust.status != DeviceTrustStatus.revoked) {
+            if (chat.sender.id != localPeer.id &&
+                moderation.status == MessageModerationStatus.normal) {
+              await notifications?.show(
+                messageHash: envelope.messageHash,
+                isSos: false,
+              );
+            }
             await metrics.captureEvent(
               type: ValidationEventType.envelopeDelivered,
               messageHash: envelope.messageHash,
@@ -608,10 +623,18 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
           candidate: _sosSimilaritySample(decoded),
           priorMessages: recentMessages.map(_sosSimilaritySample),
         );
-        await messageRepository.saveMessage(
+        final inserted = await messageRepository.saveMessage(
           _withSosModeration(decoded, moderation),
         );
         if (senderTrust.status != DeviceTrustStatus.revoked) {
+          if (inserted &&
+              !isLocalOrigin &&
+              moderation.status == MessageModerationStatus.normal) {
+            await notifications?.show(
+              messageHash: envelope.messageHash,
+              isSos: true,
+            );
+          }
           await metrics.captureEvent(
             type: ValidationEventType.envelopeDelivered,
             messageHash: envelope.messageHash,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -6,6 +7,7 @@ import 'package:shadownetwork/features/messaging/data/datasources/local_messagin
 import 'package:shadownetwork/features/messaging/data/models/sos_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/models/chat_message_payload.dart';
 import 'package:shadownetwork/features/messaging/data/repositories/sqlite_chat_repository.dart';
+import 'package:shadownetwork/features/messaging/data/services/incoming_message_notifications.dart';
 import 'package:shadownetwork/features/messaging/data/services/mock_scf_transport.dart';
 import 'package:shadownetwork/features/messaging/data/services/scf_service.dart';
 import 'package:shadownetwork/features/messaging/data/services/scf_relay_service.dart';
@@ -36,12 +38,14 @@ const receiver = Peer(
 
 ProviderContainer runtimeContainer(
   Database db,
-  MockScfTransportEndpoint transport,
-) {
+  MockScfTransportEndpoint transport, {
+  IncomingMessageNotifications? notifications,
+}) {
   final container = ProviderContainer(
     overrides: [
       localMessagingDatabaseProvider.overrideWith((ref) async => db),
       scfTransportProvider.overrideWithValue(transport),
+      incomingMessageNotificationsProvider.overrideWithValue(notifications),
       deviceIdentityStoreProvider.overrideWithValue(
         DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
       ),
@@ -64,6 +68,79 @@ ChatMessage chat(String id, DateTime time, String conversation) => ChatMessage(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(sqfliteFfiInit);
+
+  test(
+    'foreground chat and background SOS notify once per local receipt',
+    () async {
+      final db = await LocalMessagingDatabase.open(
+        databasePath: inMemoryDatabasePath,
+        factory: databaseFactoryFfi,
+      );
+      addTearDown(db.close);
+      const channel = MethodChannel('test/incoming_message_notifications');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final network = MockScfTransportNetwork();
+      final container = runtimeContainer(
+        db,
+        network.registerPeer(receiver),
+        notifications: const IncomingMessageNotifications(channel: channel),
+      );
+      final runtime = container.read(relayRuntimeProvider.notifier);
+      final now = DateTime.now().toUtc();
+      final reply = chat('new-chat', now, 'conversation');
+      final sos = SosMessage(
+        id: 'new-sos',
+        sender: sender,
+        recipient: receiver,
+        body: 'Need assistance',
+        category: Category.medical,
+        status: MessageStatus.queued,
+        createdAt: now,
+      );
+      ScfEnvelope envelope(String hash, String payload) => ScfEnvelope(
+        messageHash: hash,
+        payloadJson: payload,
+        hopCount: 1,
+        receivedAt: now,
+        expiresAt: now.add(const Duration(hours: 1)),
+      );
+      final chatEnvelope = envelope(
+        ChatMessagePayload.messageHash(reply),
+        ChatMessagePayload.canonicalJson(reply),
+      );
+      final sosEnvelope = envelope(
+        SosMessagePayload.messageHash(sos),
+        SosMessagePayload.canonicalJson(sos),
+      );
+      void receive(ScfEnvelope item) => network.send(
+        fromPeerId: sender.id,
+        toPeerId: receiver.id,
+        envelope: item,
+      );
+      runtime.setBackground(false);
+      receive(chatEnvelope);
+      expect(await runtime.receiveIncoming(), 1);
+      runtime.setBackground(true);
+      receive(sosEnvelope);
+      expect(await runtime.receiveIncoming(), 1);
+      // Both targeted copies were consumed, so the replay reaches persistence.
+      receive(chatEnvelope);
+      receive(sosEnvelope);
+      await runtime.receiveIncoming();
+      expect(calls.map((call) => call.method), ['show', 'show']);
+      expect(calls.map((call) => call.arguments), [
+        {'messageHash': chatEnvelope.messageHash, 'isSos': false},
+        {'messageHash': sosEnvelope.messageHash, 'isSos': true},
+      ]);
+    },
+  );
 
   test(
     'accepted chat survives restart before the conversation write',

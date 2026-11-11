@@ -6,5 +6,7 @@ abstract class SosMessageRepository {
     required String senderPeerId,
     required DateTime since,
   });
-  Future<void> saveMessage(SosMessage message);
+
+  /// Saves the message and returns whether it is new to this phone.
+  Future<bool> saveMessage(SosMessage message);
 }

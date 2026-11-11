@@ -25,6 +25,9 @@ internal object RelayEngineHost {
         validationSharing = sharing
         MethodChannel(created.dartExecutor.binaryMessenger, "shadow_network/validation_exports")
             .setMethodCallHandler(sharing::handle)
+        val notifications = IncomingMessageNotificationBridge(context.applicationContext)
+        MethodChannel(created.dartExecutor.binaryMessenger, "shadow_network/incoming_notifications")
+            .setMethodCallHandler(notifications::handle)
         created.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
         return created
     }
