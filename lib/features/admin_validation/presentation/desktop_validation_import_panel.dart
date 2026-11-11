@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/validation_import.dart';
 import 'providers/validation_import_provider.dart';
+import 'validation_analysis_dashboard.dart';
 
 const _red = Color(0xFFB52B32);
 const _darkRed = Color(0xFF861A1A);
@@ -127,6 +128,7 @@ class _ImportContents extends ConsumerWidget {
         const Text(
           'A schema 2 checksum detects changes; it does not authenticate a phone or approve a device. Original JSON is retained locally for reproducibility. Keep your source files as a separate backup.',
         ),
+        const ValidationAnalysisDashboard(),
         if (preview != null) ...[
           const SizedBox(height: 24),
           Text(
