@@ -81,6 +81,101 @@ void main() {
   Finder headerText(String label) =>
       find.descendant(of: header, matching: find.text(label));
 
+  for (final level in [
+    DeviceAccessLevel.civilian,
+    DeviceAccessLevel.responder,
+  ]) {
+    testWidgets('${level.name} archives and restores their own SOS', (
+      tester,
+    ) async {
+      final originalFactory = ml.MapLibrePlatform.createInstance;
+      ml.MapLibrePlatform.createInstance = _MapPlatform.new;
+      addTearDown(() => ml.MapLibrePlatform.createInstance = originalFactory);
+      const channel = MethodChannel('flutter.baseflow.com/geolocator');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (_) async => false);
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final archivedState = StateProvider<bool>((ref) => false);
+      final own = SosMessage(
+        id: 'own',
+        sender: const Peer(
+          id: 'resident',
+          name: 'Resident',
+          type: PeerType.civilian,
+          isConnected: false,
+        ),
+        body: 'My outgoing SOS.',
+        category: Category.medical,
+        status: MessageStatus.queued,
+        createdAt: DateTime.now(),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nearbyPeersProvider.overrideWith((ref) async => []),
+            sosMessagesProvider.overrideWith(
+              (ref) async => [
+                own.copyWith(
+                  archivedAt: ref.watch(archivedState) ? DateTime.now() : null,
+                ),
+              ],
+            ),
+            setSosArchivedProvider.overrideWith((ref) {
+              return (id, {required archived}) async {
+                expect(id, own.id);
+                ref.read(archivedState.notifier).state = archived;
+                return true;
+              };
+            }),
+            conversationsProvider.overrideWith((ref) async => []),
+            relayRuntimeProvider.overrideWith(_NoopRelayRuntime.new),
+            mapTileCacheStoreProvider.overrideWith(
+              (ref) async => MemCacheStore(),
+            ),
+          ],
+          child: MaterialApp(
+            home: HomePage(
+              accessProfile: DeviceAccessProfile(
+                level: level,
+                deviceId: 'resident',
+                ownerName: 'Resident',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find
+            .text(level == DeviceAccessLevel.civilian ? 'Messages' : 'Alerts')
+            .last,
+      );
+      await tester.pumpAndSettle();
+      final card = find.byKey(const ValueKey('sos-card-own'));
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      expect(find.text('Mark responded'), findsNothing);
+      await tester.tap(find.text('Archive SOS'));
+      await tester.pumpAndSettle();
+      expect(card, findsNothing);
+      final filter = find.text('Archive');
+      await tester.ensureVisible(filter);
+      await tester.tap(filter);
+      await tester.pumpAndSettle();
+      expect(card, findsOneWidget);
+      await tester.tap(card);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Restore SOS'));
+      await tester.pumpAndSettle();
+      expect(card, findsNothing);
+      final allMessages = find.text('All Messages');
+      await tester.ensureVisible(allMessages);
+      await tester.tap(allMessages);
+      await tester.pumpAndSettle();
+      expect(card, findsOneWidget);
+    });
+  }
+
   testWidgets('responder alerts distinguish outgoing SOS from received SOS', (
     tester,
   ) async {

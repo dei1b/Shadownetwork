@@ -11,7 +11,7 @@ class LocalMessagingDatabase {
   const LocalMessagingDatabase._();
 
   static const databaseName = 'shadownetwork.db';
-  static const databaseVersion = 16;
+  static const databaseVersion = 17;
 
   static const categoriesTable = 'categories';
   static const peerTypesTable = 'peer_types';
@@ -49,7 +49,18 @@ class LocalMessagingDatabase {
     14: _addPendingSosInbox,
     15: _recoverPendingChatInbox,
     16: _addSosResponseTime,
+    17: _addSosArchiveTime,
   };
+
+  static Future<void> _addSosArchiveTime(Database database) async {
+    final columns = await database.rawQuery(
+      'PRAGMA table_info($sosMessagesTable)',
+    );
+    if (columns.any((column) => column['name'] == 'archived_at')) return;
+    await database.execute(
+      'ALTER TABLE $sosMessagesTable ADD COLUMN archived_at TEXT',
+    );
+  }
 
   static Future<void> _addSosResponseTime(Database database) async {
     final columns = await database.rawQuery(

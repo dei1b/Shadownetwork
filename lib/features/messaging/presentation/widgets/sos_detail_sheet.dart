@@ -17,6 +17,7 @@ Future<bool?> showSosDetailSheet(
   VoidCallback? onMessageSender,
   String? ownSenderLabel,
   bool canUpdateResponse = false,
+  bool canUpdateArchive = false,
 }) => showModalBottomSheet<bool>(
   context: context,
   isScrollControlled: true,
@@ -26,6 +27,9 @@ Future<bool?> showSosDetailSheet(
   builder: (sheetContext) => SosDetailSheet(
     message: message,
     ownSenderLabel: ownSenderLabel,
+    onUpdateArchive: canUpdateArchive
+        ? () => Navigator.of(sheetContext).pop(true)
+        : null,
     onUpdateResponse: canUpdateResponse
         ? () => Navigator.of(sheetContext).pop(true)
         : null,
@@ -45,12 +49,14 @@ class SosDetailSheet extends StatelessWidget {
     this.onMessageSender,
     this.ownSenderLabel,
     this.onUpdateResponse,
+    this.onUpdateArchive,
   });
 
   final SosMessage message;
   final VoidCallback? onMessageSender;
   final String? ownSenderLabel;
   final VoidCallback? onUpdateResponse;
+  final VoidCallback? onUpdateArchive;
 
   @override
   Widget build(BuildContext context) {
@@ -119,6 +125,25 @@ class SosDetailSheet extends StatelessWidget {
                       label: 'Responded',
                       value: SosTimingLabels.timestamp(message.respondedAt),
                     ),
+                  if (onUpdateArchive != null) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: onUpdateArchive,
+                        icon: Icon(
+                          message.archivedAt == null
+                              ? Icons.archive_outlined
+                              : Icons.unarchive_outlined,
+                        ),
+                        label: Text(
+                          message.archivedAt == null
+                              ? 'Archive SOS'
+                              : 'Restore SOS',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   if (onUpdateResponse != null) ...[
                     SizedBox(
                       width: double.infinity,

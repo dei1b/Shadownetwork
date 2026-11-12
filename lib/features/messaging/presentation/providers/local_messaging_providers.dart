@@ -194,6 +194,21 @@ final sosMessagesProvider = FutureProvider<List<SosMessage>>((ref) async {
   return repository.getMessages();
 });
 
+final setSosArchivedProvider =
+    Provider<Future<bool> Function(String, {required bool archived})>((ref) {
+      return (messageId, {required archived}) async {
+        final localPeer = await ref.read(localPeerProvider.future);
+        final repository = await ref.read(sosMessageRepositoryProvider.future);
+        final changed = await repository.setArchived(
+          messageId: messageId,
+          localPeerId: localPeer.id,
+          archived: archived,
+        );
+        if (changed) ref.invalidate(sosMessagesProvider);
+        return changed;
+      };
+    });
+
 final setSosRespondedProvider =
     Provider<Future<bool> Function(String, {required bool responded})>((ref) {
       return (messageId, {required responded}) async {

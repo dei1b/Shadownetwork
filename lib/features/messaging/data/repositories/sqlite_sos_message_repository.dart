@@ -128,6 +128,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
           'received_transport',
           'transfer_id',
           'responded_at',
+          'archived_at',
         ],
         where: 'id = ?',
         whereArgs: [message.id],
@@ -140,6 +141,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
       }
       // Replayed envelopes cannot reopen an alert closed on this phone.
       row['responded_at'] = existing.firstOrNull?['responded_at'];
+      row['archived_at'] = existing.firstOrNull?['archived_at'];
       await transaction.insert(
         LocalMessagingDatabase.sosMessagesTable,
         row,
@@ -162,6 +164,30 @@ class SqliteSosMessageRepository implements SosMessageRepository {
       }
       return existing.isEmpty;
     });
+  }
+
+  Future<bool> setArchived({
+    required String messageId,
+    required String localPeerId,
+    required bool archived,
+  }) async {
+    final changed = await _database.update(
+      LocalMessagingDatabase.sosMessagesTable,
+      {
+        'archived_at': archived
+            ? DateTime.now().toUtc().toIso8601String()
+            : null,
+      },
+      where:
+          """
+        id = ? AND lower(sender_peer_id) = lower(?)
+        AND received_at IS NULL AND status != ?
+        AND trust_status != 'revoked'
+        AND archived_at IS ${archived ? 'NULL' : 'NOT NULL'}
+      """,
+      whereArgs: [messageId, localPeerId, MessageStatus.received.name],
+    );
+    return changed == 1;
   }
 
   @override

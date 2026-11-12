@@ -1061,7 +1061,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final List<(String, IconData, String)> filters = [
       ('All Messages', Icons.chat_bubble_outline_rounded, 'ALL'),
       ('SOS Alerts', Icons.sos_rounded, 'SOS'),
-      if (_isResponder) ('Archive', Icons.archive_outlined, 'ARCHIVE'),
+      ('Archive', Icons.archive_outlined, 'ARCHIVE'),
       ('Requests', Icons.pan_tool_outlined, 'REQUEST'),
       ('Updates', Icons.campaign_outlined, 'UPDATE'),
       ('Spam', Icons.report_gmailerrorred_rounded, 'SPAM'),
@@ -1187,7 +1187,7 @@ class _HomePageState extends ConsumerState<HomePage> {
               return _buildEmptyState(
                 icon: Icons.chat_bubble_outline_rounded,
                 message: activeType == 'ARCHIVE'
-                    ? 'No responded SOS alerts yet.'
+                    ? 'No archived SOS alerts yet.'
                     : 'No local messages yet.',
               );
             }
@@ -1676,10 +1676,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       await _openConversation(message.sender, linkedSosMessage: message);
       return;
     }
+    final canUpdateArchive =
+        _ownSosSenderLabel(message) != null &&
+        message.trustStatus != DeviceTrustStatus.revoked;
     final updateResponse = await showSosDetailSheet(
       context,
       message: message,
       ownSenderLabel: _ownSosSenderLabel(message),
+      canUpdateArchive: canUpdateArchive,
       canUpdateResponse:
           _isResponder &&
           !isLocalSender &&
@@ -1694,12 +1698,20 @@ class _HomePageState extends ConsumerState<HomePage> {
           : () => _openConversation(message.sender, linkedSosMessage: message),
     );
     if (!mounted || updateResponse != true) return;
-    final responded = message.respondedAt == null;
+    final moveToArchive = canUpdateArchive
+        ? message.archivedAt == null
+        : message.respondedAt == null;
     try {
-      if (!await ref.read(setSosRespondedProvider)(
-        message.id,
-        responded: responded,
-      )) {
+      final updated = canUpdateArchive
+          ? await ref.read(setSosArchivedProvider)(
+              message.id,
+              archived: moveToArchive,
+            )
+          : await ref.read(setSosRespondedProvider)(
+              message.id,
+              responded: moveToArchive,
+            );
+      if (!updated) {
         if (mounted) {
           _showMessage(
             'This alert could not be updated.',
@@ -1710,7 +1722,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       }
       if (mounted) {
         _showMessage(
-          responded
+          moveToArchive
               ? 'SOS moved to Archive.'
               : 'SOS restored to active alerts.',
           kind: FeedbackKind.success,
@@ -1746,7 +1758,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       description: message.body,
       distance: _distanceTextForMessage(message),
       time: _relativeTime(message.createdAt),
-      badge: message.respondedAt == null ? type : 'RESPONDED',
+      badge: message.archivedAt != null
+          ? 'ARCHIVED'
+          : message.respondedAt == null
+          ? type
+          : 'RESPONDED',
       type: type,
       icon: isSpam
           ? Icons.report_gmailerrorred_rounded

@@ -15,6 +15,7 @@ class SosMessage {
     this.updatedAt,
     this.receivedAt,
     this.respondedAt,
+    this.archivedAt,
     this.receivedFromPeerId,
     this.receivedTransport,
     this.transferId,
@@ -47,6 +48,9 @@ class SosMessage {
 
   /// Time this phone's rescuer moved the alert to the archive.
   final DateTime? respondedAt;
+
+  /// Local archive time for an SOS sent from this phone.
+  final DateTime? archivedAt;
   final String? receivedFromPeerId;
   final String? receivedTransport;
   final String? transferId;
@@ -83,6 +87,7 @@ class SosMessage {
     DateTime? updatedAt,
     Object? receivedAt = _sentinel,
     Object? respondedAt = _sentinel,
+    Object? archivedAt = _sentinel,
     Object? receivedFromPeerId = _sentinel,
     Object? receivedTransport = _sentinel,
     Object? transferId = _sentinel,
@@ -115,6 +120,9 @@ class SosMessage {
       respondedAt: identical(respondedAt, _sentinel)
           ? this.respondedAt
           : respondedAt as DateTime?,
+      archivedAt: identical(archivedAt, _sentinel)
+          ? this.archivedAt
+          : archivedAt as DateTime?,
       receivedFromPeerId: identical(receivedFromPeerId, _sentinel)
           ? this.receivedFromPeerId
           : receivedFromPeerId as String?,
