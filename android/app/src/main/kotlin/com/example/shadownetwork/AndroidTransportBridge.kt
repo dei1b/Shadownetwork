@@ -1384,7 +1384,10 @@ internal class AndroidTransportBridge(private val context: Context) {
         }
         val address = peer.bluetoothAddress
             ?: throw IOException("Peer ${peer.id} has no Bluetooth address.")
-        val chunks = bleFrameChunks(frame)
+        var chunks = emptyList<ByteArray>()
+        val negotiatedMtu = AtomicInteger(BLE_DEFAULT_ATT_MTU)
+        val discoveryStarted = AtomicBoolean(false)
+        val mtuFallback = AtomicReference<Runnable?>()
         val completed = CountDownLatch(1)
         val nextIndex = AtomicInteger(0)
         val failure = AtomicReference<IOException?>()
@@ -1442,9 +1445,28 @@ internal class AndroidTransportBridge(private val context: Context) {
                     fail("Unable to connect to ${peer.id} over BLE.")
                     return
                 }
-                if (!gatt.discoverServices()) {
+                val fallback = Runnable { discover(gatt) }
+                mtuFallback.set(fallback)
+                if (gatt.requestMtu(BLE_IDENTITY_MTU)) {
+                    mainHandler.postDelayed(fallback, BLE_MTU_FALLBACK_MS)
+                } else {
+                    mtuFallback.getAndSet(null)?.let(mainHandler::removeCallbacks)
+                    discover(gatt)
+                }
+            }
+
+            private fun discover(gatt: BluetoothGatt) {
+                if (completed.count != 0L &&
+                    discoveryStarted.compareAndSet(false, true) && !gatt.discoverServices()
+                ) {
                     fail("Unable to discover ${peer.id} BLE relay service.")
                 }
+            }
+
+            override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
+                if (status == BluetoothGatt.GATT_SUCCESS) negotiatedMtu.set(mtu)
+                mtuFallback.getAndSet(null)?.let(mainHandler::removeCallbacks)
+                discover(gatt)
             }
 
             override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
@@ -1452,6 +1474,14 @@ internal class AndroidTransportBridge(private val context: Context) {
                     fail("BLE relay service discovery failed for ${peer.id}.")
                     return
                 }
+                // Three ATT bytes plus one relay frame byte leave the usable payload.
+                val mtu = negotiatedMtu.get()
+                val chunkSize = if (mtu <= BLE_DEFAULT_ATT_MTU) {
+                    BLE_CHUNK_PAYLOAD_BYTES
+                } else {
+                    (mtu - 4).coerceAtMost(BLE_IDENTITY_MTU - 4)
+                }
+                chunks = bleFrameChunks(frame, chunkSize)
                 writeNext(gatt)
             }
 
@@ -1525,6 +1555,8 @@ internal class AndroidTransportBridge(private val context: Context) {
             pending.failure.get()?.let { throw TransferFailure(it.first, it.second, pending.details()) }
             rememberPeer(peer.copy(isConnected = true))
         } finally {
+            completed.countDown()
+            mtuFallback.getAndSet(null)?.let(mainHandler::removeCallbacks)
             pending.onFailure = null
             runCatching { gatt.disconnect() }
             runCatching { gatt.close() }
@@ -1672,16 +1704,16 @@ internal class AndroidTransportBridge(private val context: Context) {
         }
     }
 
-    private fun bleFrameChunks(frame: JSONObject): List<ByteArray> {
+    private fun bleFrameChunks(frame: JSONObject, chunkPayloadBytes: Int): List<ByteArray> {
         val payload = frame.toString().toByteArray(Charsets.UTF_8)
-        if (payload.size <= BLE_CHUNK_PAYLOAD_BYTES) {
+        if (payload.size <= chunkPayloadBytes) {
             return listOf(byteArrayOf(BLE_FRAME_SINGLE) + payload)
         }
 
         val chunks = mutableListOf<ByteArray>()
         var offset = 0
         while (offset < payload.size) {
-            val end = minOf(offset + BLE_CHUNK_PAYLOAD_BYTES, payload.size)
+            val end = minOf(offset + chunkPayloadBytes, payload.size)
             val marker = when {
                 offset == 0 -> BLE_FRAME_START
                 end == payload.size -> BLE_FRAME_END
@@ -1996,6 +2028,8 @@ internal class AndroidTransportBridge(private val context: Context) {
         private const val BLE_SEND_TIMEOUT_MS = 15_000L
         private const val BLE_IDENTITY_TIMEOUT_MS = 10_000L
         private const val BLE_IDENTITY_MTU = 256
+        private const val BLE_DEFAULT_ATT_MTU = 23
+        private const val BLE_MTU_FALLBACK_MS = 1_500L
         // One protocol byte plus 18 payload bytes fits the default ATT MTU.
         private const val BLE_CHUNK_PAYLOAD_BYTES = 18
         private const val BLE_FRAME_SINGLE: Byte = 0x01

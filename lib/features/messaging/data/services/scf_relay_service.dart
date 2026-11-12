@@ -159,19 +159,35 @@ class ScfRelayService {
     Peer peer, {
     DateTime? now,
     int limit = 50,
+    bool Function()? shouldContinue,
   }) async {
-    final outbound = await _scfService.prepareOutboundForPeer(
-      peer.id,
-      now: now,
-      limit: limit,
-    );
-
+    if (limit <= 0) {
+      throw ArgumentError.value(limit, 'limit', 'Must be greater than zero.');
+    }
+    final attempted = <String>{};
     var sentCount = 0;
     var failedCount = 0;
     String? lastError;
     final sentMessageHashes = <String>[];
 
-    for (final queuedEnvelope in outbound) {
+    while (attempted.length < limit && (shouldContinue?.call() ?? true)) {
+      // Recheck priorities between transfers so an SOS queued mid-sync can go next.
+      final outbound = await _scfService.prepareOutboundForPeer(
+        peer.id,
+        now: now,
+        limit: 1,
+        excludedHashes: attempted,
+      );
+      if (outbound.isEmpty) break;
+      final queuedEnvelope = outbound.single;
+      attempted.add(queuedEnvelope.messageHash);
+      if (!(shouldContinue?.call() ?? true)) {
+        await _scfService.releaseOutboundOffer(
+          queuedEnvelope.messageHash,
+          peer.id,
+        );
+        break;
+      }
       // A retry of the same SOS is a new attempt, not a new logical message.
       final envelope = queuedEnvelope.copyWith(transferId: _newTransferId());
       await metricsRecorder?.captureEvent(
@@ -200,6 +216,15 @@ class ScfRelayService {
               'Origin device is revoked; retained in quarantine.',
             );
           }
+        }
+        final stillEligible = await _scfService.isOutboundOfferActive(
+          envelope.messageHash,
+          peer.id,
+          now: now,
+        );
+        if (!stillEligible || !(shouldContinue?.call() ?? true)) {
+          await _scfService.releaseOutboundOffer(envelope.messageHash, peer.id);
+          continue;
         }
         final transfer = await _transport.sendEnvelope(
           peer: peer,

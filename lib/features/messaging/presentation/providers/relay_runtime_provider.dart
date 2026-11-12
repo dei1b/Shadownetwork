@@ -120,6 +120,8 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
   StreamSubscription<void>? _relayStopSubscription;
   int _epoch = 0;
   bool _syncInFlight = false;
+  bool _syncRequested = false;
+  bool _urgentSyncRequested = false;
   Future<int>? _receiveTask;
   bool _receiveRequested = false;
   bool _enabled = false;
@@ -269,11 +271,20 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
     }
   }
 
+  void requestSosSync() {
+    if (_syncInFlight) _urgentSyncRequested = true;
+    unawaited(syncNow(force: true));
+  }
+
   Future<void> syncNow({bool force = true}) async {
-    if (_syncInFlight || (!force && !_enabled)) {
+    if (_syncInFlight) {
+      if (force) _syncRequested = true;
       return;
     }
+    if (!force && !_enabled) return;
 
+    _syncRequested = false;
+    _urgentSyncRequested = false;
     _syncInFlight = true;
     final epoch = _epoch;
     state = state.copyWith(isSyncing: true, lastError: null);
@@ -351,7 +362,12 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       var relayedCount = 0;
       for (final peer in discoveredPeers) {
         if (epoch != _epoch) return;
-        final result = await relayService.relayToPeer(peer, now: now);
+        if (_urgentSyncRequested) break;
+        final result = await relayService.relayToPeer(
+          peer,
+          limit: 3,
+          shouldContinue: () => epoch == _epoch && !_urgentSyncRequested,
+        );
         relayedCount += result.sentCount;
         for (final hash in result.sentMessageHashes) {
           await chatRepository.updateOutgoingMessageStatus(
@@ -362,6 +378,7 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         }
       }
 
+      if (epoch != _epoch) return;
       final transportStatus = await transport.getStatus();
 
       state = state.copyWith(
@@ -389,7 +406,15 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
       );
     } finally {
       _syncInFlight = false;
-      _scheduleNextSync();
+      if (_syncRequested && epoch == _epoch) {
+        _syncTimer?.cancel();
+        _syncTimer = Timer(
+          Duration.zero,
+          () => unawaited(syncNow(force: true)),
+        );
+      } else {
+        _scheduleNextSync();
+      }
     }
   }
 

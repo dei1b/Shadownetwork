@@ -22,6 +22,15 @@ class ScfService {
   final Database _database;
   final Duration defaultTtl;
 
+  static const _notArchived =
+      """
+    NOT EXISTS (
+      SELECT 1 FROM ${LocalMessagingDatabase.sosMessagesTable} AS sos
+      WHERE sos.message_hash = messages.message_hash
+        AND (sos.archived_at IS NOT NULL OR sos.responded_at IS NOT NULL)
+    )
+    """;
+
   Future<bool> storeMessage(
     SosMessage message, {
     DateTime? receivedAt,
@@ -126,6 +135,22 @@ class ScfService {
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
       }
+      final source = envelope.receivedFromPeerId;
+      if (source != null && source.isNotEmpty) {
+        // The sending peer and the origin already hold this payload.
+        for (final peerId in {
+          source,
+          ?RelayPayloadCodec.senderPeerId(envelope.payloadJson),
+        }) {
+          await _upsertPeerStatus(
+            transaction,
+            messageHash: envelope.messageHash,
+            peerId: peerId,
+            status: ScfPeerStatus.sent,
+            updatedAt: timestamp,
+          );
+        }
+      }
       return inserted;
     });
   }
@@ -206,6 +231,7 @@ class ScfService {
     String peerId, {
     DateTime? now,
     int limit = 50,
+    Set<String> excludedHashes = const {},
   }) async {
     if (limit <= 0) {
       throw ArgumentError.value(limit, 'limit', 'Must be greater than zero.');
@@ -224,17 +250,26 @@ class ScfService {
           AND statuses.peer_id = ?
         WHERE messages.expires_at > ?
           AND messages.origin_trust_status != ?
+          AND $_notArchived
+          ${excludedHashes.isEmpty ? '' : 'AND messages.message_hash NOT IN (${List.filled(excludedHashes.length, '?').join(', ')})'}
           AND (
             statuses.status IS NULL
             OR statuses.status IN (?, ?)
           )
-        ORDER BY messages.received_at ASC
+        ORDER BY
+          CASE WHEN messages.payload_type = 'sos_message' THEN 0 ELSE 1 END,
+          CASE WHEN messages.payload_type = 'sos_message'
+            AND COALESCE(statuses.attempt_count, 0) = 0 THEN 0 ELSE 1 END,
+          CASE WHEN messages.payload_type = 'sos_message'
+            THEN messages.received_at END DESC,
+          messages.received_at ASC, messages.message_hash ASC
         LIMIT ?
         ''',
         [
           peerId,
           timestamp.toIso8601String(),
           DeviceTrustStatus.revoked.name,
+          ...excludedHashes,
           ScfPeerStatus.pending.name,
           ScfPeerStatus.failed.name,
           limit,
@@ -268,6 +303,48 @@ class ScfService {
           )
           .toList(growable: false);
     });
+  }
+
+  Future<bool> isOutboundOfferActive(
+    String messageHash,
+    String peerId, {
+    DateTime? now,
+  }) async {
+    final rows = await _database.rawQuery(
+      """
+      SELECT 1 FROM ${LocalMessagingDatabase.scfMessagesTable} AS messages
+      JOIN ${LocalMessagingDatabase.scfPeerStatusesTable} AS statuses
+        ON statuses.message_hash = messages.message_hash
+      WHERE messages.message_hash = ? AND statuses.peer_id = ?
+        AND statuses.status = ?
+        AND messages.expires_at > ?
+        AND $_notArchived
+      LIMIT 1
+      """,
+      [
+        messageHash,
+        peerId,
+        ScfPeerStatus.offered.name,
+        (now ?? DateTime.now()).toUtc().toIso8601String(),
+      ],
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> releaseOutboundOffer(String messageHash, String peerId) async {
+    await _database.rawUpdate(
+      """
+      UPDATE ${LocalMessagingDatabase.scfPeerStatusesTable}
+      SET status = ?, attempt_count = MAX(0, attempt_count - 1)
+      WHERE message_hash = ? AND peer_id = ? AND status = ?
+      """,
+      [
+        ScfPeerStatus.pending.name,
+        messageHash,
+        peerId,
+        ScfPeerStatus.offered.name,
+      ],
+    );
   }
 
   Future<void> updatePeerStatus({
@@ -321,11 +398,14 @@ class ScfService {
   }
 
   Future<bool> hasRecentQueuedEnvelopes() async {
-    final rows = await _database.query(
-      LocalMessagingDatabase.scfMessagesTable,
-      columns: ['message_hash'],
-      where: 'expires_at > ? AND origin_trust_status != ? AND received_at >= ?',
-      whereArgs: [
+    final rows = await _database.rawQuery(
+      """
+      SELECT 1 FROM ${LocalMessagingDatabase.scfMessagesTable} AS messages
+      WHERE expires_at > ? AND origin_trust_status != ? AND received_at >= ?
+        AND $_notArchived
+      LIMIT 1
+      """,
+      [
         DateTime.now().toUtc().toIso8601String(),
         DeviceTrustStatus.revoked.name,
         DateTime.now()
@@ -333,7 +413,6 @@ class ScfService {
             .subtract(const Duration(minutes: 2))
             .toIso8601String(),
       ],
-      limit: 1,
     );
     return rows.isNotEmpty;
   }

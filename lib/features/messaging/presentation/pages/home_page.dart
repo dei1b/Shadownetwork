@@ -582,7 +582,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
 
     await ref.read(saveSosMessageProvider)(message);
-    await ref.read(relayRuntimeProvider.notifier).syncNow(force: true);
+    ref.read(relayRuntimeProvider.notifier).requestSosSync();
   }
 
   messaging.Peer _peerFromTrustedDevice(TrustedDevice device) {
@@ -1479,7 +1479,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                     ],
                     if (isOwnSos) ...[
                       const SizedBox(height: 8),
-                      SosSendStatus(message: item.message),
+                      SosSendStatus(
+                        message: item.message,
+                        showDeliveryQualifier: false,
+                      ),
                     ],
                     const SizedBox(height: 8),
                     Wrap(
@@ -1721,9 +1724,12 @@ class _HomePageState extends ConsumerState<HomePage> {
         return;
       }
       if (mounted) {
+        if (!moveToArchive && canUpdateArchive) {
+          ref.read(relayRuntimeProvider.notifier).requestSosSync();
+        }
         _showMessage(
           moveToArchive
-              ? 'SOS moved to Archive.'
+              ? 'SOS archived. This phone will stop forwarding it.'
               : 'SOS restored to active alerts.',
           kind: FeedbackKind.success,
         );

@@ -59,7 +59,24 @@ void main() {
         localPeerId: 'CIVILIAN',
         archived: value,
       );
+      final scfBeforeRestart = ScfService(database: db);
+      final prepared = (await scfBeforeRestart.prepareOutboundForPeer(
+        'relay',
+      )).single;
       expect(await archive(true), isTrue);
+      expect(
+        await scfBeforeRestart.isOutboundOfferActive(
+          prepared.messageHash,
+          'relay',
+        ),
+        isFalse,
+      );
+      await scfBeforeRestart.releaseOutboundOffer(
+        prepared.messageHash,
+        'relay',
+      );
+      expect(await scfBeforeRestart.prepareOutboundForPeer('relay'), isEmpty);
+      expect(await scfBeforeRestart.hasRecentQueuedEnvelopes(), isFalse);
       await repository.saveMessage(own);
       await db.close();
       db = await harness.openCurrentDatabase();
@@ -83,6 +100,11 @@ void main() {
       );
       expect(await archive(false), isTrue);
       expect((await repository.getMessages()).single.archivedAt, isNull);
+      final resumed = (await ScfService(
+        database: db,
+      ).prepareOutboundForPeer('relay')).single;
+      expect(resumed.messageHash, prepared.messageHash);
+      expect(resumed.expiresAt, prepared.expiresAt);
     },
   );
 

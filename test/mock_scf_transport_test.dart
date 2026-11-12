@@ -121,60 +121,114 @@ void main() {
     expect(statusAtA?.status, ScfPeerStatus.sent);
   });
 
-  test('deduplicates a returned mock relay payload', () async {
-    final nodeADatabase = await _openTestDatabase('mock-dedupe-a.db');
-    final nodeBDatabase = await _openTestDatabase('mock-dedupe-b.db');
-    addTearDown(nodeADatabase.close);
-    addTearDown(nodeBDatabase.close);
+  test(
+    'middle phone skips the origin and forwards the SOS at hop two',
+    () async {
+      final nodeADatabase = await _openTestDatabase('mock-dedupe-a.db');
+      final nodeBDatabase = await _openTestDatabase('mock-dedupe-b.db');
+      final nodeCDatabase = await _openTestDatabase('mock-relay-c.db');
+      addTearDown(nodeCDatabase.close);
+      addTearDown(nodeADatabase.close);
+      addTearDown(nodeBDatabase.close);
 
-    const nodeA = Peer(
-      id: 'node-a',
-      name: 'Node A',
-      type: PeerType.civilian,
-      isConnected: true,
-    );
-    const nodeB = Peer(
-      id: 'node-b',
-      name: 'Node B',
-      type: PeerType.relay,
-      isConnected: true,
-    );
+      const nodeA = Peer(
+        id: 'node-a',
+        name: 'Node A',
+        type: PeerType.civilian,
+        isConnected: true,
+      );
+      const nodeB = Peer(
+        id: 'node-b',
+        name: 'Node B',
+        type: PeerType.relay,
+        isConnected: true,
+      );
 
-    final network = MockScfTransportNetwork();
-    final transportA = network.registerPeer(nodeA);
-    final transportB = network.registerPeer(nodeB);
-    final scfA = ScfService(database: nodeADatabase);
-    final scfB = ScfService(database: nodeBDatabase);
-    final relayA = ScfRelayService(scfService: scfA, transport: transportA);
-    final relayB = ScfRelayService(scfService: scfB, transport: transportB);
-    final now = DateTime.utc(2026, 5, 2, 6);
-    final message = _message(sender: nodeA);
+      final network = MockScfTransportNetwork();
+      final transportA = network.registerPeer(nodeA);
+      final transportB = network.registerPeer(nodeB);
+      final nodeC = nodeB.copyWith(id: 'node-c', type: PeerType.responder);
+      final transportC = network.registerPeer(nodeC);
+      final scfC = ScfService(database: nodeCDatabase);
+      final relayC = ScfRelayService(scfService: scfC, transport: transportC);
+      final scfA = ScfService(database: nodeADatabase);
+      final scfB = ScfService(database: nodeBDatabase);
+      final relayA = ScfRelayService(scfService: scfA, transport: transportA);
+      final relayB = ScfRelayService(scfService: scfB, transport: transportB);
+      final now = DateTime.utc(2026, 5, 2, 6);
+      final message = _message(sender: nodeA);
 
-    await scfA.storeMessage(message, receivedAt: now);
-    final sendingA = relayA.relayToPeer(
-      nodeB,
-      now: now.add(const Duration(minutes: 1)),
-    );
-    await transportB.relayEvents.first;
-    await relayB.ingestIncoming(now: now.add(const Duration(minutes: 2)));
-    expect((await sendingA).sentCount, 1);
-    final sendingB = relayB.relayToPeer(
-      nodeA,
-      now: now.add(const Duration(minutes: 3)),
-    );
-    await transportA.relayEvents.first;
+      await scfA.storeMessage(message, receivedAt: now);
+      final sendingA = relayA.relayToPeer(
+        nodeB,
+        now: now.add(const Duration(minutes: 1)),
+      );
+      await transportB.relayEvents.first;
+      await relayB.ingestIncoming(now: now.add(const Duration(minutes: 2)));
+      expect((await sendingA).sentCount, 1);
+      final returnToOrigin = await relayB.relayToPeer(nodeA, now: now);
+      expect(returnToOrigin.sentCount, 0);
+      expect(await transportA.receiveEnvelopes(), isEmpty);
 
-    final ingestedByA = await relayA.ingestIncoming(
-      now: now.add(const Duration(minutes: 4)),
-    );
-    expect((await sendingB).sentCount, 1);
-    final storedAtA = await scfA.getStoredEnvelopes(
-      now: now.add(const Duration(minutes: 5)),
-    );
+      final receivedAtC = transportC.relayEvents.first;
+      final onward = relayB.relayToPeer(nodeC, now: now);
+      await receivedAtC;
+      expect(await relayC.ingestIncoming(now: now), 1);
+      expect((await onward).sentCount, 1);
+      final stored = (await scfC.getStoredEnvelopes(now: now)).single;
+      expect(stored.messageHash, SosMessagePayload.messageHash(message));
+      expect(stored.hopCount, 2);
+    },
+  );
 
-    expect(ingestedByA, 0);
-    expect(storedAtA, hasLength(1));
-  });
+  test(
+    'a new SOS jumps ahead of remaining backlog during the same relay pass',
+    () async {
+      final db = await _openTestDatabase('mock-sos-priority.db');
+      addTearDown(db.close);
+      const sender = Peer(
+        id: 'sender',
+        name: 'Sender',
+        type: PeerType.civilian,
+        isConnected: true,
+      );
+      final relay = sender.copyWith(id: 'relay');
+      final network = MockScfTransportNetwork();
+      final origin = network.registerPeer(sender);
+      final middle = network.registerPeer(relay);
+      final service = ScfService(database: db);
+      final relayService = ScfRelayService(
+        scfService: service,
+        transport: origin,
+      );
+      final now = DateTime.utc(2026, 5, 2, 6);
+      final old = _message(sender: sender);
+      final newer = old.copyWith(id: 'newer', body: 'Newer');
+      final newest = old.copyWith(id: 'newest', body: 'Newest');
+      await service.storeMessage(
+        old,
+        receivedAt: now.subtract(const Duration(seconds: 2)),
+      );
+      await service.storeMessage(
+        newer,
+        receivedAt: now.subtract(const Duration(seconds: 1)),
+      );
+
+      final firstReady = middle.relayEvents.first;
+      final sending = relayService.relayToPeer(relay, now: now, limit: 2);
+      await firstReady;
+      final first = (await middle.receiveEnvelopes()).single;
+      expect(first.messageHash, SosMessagePayload.messageHash(newer));
+      await service.storeMessage(newest, receivedAt: now);
+      final nextReady = middle.relayEvents.first;
+      await middle.acknowledgeEnvelope(envelope: first);
+      await nextReady;
+      final next = (await middle.receiveEnvelopes()).single;
+      expect(next.messageHash, SosMessagePayload.messageHash(newest));
+      await middle.acknowledgeEnvelope(envelope: next);
+      expect((await sending).sentCount, 2);
+    },
+  );
 }
 
 Future<Database> _openTestDatabase(String name) async {
