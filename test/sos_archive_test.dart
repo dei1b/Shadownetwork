@@ -130,6 +130,7 @@ void main() {
         status: MessageStatus.received,
         createdAt: now,
         receivedAt: now,
+        hopCount: 3,
         latitude: 7.3,
         longitude: 125.7,
       );
@@ -165,7 +166,10 @@ void main() {
       final respondedAt = (await repository.getMessages()).single.respondedAt;
       expect(respondedAt, isNotNull);
       await repository.saveMessage(
-        alert.copyWith(receivedAt: now.add(const Duration(seconds: 3))),
+        alert.copyWith(
+          receivedAt: now.add(const Duration(seconds: 3)),
+          hopCount: 1,
+        ),
       );
       await db.close();
       db = await harness.openCurrentDatabase();
@@ -173,6 +177,7 @@ void main() {
       final archived = (await repository.getMessages()).single;
       expect(archived.respondedAt, respondedAt);
       expect(archived.receivedAt, now);
+      expect(archived.hopCount, 3);
       expect(showsOnMap(archived), isFalse);
       bool showsIn(String filter) => shouldShowSosMessageForFilter(
         message: archived,

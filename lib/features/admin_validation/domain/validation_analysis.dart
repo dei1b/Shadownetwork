@@ -116,6 +116,7 @@ class ValidationRunAnalysis {
     required this.latency,
     required this.propagation,
     required this.battery,
+    required this.batteryDrainByPhone,
     required this.sosStarted,
     required this.sosConfirmed,
     required this.sosHandoffTime,
@@ -134,6 +135,7 @@ class ValidationRunAnalysis {
   final Map<String, int> hops, transports;
   final AnalysisStatistics latency, propagation;
   final Map<String, double?> battery;
+  final AnalysisStatistics batteryDrainByPhone;
   final int sosStarted, sosConfirmed;
   final AnalysisStatistics sosHandoffTime;
 }
@@ -155,9 +157,17 @@ class ValidationAnalysisCalculator {
           : r.data['id'];
       final key = '${r.device}/${r.session}/${r.kind}/$id';
       final old = unique[key];
-      if (old != null &&
-          canonicalJsonEncode(old.data) != canonicalJsonEncode(r.data)) {
-        conflicts.add(key);
+      if (old != null) {
+        // A later duplicate can change only the stored hop field in old exports.
+        final previous = Map.of(old.data);
+        final current = Map.of(r.data);
+        if (r.kind == 'sos_receipts') {
+          previous.remove('hop_count');
+          current.remove('hop_count');
+        }
+        if (canonicalJsonEncode(previous) != canonicalJsonEncode(current)) {
+          conflicts.add(key);
+        }
       }
       unique.putIfAbsent(key, () => r);
     }
@@ -322,8 +332,42 @@ class ValidationAnalysisCalculator {
     final hops = <String, int>{}, transports = <String, int>{};
     void count(Map<String, int> map, String key) =>
         map.update(key, (v) => v + 1, ifAbsent: () => 1);
-    for (final r in receipts.values) {
-      if (r.data['hop_count'] != null) count(hops, '${r.data['hop_count']}');
+    // Match the first receipt's transfer even when filters hide its receive event.
+    final receives = <(String, String, String), AnalysisRecord>{};
+    final ambiguousReceives = <(String, String, String)>{};
+    for (final event in all.where((r) => r.type == 'envelopeReceived')) {
+      final hash = event.hash;
+      final transfer = event.transfer;
+      final hop = event.data['hop_count'];
+      final payload = event.data['payload_type'];
+      if (hash == null ||
+          transfer == null ||
+          hop is! int ||
+          hop <= 0 ||
+          (payload != null && payload != 'sos_message')) {
+        continue;
+      }
+      final key = (event.device, hash, transfer);
+      final previous = receives.putIfAbsent(key, () => event);
+      if (previous.data['hop_count'] != hop ||
+          previous.data['peer_id'] != event.data['peer_id'] ||
+          previous.transport != event.transport) {
+        ambiguousReceives.add(key);
+      }
+    }
+    for (final receipt in receipts.values) {
+      final hash = receipt.hash;
+      final transfer = receipt.transfer;
+      if (hash == null || transfer == null) continue;
+      final key = (receipt.device, hash, transfer);
+      final event = receives[key];
+      final source = receipt.data['last_peer_id'];
+      if (event == null ||
+          ambiguousReceives.contains(key) ||
+          (source != null && source != event.data['peer_id'])) {
+        continue;
+      }
+      count(hops, '${event.data['hop_count']}');
     }
     for (final r in sent.values) {
       count(transports, r.transport);
@@ -342,6 +386,12 @@ class ValidationAnalysisCalculator {
     }
     issues.add('Clocks unsynchronized: propagation is clock-uncertain.');
     final battery = <String, double?>{};
+    final chargingPhones = {
+      for (final r in all)
+        if (r.kind == 'battery_samples' && r.data['is_charging'] == true)
+          r.device,
+    };
+    final dischargeByPhone = <String, (double, double)>{};
     final groups = <String, List<AnalysisRecord>>{};
     for (final r in selected.where((r) => r.kind == 'battery_samples')) {
       groups.putIfAbsent('${r.device}/${r.session}', () => []).add(r);
@@ -362,11 +412,23 @@ class ValidationAnalysisCalculator {
                     (samples[i].data['battery_percent'] as num) &&
                 samples[i + 1].time!.isAfter(samples[i].time!),
           ).every((v) => v);
-      battery[entry.key] = valid
-          ? ((samples.first.data['battery_percent'] as num) -
-                    (samples.last.data['battery_percent'] as num)) /
-                elapsed
-          : null;
+      if (!valid) {
+        battery[entry.key] = null;
+        continue;
+      }
+      final used =
+          (samples.first.data['battery_percent'] as num).toDouble() -
+          (samples.last.data['battery_percent'] as num).toDouble();
+      battery[entry.key] = used / elapsed;
+      final phone = samples.first.device;
+      if (!chargingPhones.contains(phone)) {
+        final (previousUsed, previousHours) =
+            dischargeByPhone[phone] ?? (0.0, 0.0);
+        dischargeByPhone[phone] = (
+          previousUsed + used,
+          previousHours + elapsed,
+        );
+      }
     }
     final discovery = selected
         .where((r) => r.kind == 'discovery_attempts')
@@ -399,6 +461,9 @@ class ValidationAnalysisCalculator {
       ),
       propagation: AnalysisStatistics(propagation),
       battery: battery,
+      batteryDrainByPhone: AnalysisStatistics(
+        dischargeByPhone.values.map((sample) => sample.$1 / sample.$2),
+      ),
       sosStarted: startedSos.length,
       sosConfirmed: confirmedSos.length,
       sosHandoffTime: sosHandoffTime,

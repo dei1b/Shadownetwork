@@ -284,7 +284,9 @@ void main() {
     int hour,
     int percent, {
     bool charging = false,
-  }) => AnalysisRecord('run', 'a', 'responder', 's', 'battery_samples', {
+    String device = 'a',
+    String session = 's',
+  }) => AnalysisRecord('run', device, 'responder', session, 'battery_samples', {
     'id': id,
     'sampled_at': DateTime.utc(2026, 11, 11, hour).toIso8601String(),
     'battery_percent': percent,
@@ -313,7 +315,90 @@ void main() {
       isNull,
     );
   });
-  test('receipt hops require SOS receipts; negative propagation excluded', () {
+  test(
+    'battery average weights each phone equally and excludes charging phones',
+    () {
+      final result = calculate(
+        [
+          // A used 2 points in one hour and 10 points in two hours: 4 points/hour.
+          battery('1', 1, 80),
+          battery('2', 2, 78),
+          battery('3', 3, 75, session: 'second'),
+          battery('4', 5, 65, session: 'second'),
+          battery('1', 1, 90, device: 'b'),
+          battery('2', 2, 82, device: 'b'),
+          // C has a usable individual reading but recorded charging in this run.
+          battery('1', 1, 90, device: 'c'),
+          battery('2', 2, 70, device: 'c'),
+          battery('3', 0, 60, device: 'c', session: 'before', charging: true),
+          battery('1', 1, 90, device: 'd'),
+        ],
+        filter: ValidationAnalysisFilter(
+          run: 'run',
+          start: DateTime.utc(2026, 11, 11, 1),
+        ),
+      );
+      expect(result.battery['c/s'], 20);
+      expect(result.battery['d/s'], isNull);
+      expect(result.batteryDrainByPhone.count, 2);
+      expect(result.batteryDrainByPhone.mean, 6);
+    },
+  );
+
+  test(
+    'first receipt hop uses its own transfer, including across a date filter',
+    () {
+      AnalysisRecord receipt(int hop) =>
+          AnalysisRecord('run', 'a', 'responder', 's', 'sos_receipts', {
+            'message_hash': 'hash',
+            'transfer_id': 'first',
+            'last_peer_id': 'relay',
+            'transport': 'bluetooth',
+            'created_at': '2026-11-11T00:00:00Z',
+            'received_at': '2026-11-11T02:00:00Z',
+            'hop_count': hop,
+          });
+      AnalysisRecord receive(
+        String id,
+        String transfer,
+        int hop, {
+        String device = 'a',
+      }) => AnalysisRecord('run', device, 'responder', 's', 'message_events', {
+        'id': id,
+        'event_type': 'envelopeReceived',
+        'message_hash': 'hash',
+        'transfer_id': transfer,
+        'peer_id': 'relay',
+        'payload_type': 'sos_message',
+        'transport': 'bluetooth',
+        'occurred_at': '2026-11-11T01:59:59Z',
+        'hop_count': hop,
+      });
+      final filter = ValidationAnalysisFilter(
+        run: 'run',
+        start: DateTime.utc(2026, 11, 11, 2),
+      );
+      final rows = [
+        receipt(1),
+        receipt(2),
+        receive('later-copy', 'duplicate', 1),
+        receive('another-phone', 'first', 4, device: 'other'),
+        receive('matched', 'first', 3),
+      ];
+      final result = calculate(rows, filter: filter);
+      expect(result.receipts.length, 1);
+      expect(result.hops, {'3': 1});
+      expect(
+        calculate([
+          ...rows,
+          receive('ambiguous', 'first', 2),
+        ], filter: filter).hops,
+        isEmpty,
+      );
+    },
+  );
+
+  test('unverified receipt hops and negative propagation are excluded', () {
     final r = AnalysisRecord('run', 'a', 'responder', 's', 'sos_receipts', {
       'message_hash': 'hash',
       'received_at': '2026-11-11T00:00:00Z',
@@ -322,7 +407,7 @@ void main() {
     });
     final result = calculate([r, r, event('x', 'envelopeDelivered')]);
     expect(result.receipts.length, 1);
-    expect(result.hops, {'2': 1});
+    expect(result.hops, isEmpty);
     expect(result.propagation.count, 0);
     expect(result.issues.join(), contains('Invalid'));
   });

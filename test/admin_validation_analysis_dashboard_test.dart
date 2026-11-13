@@ -142,6 +142,15 @@ void main() {
         expect(find.text('2 phones imported'), findsOneWidget);
         expect(find.text('50% · 1 of 2'), findsOneWidget);
         expect(find.text('2.00 seconds'), findsOneWidget);
+        final transfers = find.text('Transfer details');
+        await tester.ensureVisible(transfers);
+        await tester.tap(transfers);
+        await tester.pumpAndSettle();
+        expect(find.text('Verified hops to first SOS receipt'), findsOneWidget);
+        expect(find.text('3 hops'), findsOneWidget);
+        expect(find.text('1 hop'), findsNothing);
+        await tester.tap(transfers);
+        await tester.pumpAndSettle();
       } else {
         expect(find.text('1 phone imported'), findsOneWidget);
         expect(find.text('Not measured'), findsOneWidget);
@@ -184,6 +193,8 @@ void main() {
         await tester.ensureVisible(find.text('Timing and battery details'));
         await tester.tap(find.text('Timing and battery details'));
         await tester.pumpAndSettle();
+        expect(find.text('Average battery drain'), findsOneWidget);
+        expect(find.text('0.00'), findsOneWidget);
         await tester.ensureVisible(find.text('Phone 1 · battery level'));
         await tester.pumpAndSettle();
         expect(
@@ -270,9 +281,25 @@ const _sosRecords = [
     'responder-fixture',
     'responder',
     'session',
+    'message_events',
+    {
+      'id': 'first-receive',
+      'event_type': 'envelopeReceived',
+      'message_hash': 'sos-1',
+      'transfer_id': 'transfer-1',
+      'occurred_at': '2026-11-11T08:00:02Z',
+      'hop_count': 3,
+    },
+  ),
+  AnalysisRecord(
+    'SN-FIXTURE',
+    'responder-fixture',
+    'responder',
+    'session',
     'sos_receipts',
     {
       'message_hash': 'sos-1',
+      'transfer_id': 'transfer-1',
       'created_at': '2026-11-11T08:00:00Z',
       'received_at': '2026-11-11T08:00:02Z',
       'hop_count': 1,

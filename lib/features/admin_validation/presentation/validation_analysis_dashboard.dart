@@ -699,7 +699,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                         spacing: 12,
                         runSpacing: 12,
                         children: [
-                          bars('Steps to the receiving responder (hop count)', {
+                          bars('Verified hops to first SOS receipt', {
                             for (final e in result.hops.entries)
                               '${e.key} ${e.key == '1' ? 'hop' : 'hops'}':
                                   e.value,
@@ -712,7 +712,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Hops count phone-to-phone steps. Connection counts include repeat sends.',
+                        'Each first receipt is matched to its receive event by transfer ID. Receipts without a match are omitted from the hop chart. Connection counts include repeat sends.',
                       ),
                     ],
                   ),
@@ -764,6 +764,15 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                       const SizedBox(height: 16),
                       bars('Handoff time distribution', histogram),
                       const SizedBox(height: 24),
+                      metric(
+                        'Average battery drain',
+                        result.batteryDrainByPhone.mean?.toStringAsFixed(2) ??
+                            'Not measured',
+                        result.batteryDrainByPhone.count == 0
+                            ? 'No phones with usable discharge readings and no recorded charging.'
+                            : 'Percentage points per hour across ${result.batteryDrainByPhone.count} ${result.batteryDrainByPhone.count == 1 ? 'phone' : 'phones'}. Each phone counts equally. Phones that recorded charging during the run are excluded.',
+                      ),
+                      const SizedBox(height: 12),
                       const Align(
                         alignment: Alignment.centerLeft,
                         child: Text(

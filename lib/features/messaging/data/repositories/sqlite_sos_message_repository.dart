@@ -127,6 +127,7 @@ class SqliteSosMessageRepository implements SosMessageRepository {
           'received_from_peer_id',
           'received_transport',
           'transfer_id',
+          'hop_count',
           'responded_at',
           'archived_at',
         ],
