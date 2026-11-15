@@ -69,6 +69,40 @@ void main() {
     expect(await store.hasPinnedIssuer(), isTrue);
   });
 
+  test('removing approval preserves the accepted version and hash', () async {
+    final store = TrustBundleStore();
+    final signer = await TestTrustBundleSigner.create();
+    final now = DateTime.utc(2026, 11, 15);
+    final old = await signer.sign(
+      bundleVersion: 1,
+      issuedAt: now,
+      approvedDevices: [testTrustedDevice()],
+    );
+    final revoked = await signer.sign(
+      bundleVersion: 2,
+      issuedAt: now,
+      revokedDevices: [testTrustedDevice(status: 'revoked')],
+    );
+    final conflicting = await signer.sign(bundleVersion: 2, issuedAt: now);
+    await store.importBundleJson(revoked, now: now);
+    await store.clearBundle();
+
+    final reopened = TrustBundleStore();
+    expect(await reopened.loadBundle(), isNull);
+    await expectLater(
+      reopened.importBundleJson(old, now: now),
+      throwsFormatException,
+    );
+    await expectLater(
+      reopened.importBundleJson(conflicting, now: now),
+      throwsFormatException,
+    );
+    expect(
+      (await reopened.importBundleJson(revoked, now: now)).revokedCount,
+      1,
+    );
+  });
+
   test('rejects unsigned legacy bundles', () async {
     final store = TrustBundleStore();
 

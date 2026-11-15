@@ -295,6 +295,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
   String radio(String value) => switch (value) {
     'bluetooth' || 'ble' => 'Bluetooth (BLE)',
     'wifi_direct' => 'Wi-Fi Direct',
+    'hybrid' => 'Combined discovery',
     'unknown' => 'Not recorded',
     'mock' => 'Simulation',
     _ => value,
@@ -725,7 +726,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                           metric(
                             'Nearby phone searches',
                             rate(result.discoverySuccess, result.discovery),
-                            '${result.discoverySuccess} of ${result.discovery} searches found a nearby phone. Finding a phone does not confirm message delivery.',
+                            '${result.discoverySuccess} of ${result.discovery} searches found a nearby phone. Combined Bluetooth and Wi-Fi Direct searches stay visible with any connection filter.',
                           ),
                           metric(
                             'Backup connection use',

@@ -151,6 +151,34 @@ void main() {
         expect(find.text('1 hop'), findsNothing);
         await tester.tap(transfers);
         await tester.pumpAndSettle();
+        final filters = find.text('Filter technical details');
+        await tester.ensureVisible(filters);
+        await tester.tap(filters);
+        await tester.pumpAndSettle();
+        final connection = find.byKey(const ValueKey('Connection type/null'));
+        await tester.ensureVisible(connection);
+        await tester.tap(connection);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Bluetooth (BLE)').last);
+        await tester.pumpAndSettle();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 250)),
+        );
+        await tester.pumpAndSettle();
+        final discovery = find.text('Discovery and backup connections');
+        await tester.ensureVisible(discovery);
+        await tester.tap(discovery);
+        await tester.pumpAndSettle();
+        expect(
+          find.textContaining('1 of 1 searches found a nearby phone.'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('Combined Bluetooth and Wi-Fi Direct'),
+          findsOneWidget,
+        );
+        await tester.tap(discovery);
+        await tester.pumpAndSettle();
       } else {
         expect(find.text('1 phone imported'), findsOneWidget);
         expect(find.text('Not measured'), findsOneWidget);
@@ -219,6 +247,19 @@ void main() {
 }
 
 const _sosRecords = [
+  AnalysisRecord(
+    'SN-FIXTURE',
+    'responder-fixture',
+    'responder',
+    'session',
+    'discovery_attempts',
+    {
+      'id': 'combined-search',
+      'transport': 'hybrid',
+      'ended_at': '2026-11-11T08:00:00Z',
+      'success': true,
+    },
+  ),
   AnalysisRecord(
     'SN-FIXTURE',
     'sender-fixture',

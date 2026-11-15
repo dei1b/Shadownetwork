@@ -412,6 +412,8 @@ void main() {
     final cardState = tester.state(find.byType(ml.MapLibreMap));
     expect(headerText('ShadowNetwork'), findsOneWidget);
     expect(headerText('Registration available'), findsOneWidget);
+    expect(find.byIcon(Icons.location_pin), findsNothing);
+    expect(find.text('Showing my location'), findsNothing);
     final locate = find.byKey(const ValueKey('locate-me-action'));
     final messages = find.byKey(const ValueKey('messages-action'));
     expect(tester.getSize(locate), tester.getSize(messages));

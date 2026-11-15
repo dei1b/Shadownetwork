@@ -12,15 +12,46 @@ class TrustBundleStore {
   static const _verifiedStateKey = 'shadow_network_verified_trust_state_v2';
   static const _pinnedIssuerKey = 'shadow_network_pinned_trust_issuer_v2';
 
+  static Future<void> _pendingWrite = Future.value();
+
+  Future<T> _serializeWrite<T>(Future<T> Function() action) {
+    final write = _pendingWrite.then((_) => action());
+    _pendingWrite = write.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return write;
+  }
+
+  Map<String, dynamic>? _readVerifiedState(SharedPreferences preferences) {
+    final source = preferences.getString(_verifiedStateKey);
+    if (source == null || source.trim().isEmpty) return null;
+    final decoded = jsonDecode(source);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('Stored trust state is invalid.');
+    }
+    return decoded;
+  }
+
+  int _storedVersion(Map<String, dynamic> state) {
+    final version =
+        state['bundle_version'] ?? (state['bundle'] as Map?)?['bundle_version'];
+    if (version is! int) {
+      throw const FormatException('Stored trust bundle version is invalid.');
+    }
+    return version;
+  }
+
   Future<TrustBundle?> loadBundle() async {
     final preferences = await SharedPreferences.getInstance();
-    final stateSource = preferences.getString(_verifiedStateKey);
-    if (stateSource != null && stateSource.trim().isNotEmpty) {
-      final decoded = jsonDecode(stateSource);
-      if (decoded is! Map || decoded['bundle'] is! Map) {
+    final state = _readVerifiedState(preferences);
+    if (state != null) {
+      if (state['bundle'] == null && state.containsKey('bundle_version')) {
+        return null;
+      }
+      if (state['bundle'] is! Map) {
         throw const FormatException('Stored trust state is invalid.');
       }
-      final state = Map<String, Object?>.from(decoded);
       final bundle = TrustBundle.fromJson(
         Map<String, Object?>.from(state['bundle']! as Map),
       );
@@ -41,7 +72,7 @@ class TrustBundleStore {
     String source, {
     bool allowRollbackForTesting = false,
     DateTime? now,
-  }) async {
+  }) => _serializeWrite(() async {
     final bundle = TrustBundle.fromJsonString(source);
     final preferences = await SharedPreferences.getInstance();
     final importedAt = (now ?? DateTime.now()).toUtc();
@@ -56,11 +87,13 @@ class TrustBundleStore {
       bundleHash: bundleHash,
     );
 
-    await preferences.setString(
+    await _savePreference(
+      preferences,
       _pinnedIssuerKey,
       jsonEncode(bundle.issuer!.toJson()),
     );
-    await preferences.setString(
+    await _savePreference(
+      preferences,
       _verifiedStateKey,
       jsonEncode({
         'bundle': bundle.toJson(),
@@ -70,12 +103,36 @@ class TrustBundleStore {
     );
     await preferences.remove(_legacyBundleKey);
     return verifiedBundle;
-  }
+  });
 
-  Future<void> clearBundle() async {
+  Future<void> clearBundle() => _serializeWrite(() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.remove(_verifiedStateKey);
-    await preferences.remove(_legacyBundleKey);
+    final state = _readVerifiedState(preferences);
+    if (state != null) {
+      // Keep the rollback floor when the user removes the active approval.
+      await _savePreference(
+        preferences,
+        _verifiedStateKey,
+        jsonEncode({
+          'bundle_version': _storedVersion(state),
+          'bundle_hash': state['bundle_hash'],
+        }),
+      );
+    }
+    if (!await preferences.remove(_legacyBundleKey)) {
+      throw StateError('Could not remove the legacy approval.');
+    }
+  });
+
+  Future<void> _savePreference(
+    SharedPreferences preferences,
+    String key,
+    String value,
+  ) async {
+    if (!await preferences.setString(key, value)) {
+      await preferences.reload();
+      throw StateError('Could not save approval state.');
+    }
   }
 
   Future<bool> hasPinnedIssuer() async {
@@ -148,26 +205,19 @@ class TrustBundleStore {
     final bundleHash = sha256
         .convert(utf8.encode(canonicalJsonEncode(bundle.toJson())))
         .toString();
-    final currentStateSource = preferences.getString(_verifiedStateKey);
-    if (currentStateSource != null && currentStateSource.trim().isNotEmpty) {
-      final decoded = jsonDecode(currentStateSource);
-      if (decoded is Map && decoded['bundle'] is Map) {
-        final current = TrustBundle.fromJson(
-          Map<String, Object?>.from(decoded['bundle'] as Map),
+    final current = _readVerifiedState(preferences);
+    if (current != null) {
+      final currentVersion = _storedVersion(current);
+      if (!allowRollbackForTesting && bundle.bundleVersion < currentVersion) {
+        throw FormatException(
+          'Trust bundle rollback rejected. Current version is $currentVersion.',
         );
-        final currentHash = decoded['bundle_hash'] as String?;
-        if (!allowRollbackForTesting &&
-            bundle.bundleVersion < current.bundleVersion) {
-          throw FormatException(
-            'Trust bundle rollback rejected. Current version is ${current.bundleVersion}.',
-          );
-        }
-        if (bundle.bundleVersion == current.bundleVersion &&
-            currentHash != bundleHash) {
-          throw const FormatException(
-            'A different bundle with the same version was rejected.',
-          );
-        }
+      }
+      if (bundle.bundleVersion == currentVersion &&
+          current['bundle_hash'] != bundleHash) {
+        throw const FormatException(
+          'A different bundle with the same version was rejected.',
+        );
       }
     }
     return bundleHash;

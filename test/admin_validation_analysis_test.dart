@@ -151,6 +151,86 @@ void main() {
     expect(wifi.failed, 0);
     expect(calculate(records).failed, 1);
   });
+  test('receipt moderation changes preserve delivery and timing', () {
+    AnalysisRecord receipt(String moderation, {String transfer = 'original'}) =>
+        AnalysisRecord('run', 'target', 'responder', 's', 'sos_receipts', {
+          'message_hash': 'hash',
+          'created_at': '2026-11-11T00:00:00Z',
+          'received_at': '2026-11-11T00:00:01Z',
+          'transfer_id': transfer,
+          'moderation_status': moderation,
+        });
+    final queued = event('queued', 'sosQueued', device: 'sender');
+    final original = receipt('normal');
+    final updated = receipt('spam');
+    for (final snapshots in [
+      [original, updated],
+      [updated, original],
+    ]) {
+      final result = calculate([queued, ...snapshots]);
+      expect(result.sosConfirmed, 1);
+      expect(result.receipts, hasLength(1));
+      expect(result.propagation.values, [1000]);
+      expect(result.issues, isNot(contains('1 conflicting records excluded.')));
+    }
+    final conflict = calculate([
+      queued,
+      original,
+      receipt('spam', transfer: 'different'),
+    ]);
+    expect(conflict.sosConfirmed, 0);
+    expect(conflict.issues, contains('1 conflicting records excluded.'));
+  });
+
+  test(
+    'connection filters retain combined searches within phone and dates',
+    () {
+      AnalysisRecord search(
+        String id,
+        String radio, {
+        String device = 'a',
+        int hour = 1,
+      }) => AnalysisRecord(
+        'run',
+        device,
+        'responder',
+        's',
+        'discovery_attempts',
+        {
+          'id': id,
+          'transport': radio,
+          'ended_at': DateTime.utc(2026, 11, 11, hour).toIso8601String(),
+          'success': true,
+        },
+      );
+      final combined = search('combined', 'hybrid');
+      final records = [
+        combined,
+        search('bluetooth-search', 'bluetooth'),
+        search('outside-window', 'hybrid', hour: 0),
+        search('other-phone', 'hybrid', device: 'b'),
+        event('ble-send', 'envelopeSent', hour: 1),
+        event('wifi-send', 'envelopeSent', hour: 1, radio: 'wifi_direct'),
+      ];
+      for (final radio in ['bluetooth', 'wifi_direct']) {
+        final result = calculate(
+          records,
+          filter: ValidationAnalysisFilter(
+            run: 'run',
+            device: 'a',
+            transport: radio,
+            start: DateTime.utc(2026, 11, 11, 1),
+          ),
+        );
+        final count = radio == 'bluetooth' ? 2 : 1;
+        expect(result.discovery, count);
+        expect(result.discoverySuccess, count);
+        expect(result.records, contains(combined));
+        expect(result.transports, {radio: 1});
+      }
+    },
+  );
+
   test('earliest valid receipt wins over invalid ordering', () {
     AnalysisRecord receipt(String received) =>
         AnalysisRecord('run', 'a', 'responder', 's', 'sos_receipts', {

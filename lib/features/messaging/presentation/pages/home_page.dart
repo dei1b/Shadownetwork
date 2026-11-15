@@ -184,6 +184,12 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _startFollowing({bool showError = true}) async {
     final canLocate = await _ensureLocationReady(showError: showError);
     if (!canLocate) {
+      if (mounted) {
+        setState(() {
+          _isFollowing = false;
+          _myPosition = null;
+        });
+      }
       return;
     }
 
@@ -202,21 +208,27 @@ class _HomePageState extends ConsumerState<HomePage> {
             accuracy: LocationAccuracy.high,
             distanceFilter: 5,
           ),
-        ).listen((position) {
-          final myPoint = LatLng(position.latitude, position.longitude);
-          if (!mounted) {
-            return;
-          }
+        ).listen(
+          (position) {
+            final myPoint = LatLng(position.latitude, position.longitude);
+            if (!mounted) {
+              return;
+            }
 
-          setState(() {
-            _myPosition = myPoint;
-            _currentCenter = myPoint;
-          });
+            setState(() {
+              _myPosition = myPoint;
+              if (_isFollowing) _currentCenter = myPoint;
+            });
 
-          if (_isFollowing) {
-            _moveMap(myPoint, _currentZoom);
-          }
-        });
+            if (_isFollowing) {
+              _moveMap(myPoint, _currentZoom);
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!mounted) return;
+            setState(() => _myPosition = null);
+          },
+        );
   }
 
   Future<LatLng?> _locateMe({bool showError = true}) async {
@@ -224,7 +236,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       return null;
     }
 
-    setState(() => _isLocating = true);
+    setState(() {
+      _isLocating = true;
+      _myPosition = null;
+    });
     try {
       final canLocate = await _ensureLocationReady(showError: showError);
       if (!mounted) return null;
@@ -2255,10 +2270,10 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   if (showPeers)
                     ..._peerMarkersFromPeers(peers, markerSize: markerSize),
-                  if (showMyLocation)
+                  if (showMyLocation && _myPosition != null)
                     _MapOverlayMarker(
                       id: 'my-location',
-                      point: _myPosition ?? _currentCenter,
+                      point: _myPosition!,
                       width: locationMarkerSize,
                       height: locationMarkerSize,
                       child: Icon(
@@ -2816,7 +2831,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   labelColor: const Color(0xFFE83C3D),
                   subtitle: _isLocating
                       ? 'Locating...'
-                      : (_isFollowing
+                      : (_myPosition != null
                             ? 'Showing my location'
                             : 'Show my location'),
                   onTap: () => _startFollowing(),

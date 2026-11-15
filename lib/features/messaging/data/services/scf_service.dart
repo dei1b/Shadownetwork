@@ -257,9 +257,14 @@ class ScfService {
             OR statuses.status IN (?, ?)
           )
         ORDER BY
-          CASE WHEN messages.payload_type = 'sos_message' THEN 0 ELSE 1 END,
-          CASE WHEN messages.payload_type = 'sos_message'
-            AND COALESCE(statuses.attempt_count, 0) = 0 THEN 0 ELSE 1 END,
+          CASE
+            WHEN COALESCE(statuses.attempt_count, 0) = 0
+              AND messages.payload_type = 'sos_message' THEN 0
+            WHEN COALESCE(statuses.attempt_count, 0) = 0 THEN 1
+            ELSE 2
+          END,
+          CASE WHEN COALESCE(statuses.attempt_count, 0) > 0
+            THEN statuses.updated_at END ASC,
           CASE WHEN messages.payload_type = 'sos_message'
             THEN messages.received_at END DESC,
           messages.received_at ASC, messages.message_hash ASC

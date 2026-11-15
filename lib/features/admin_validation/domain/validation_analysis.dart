@@ -158,12 +158,14 @@ class ValidationAnalysisCalculator {
       final key = '${r.device}/${r.session}/${r.kind}/$id';
       final old = unique[key];
       if (old != null) {
-        // A later duplicate can change only the stored hop field in old exports.
         final previous = Map.of(old.data);
         final current = Map.of(r.data);
         if (r.kind == 'sos_receipts') {
-          previous.remove('hop_count');
-          current.remove('hop_count');
+          // Later snapshots can update moderation and the legacy stored hop.
+          for (final receipt in [previous, current]) {
+            receipt.remove('hop_count');
+            receipt.remove('moderation_status');
+          }
         }
         if (canonicalJsonEncode(previous) != canonicalJsonEncode(current)) {
           conflicts.add(key);
@@ -189,7 +191,11 @@ class ValidationAnalysisCalculator {
     final all = unique.values.where(owner).toList();
     final selected = all
         .where(
-          (r) => window(r) && (r.kind == 'battery_samples' || transport(r)),
+          (r) =>
+              window(r) &&
+              (r.kind == 'battery_samples' ||
+                  (r.kind == 'discovery_attempts' && r.transport == 'hybrid') ||
+                  transport(r)),
         )
         .toList();
     String attempt(AnalysisRecord r) => '${r.device}/${r.transfer}';

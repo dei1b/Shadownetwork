@@ -166,6 +166,48 @@ void main() {
     expect(status?.attemptCount, 2);
   });
 
+  test(
+    'new SOS goes first and a chat gets a slot ahead of failed SOS retries',
+    () async {
+      await openService();
+      final now = DateTime.utc(2026, 5, 2, 5);
+      const peer = 'peer-2';
+      for (var i = 0; i < 3; i++) {
+        final older = _message().copyWith(id: 'old-$i');
+        await service.storeMessage(older, receivedAt: now);
+        await service.prepareOutboundForPeer(peer, now: now, limit: 1);
+        await service.updatePeerStatus(
+          messageHash: SosMessagePayload.messageHash(older),
+          peerId: peer,
+          status: ScfPeerStatus.failed,
+          updatedAt: now,
+        );
+      }
+      await service.storeChatMessage(
+        ChatMessage(
+          id: 'chat',
+          conversationId: 'thread',
+          sender: _message().sender,
+          recipient: _message().sender.copyWith(id: peer),
+          body: 'Reply',
+          status: MessageStatus.queued,
+          createdAt: now,
+        ),
+        receivedAt: now,
+      );
+      final fresh = _message().copyWith(id: 'fresh');
+      await service.storeMessage(fresh, receivedAt: now);
+      final batch = await service.prepareOutboundForPeer(
+        peer,
+        now: now,
+        limit: 3,
+      );
+      expect(batch.first.messageHash, SosMessagePayload.messageHash(fresh));
+      expect(batch[1].payloadType, ChatMessagePayload.payloadType);
+      expect(batch.last.payloadType, 'sos_message');
+    },
+  );
+
   test('retries interrupted offers after reopening SQLite', () async {
     final directory = await Directory.systemTemp.createTemp('scf-restart-');
     final databasePath = path.join(directory.path, 'messages.db');
