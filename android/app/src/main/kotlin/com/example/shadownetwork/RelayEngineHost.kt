@@ -12,7 +12,7 @@ internal object RelayEngineHost {
     private var transport: AndroidTransportBridge? = null
     private var validationSharing: ValidationBundleShareBridge? = null
 
-    fun getOrCreate(context: Context): FlutterEngine {
+    fun getOrCreate(context: Context, resumeRelay: Boolean = false): FlutterEngine {
         engine?.let { return it }
         val created = FlutterEngine(context.applicationContext)
         engine = created
@@ -28,7 +28,10 @@ internal object RelayEngineHost {
         val notifications = IncomingMessageNotificationBridge(context.applicationContext)
         MethodChannel(created.dartExecutor.binaryMessenger, "shadow_network/incoming_notifications")
             .setMethodCallHandler(notifications::handle)
-        created.dartExecutor.executeDartEntrypoint(DartExecutor.DartEntrypoint.createDefault())
+        created.dartExecutor.executeDartEntrypoint(
+            DartExecutor.DartEntrypoint.createDefault(),
+            if (resumeRelay) listOf("--resume-relay") else emptyList(),
+        )
         return created
     }
 

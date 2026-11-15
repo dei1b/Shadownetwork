@@ -24,12 +24,15 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(relayRuntimeProvider.notifier).setBackground(false);
+      if (!mounted) return;
+      final isVisible =
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+      ref.read(relayRuntimeProvider.notifier).setBackground(!isVisible);
       ref.read(relayRuntimeProvider.notifier).start();
       unawaited(
         ref
             .read(validationSessionProvider.notifier)
-            .recordRuntimeMode('foreground'),
+            .recordRuntimeMode(isVisible ? 'foreground' : 'background'),
       );
     });
   }

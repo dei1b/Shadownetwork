@@ -11,6 +11,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 class RelayForegroundService : Service() {
     override fun onCreate() {
@@ -30,10 +31,27 @@ class RelayForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        startForeground(NOTIFICATION_ID, buildNotification())
-        // A sticky service restart also rebuilds Dart, SQLite, signature checks and the relay queue.
-        RelayEngineHost.getOrCreate(applicationContext)
+        if (intent == null && !wasEnabled(this)) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        if (!isForeground) {
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+                isForeground = true
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "Could not bring relay service to the foreground", error)
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+        }
+        RelayEngineHost.getOrCreate(applicationContext, resumeRelay = true)
         return START_STICKY
+    }
+
+    override fun onDestroy() {
+        isForeground = false
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -82,14 +100,17 @@ class RelayForegroundService : Service() {
     }
 
     companion object {
+        private const val TAG = "ShadowRelayService"
         private const val CHANNEL_ID = "shadow_network_relay"
         private const val NOTIFICATION_ID = 4208
         private const val ACTION_STOP = "com.example.shadownetwork.action.STOP_RELAY"
+        private var isForeground = false
 
         fun wasEnabled(context: Context): Boolean =
             context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE).getBoolean("enabled", false)
 
         fun start(context: Context): Boolean {
+            if (isForeground) return true
             val intent = Intent(context, RelayForegroundService::class.java)
             return runCatching {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -98,7 +119,7 @@ class RelayForegroundService : Service() {
                     context.startService(intent)
                 }
                 context.getSharedPreferences("relay_runtime", Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
-            }.isSuccess
+            }.onFailure { Log.w(TAG, "Could not request relay service startup", it) }.isSuccess
         }
 
         fun stop(context: Context) {

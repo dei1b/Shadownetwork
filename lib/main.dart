@@ -11,7 +11,7 @@ import 'features/messaging/presentation/providers/local_messaging_providers.dart
 import 'features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'features/validation/presentation/providers/validation_session_provider.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final container = ProviderContainer();
@@ -24,7 +24,11 @@ Future<void> main() async {
           container.read(deviceIdentityStoreProvider),
         )
       : null;
-  final initialization = _initializeApp(container, firstRunGuide);
+  final initialization = _initializeApp(
+    container,
+    firstRunGuide,
+    resumeRelay: isMobile && args.contains('--resume-relay'),
+  );
   runApp(
     UncontrolledProviderScope(
       container: container,
@@ -38,25 +42,10 @@ Future<void> main() async {
 
 Future<void> _initializeApp(
   ProviderContainer container,
-  Future<bool>? firstRunGuide,
-) async {
-  try {
-    await Firebase.initializeApp();
-  } catch (error) {
-    debugPrint('Firebase init warning: $error');
-  }
-
-  // On a fresh install, AppShellPage starts the relay after the guide so
-  // Android permission dialogs don't interrupt the introduction.
-  if (await firstRunGuide != true) {
-    unawaited(
-      container.read(relayRuntimeProvider.notifier).start().catchError((
-        Object error,
-      ) {
-        debugPrint('Relay startup warning: $error');
-      }),
-    );
-  }
+  Future<bool>? firstRunGuide, {
+  required bool resumeRelay,
+}) async {
+  unawaited(_startRelay(container, firstRunGuide, resumeRelay: resumeRelay));
   unawaited(
     container
         .read(validationSessionProvider.future)
@@ -69,4 +58,26 @@ Future<void> _initializeApp(
           debugPrint('Validation recovery warning: $error');
         }),
   );
+
+  try {
+    await Firebase.initializeApp();
+  } catch (error) {
+    debugPrint('Firebase init warning: $error');
+  }
+}
+
+Future<void> _startRelay(
+  ProviderContainer container,
+  Future<bool>? firstRunGuide, {
+  required bool resumeRelay,
+}) async {
+  try {
+    // A normal first launch waits until the guide finishes before requesting
+    // permissions. A restored service already has permission to run.
+    if (resumeRelay || await firstRunGuide != true) {
+      await container.read(relayRuntimeProvider.notifier).start();
+    }
+  } catch (error) {
+    debugPrint('Relay startup warning: $error');
+  }
 }
