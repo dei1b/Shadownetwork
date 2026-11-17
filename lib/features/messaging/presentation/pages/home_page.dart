@@ -769,7 +769,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _TabHeader(
-          title: _isResponder ? 'Responder dashboard' : 'ShadowNetwork',
+          title: _isResponder ? 'Campus responder dashboard' : 'ShadowNetwork',
           badge: _isResponder
               ? null
               : _TabHeaderBadge(
@@ -819,7 +819,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     ) = switch (profile.level) {
       DeviceAccessLevel.responder => (
         Icons.verified_user_rounded,
-        'VERIFIED RESPONDER',
+        'VERIFIED CAMPUS RESPONDER',
         '${profile.ownerName ?? 'Approved device'} - responder tools enabled',
         const Color(0xFFEAF6EF),
         const Color(0xFF23613D),
@@ -827,14 +827,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       DeviceAccessLevel.revoked => (
         Icons.block_rounded,
         'DEVICE REVOKED',
-        'Responder access is disabled. Contact the administrator.',
+        'Campus responder access is disabled. Contact the administrator.',
         const Color(0xFF7D1A1A),
         Colors.white,
       ),
       DeviceAccessLevel.keyMismatch => (
         Icons.key_off_rounded,
         'PHONE NEEDS TO BE REGISTERED AGAIN',
-        'Show your registration code to the barangay admin to restore responder access.',
+        'Show your registration code to the campus administrator to restore campus responder access.',
         const Color(0xFFFFE4E1),
         const Color(0xFF8B1E1E),
       ),
@@ -1278,7 +1278,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final filters = const [
       (label: 'All Peers', icon: Icons.groups_rounded),
       (label: 'Connected', icon: Icons.link_rounded),
-      (label: 'Rescuers', icon: Icons.health_and_safety_outlined),
+      (label: 'Campus responders', icon: Icons.health_and_safety_outlined),
       (label: 'On map', icon: Icons.location_on_outlined),
     ];
 
@@ -1978,9 +1978,9 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String _peerTypeLabel(messaging.Peer peer) {
     return switch (peer.type) {
-      messaging.PeerType.responder || messaging.PeerType.authority => 'Rescuer',
+      messaging.PeerType.responder || messaging.PeerType.authority => 'Campus responder',
       messaging.PeerType.relay => 'Relay',
-      messaging.PeerType.civilian => 'User',
+      messaging.PeerType.civilian => 'Student',
       messaging.PeerType.unknown => 'User',
     };
   }
@@ -3370,7 +3370,7 @@ class _PeerStatsPanel extends StatelessWidget {
             child: _PeerMetric(
               icon: Icons.health_and_safety_rounded,
               count: rescuerCount,
-              label: 'Rescuers',
+              label: 'Campus responders',
               subtitle: 'Available',
               color: Color(0xFF15A832),
             ),
@@ -4054,7 +4054,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                     child: _ReceiverDropdownOption(
                       title: 'Broadcast to rescuers',
                       subtitle: 'For all approved rescuers',
-                      roleLabel: 'Rescuers',
+                      roleLabel: 'Campus responders',
                       icon: Icons.campaign_rounded,
                     ),
                   ),
@@ -4075,7 +4075,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                     const _ReceiverDropdownOption(
                       title: 'Broadcast',
                       subtitle: 'Approved rescuers',
-                      roleLabel: 'Rescuers',
+                      roleLabel: 'Campus responders',
                       icon: Icons.campaign_rounded,
                       compact: true,
                     ),
@@ -4721,10 +4721,10 @@ class _PeerDirectoryCard extends StatelessWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          typeLabel == 'Rescuer'
+                          typeLabel == 'Campus responder'
                               ? Icons.health_and_safety_outlined
                               : Icons.person_outline_rounded,
-                          color: typeLabel == 'Rescuer'
+                          color: typeLabel == 'Campus responder'
                               ? const Color(0xFFE83C3D)
                               : const Color(0xFF5F5F5F),
                           size: 16,

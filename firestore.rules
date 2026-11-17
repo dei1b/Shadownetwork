@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function validText(value, max, required) {
+      return value is string && value.size() <= max
+        && (!required || value.size() > 0);
+    }
+
+    function reviewer() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
+    function review(uid, before, after) {
+      let history = before.get('reviewHistory', []);
+      let revision = before.get('revision', 0) + 1;
+      let decision = after.reviewHistory[history.size()];
+      return reviewer() && request.auth.uid != uid && before.status == 'submitted'
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'revision', 'reviewHistory', 'publicationStatus'
+        ])
+        && after.status in ['approved_pending_publication', 'changes_requested', 'rejected']
+        && after.revision == revision
+        && after.publicationStatus == (after.status == 'approved_pending_publication' ? 'pending' : 'none')
+        && decision.keys().hasOnly(['reviewerUid', 'status', 'reason', 'revision', 'role'])
+        && decision.reviewerUid == request.auth.uid
+        && decision.status == after.status && decision.revision == revision
+        && (!('role' in decision) ||
+          (after.status == 'approved_pending_publication' && decision.role in ['civilian', 'responder']))
+        && validText(decision.reason, 500, after.status != 'approved_pending_publication')
+        && after.reviewHistory == history.concat([decision]);
+    }
+
+    function correct(uid, before, after) {
+      return request.auth != null && request.auth.uid == uid
+        && before.status == 'changes_requested' && after.status == 'submitted'
+        && after.revision == before.revision + 1
+        && after.diff(before).affectedKeys().hasOnly([
+          'displayName', 'studentNumber', 'courseYear', 'phone', 'address', 'status', 'revision'
+        ])
+        && validText(after.displayName, 100, true)
+        && validText(after.studentNumber, 100, true)
+        && validText(after.courseYear, 100, true)
+        && validText(after.phone, 100, false)
+        && validText(after.address, 200, false);
+    }
+
+    function published(uid, before, after) {
+      let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
+      return reviewer() && request.auth.uid != uid
+        && before.status == 'approved_pending_publication'
+        && after.status == 'published' && after.publicationStatus == 'published'
+        && after.diff(before).affectedKeys().hasOnly(['status', 'publicationStatus'])
+        && snapshot.applicationUid == uid
+        && snapshot.publishedAt == request.time;
+    }
+
+    function directoryWrite(data) {
+      let uid = data.applicationUid;
+      let application = /databases/$(database)/documents/pilotApplications/$(uid);
+      return reviewer() && request.auth.uid != uid
+        && data.keys().hasOnly(['applicationUid', 'version', 'bundle', 'publishedAt'])
+        && validText(data.bundle, 250000, true)
+        && data.version is int && data.version > 0 && data.publishedAt == request.time
+        && get(application).data.status == 'approved_pending_publication'
+        && getAfter(application).data.status == 'published';
+    }
+
+    match /trustDirectory/current {
+      allow get: if reviewer() || (request.auth != null &&
+        get(/databases/$(database)/documents/pilotApplications/$(request.auth.uid)).data.status == 'published');
+      allow create: if directoryWrite(request.resource.data);
+      allow update: if request.resource.data.version > resource.data.version
+        && directoryWrite(request.resource.data);
+    }
+
+    match /pilotApplications/{uid} {
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'displayName', 'studentNumber', 'courseYear', 'phone', 'address',
+          'deviceRegistration', 'status'
+        ])
+        && validText(request.resource.data.displayName, 100, true)
+        && validText(request.resource.data.studentNumber, 100, true)
+        && validText(request.resource.data.courseYear, 100, true)
+        && validText(request.resource.data.phone, 100, false)
+        && validText(request.resource.data.address, 200, false)
+        && validText(request.resource.data.deviceRegistration, 4096, true)
+        && request.resource.data.status == 'submitted';
+      allow get: if request.auth != null
+        && (request.auth.uid == uid
+          || reviewer());
+      allow list: if reviewer();
+      allow update: if review(uid, resource.data, request.resource.data)
+        || correct(uid, resource.data, request.resource.data)
+        || published(uid, resource.data, request.resource.data);
+    }
+  }
+}

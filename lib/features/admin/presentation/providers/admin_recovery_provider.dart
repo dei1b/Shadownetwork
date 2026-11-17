@@ -17,7 +17,7 @@ class AdminRegistryRevision extends Notifier<int> {
   @override
   int build() => 0;
 
-  void didRestore() => state++;
+  void registryChanged() => state++;
 }
 
 final adminRecoveryProvider =
@@ -51,7 +51,7 @@ class AdminRecoveryController extends AsyncNotifier<AdminIdentityStatus> {
   Future<void> restoreBackup(String source, String password) async {
     final repository = await ref.read(desktopAdminRegistryProvider.future);
     await repository.restoreEncryptedBackup(source, password);
-    ref.read(adminRegistryRevisionProvider.notifier).didRestore();
+    ref.read(adminRegistryRevisionProvider.notifier).registryChanged();
     await refresh();
   }
 }

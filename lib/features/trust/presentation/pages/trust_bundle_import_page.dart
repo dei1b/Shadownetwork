@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import '../../../registration/data/pilot_registration.dart';
+import '../../../registration/presentation/pilot_registration_page.dart';
 
 import '../../../messaging/domain/entities/peer.dart';
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
@@ -336,6 +338,8 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _TrustHeader(bundle: _bundle),
+                    if (pilotRegistrationEnabled)
+                      const PilotRegistrationEntry(),
                     const SizedBox(height: 18),
                     const UserInformationForm(),
                     const SizedBox(height: 24),

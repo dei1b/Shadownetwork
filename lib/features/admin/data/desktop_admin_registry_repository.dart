@@ -204,16 +204,71 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
 
   @override
   Future<String> buildTrustBundleJson(
+    List<RegisteredDevice> devices, {
+    String? directoryProject,
+    int minimumPreviousVersion = 0,
+  }) => _serialized(
+    () => _buildTrustBundleJson(
+      devices,
+      directoryProject,
+      minimumPreviousVersion,
+    ),
+  );
+
+  Future<String> stageDirectoryApproval(
+    RegisteredDevice device,
+    String project,
+    int previousVersion, {
+    bool assignRole = false,
+  }) => _serialized(() async {
+    final devices = await _loadDevices();
+    final index = devices.indexWhere(
+      (entry) => entry.deviceId.toLowerCase() == device.deviceId.toLowerCase(),
+    );
+    if (index < 0) {
+      devices.add(device);
+    } else {
+      final existing = devices[index];
+      if (existing.publicKey != device.publicKey ||
+          existing.signingPublicKey != device.signingPublicKey ||
+          existing.status == RegisteredDeviceStatus.revoked) {
+        throw StateError(
+          'The device conflicts with the local registry. Resolve it in Devices first.',
+        );
+      }
+      devices[index] = existing.copyWith(
+        status: RegisteredDeviceStatus.approved,
+        role: assignRole ? device.role : existing.role,
+        updatedAt: device.updatedAt,
+      );
+    }
+    final source = await _buildTrustBundleJson(
+      devices,
+      project,
+      previousVersion,
+    );
+    await database.transaction(
+      (transaction) => _replaceDevices(transaction, devices),
+    );
+    return source;
+  });
+
+  Future<String> _buildTrustBundleJson(
     List<RegisteredDevice> devices,
-  ) => _serialized(() async {
+    String? directoryProject,
+    int minimumPreviousVersion,
+  ) async {
     final validated = _decodeDevices(
       devices.map((device) => device.toJson()).toList(),
     );
     final identity = await _requireIdentity();
     final metadataBeforeReservation = (await _metadata())!;
     final effectiveCurrent = max(
-      metadataBeforeReservation['bundle_version']! as int,
-      identity.bundleVersion,
+      minimumPreviousVersion,
+      max(
+        metadataBeforeReservation['bundle_version']! as int,
+        identity.bundleVersion,
+      ),
     );
     if (effectiveCurrent >= _maxVersion) {
       throw StateError('Trust bundle version limit reached.');
@@ -240,6 +295,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       generatedAt: now,
       issuedAt: now,
       expiresAt: now.add(const Duration(days: 30)),
+      directoryProject: directoryProject,
       issuer: TrustBundleIssuer(
         issuerId: 'shadow-network-admin',
         signingKeyId: 'ed25519-${identity.fingerprint.substring(0, 16)}',
@@ -265,7 +321,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       ...unsigned.toJson(includeSignature: false),
       'signature': base64UrlEncode(signature.bytes),
     });
-  });
+  }
 
   Future<String> createEncryptedBackup(String password) =>
       _serialized(() async {

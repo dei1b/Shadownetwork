@@ -87,7 +87,7 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
                     'bluetooth' => 'Bluetooth (BLE)',
                     'civilian' => 'Resident',
                     'relay' => 'Relay phone',
-                    'responder' => 'Responder',
+                    'responder' => 'Campus responder',
                     'admin' => 'Administrator',
                     'message_events' => 'Message activity',
                     'sos_receipts' => 'Received SOS alerts',

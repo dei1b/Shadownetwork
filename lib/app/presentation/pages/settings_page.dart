@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/widgets/action_feedback.dart';
+import '../../../features/registration/data/pilot_registration.dart';
+import '../../../features/registration/presentation/pilot_registration_page.dart';
 import '../../../features/trust/presentation/providers/device_access_provider.dart';
 import '../../../features/validation/presentation/providers/field_test_settings_provider.dart';
 import '../../../features/validation/presentation/providers/validation_session_provider.dart';
@@ -17,6 +19,7 @@ class SettingsPage extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          if (pilotRegistrationEnabled) const PilotRegistrationEntry(),
           ExpansionTile(
             leading: const Icon(Icons.tune_rounded),
             title: const Text('Advanced'),

@@ -72,9 +72,35 @@ class TrustBundleStore {
     String source, {
     bool allowRollbackForTesting = false,
     DateTime? now,
+    String? directoryProject,
+    String? issuerFingerprint,
   }) => _serializeWrite(() async {
     final bundle = TrustBundle.fromJsonString(source);
     final preferences = await SharedPreferences.getInstance();
+    if (directoryProject != null) {
+      if (bundle.directoryProject != directoryProject ||
+          bundle.issuer == null) {
+        throw const FormatException(
+          'This trust directory belongs to another project.',
+        );
+      }
+      if (issuerFingerprint != null && issuerFingerprint.isNotEmpty) {
+        final publicKey = _decodeBase64Url(
+          bundle.issuer!.publicKey,
+          fieldName: 'issuer public key',
+        );
+        if (sha256.convert(publicKey).toString() !=
+            issuerFingerprint.toLowerCase()) {
+          throw const FormatException(
+            'The trust directory signer does not match the campus key.',
+          );
+        }
+      } else if (preferences.getString(_pinnedIssuerKey)?.isNotEmpty != true) {
+        throw const FormatException(
+          'A trusted campus signing key is required.',
+        );
+      }
+    }
     final importedAt = (now ?? DateTime.now()).toUtc();
     final bundleHash = await _verifyBundle(
       bundle,

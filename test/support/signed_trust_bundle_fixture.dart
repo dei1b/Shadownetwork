@@ -34,6 +34,7 @@ class TestTrustBundleSigner {
     List<TrustedDevice> approvedDevices = const [],
     List<TrustedDevice> revokedDevices = const [],
     Duration validity = const Duration(days: 30),
+    String? directoryProject,
   }) async {
     final unsignedBundle = TrustBundle(
       schemaVersion: 2,
@@ -41,6 +42,7 @@ class TestTrustBundleSigner {
       generatedAt: issuedAt,
       issuedAt: issuedAt,
       expiresAt: issuedAt.add(validity),
+      directoryProject: directoryProject,
       issuer: TrustBundleIssuer(
         issuerId: issuerId,
         signingKeyId:
@@ -67,6 +69,7 @@ class TestTrustBundleSigner {
       approvedDevices: unsignedBundle.approvedDevices,
       revokedDevices: unsignedBundle.revokedDevices,
       signature: base64UrlEncode(signature.bytes),
+      directoryProject: directoryProject,
     ).toPrettyJson();
   }
 }

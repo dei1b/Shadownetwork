@@ -227,7 +227,7 @@ void main() {
         ),
       ),
     );
-    expect(headerText('Responder dashboard'), findsOneWidget);
+    expect(headerText('Campus responder dashboard'), findsOneWidget);
     expect(find.byTooltip('Settings'), findsOneWidget);
     expect(find.text('VALIDATION TEST'), findsNothing);
     expect(find.text('Checking for SOS alerts…'), findsOneWidget);

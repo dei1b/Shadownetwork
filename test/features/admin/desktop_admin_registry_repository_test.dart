@@ -69,6 +69,25 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('an assigned online role is signed for the existing phone', () async {
+    await repository.initializeIdentity();
+    final student = device().copyWith(role: RegisteredDeviceRole.civilian);
+    await repository.saveDevices([student]);
+    final source = await repository.stageDirectoryApproval(
+      student.copyWith(role: RegisteredDeviceRole.responder),
+      'campus-demo',
+      0,
+      assignRole: true,
+    );
+    final trust = await TrustBundleStore().importBundleJson(source);
+    expect(trust.approvedDevices.single.deviceId, student.deviceId);
+    expect(trust.approvedDevices.single.role, 'responder');
+    expect(
+      (await repository.loadDevices()).single.role,
+      RegisteredDeviceRole.responder,
+    );
+  });
+
   test(
     'fresh registry requires explicit identity creation before publishing',
     () async {

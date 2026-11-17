@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,55 @@ void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
+
+  test(
+    'online bootstrap requires the expected campus signer and project',
+    () async {
+      final store = TrustBundleStore();
+      final signer = await TestTrustBundleSigner.create();
+      final now = DateTime.utc(2026, 11, 17);
+      final source = await signer.sign(
+        bundleVersion: 1,
+        issuedAt: now,
+        directoryProject: 'campus-project',
+      );
+      final fingerprint = sha256.convert(signer.publicKeyBytes).toString();
+      await expectLater(
+        store.importBundleJson(
+          source,
+          now: now,
+          directoryProject: 'campus-project',
+        ),
+        throwsFormatException,
+      );
+      await expectLater(
+        store.importBundleJson(
+          source,
+          now: now,
+          directoryProject: 'other-project',
+          issuerFingerprint: fingerprint,
+        ),
+        throwsFormatException,
+      );
+      await expectLater(
+        store.importBundleJson(
+          source,
+          now: now,
+          directoryProject: 'campus-project',
+          issuerFingerprint: 'wrong',
+        ),
+        throwsFormatException,
+      );
+      final verified = await store.importBundleJson(
+        source,
+        now: now,
+        directoryProject: 'campus-project',
+        issuerFingerprint: fingerprint,
+      );
+      expect(verified.isSignatureVerified, isTrue);
+      expect((await store.loadBundle())?.directoryProject, 'campus-project');
+    },
+  );
 
   test('imports and persists a valid trust bundle', () async {
     final store = TrustBundleStore();

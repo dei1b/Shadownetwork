@@ -74,10 +74,10 @@ class _ChatRecipientPageState extends ConsumerState<ChatRecipientPage> {
                                 .trim()
                                 .toLowerCase()) {
                               'rescuer' ||
-                              'responder' => (PeerType.responder, 'Rescuer'),
+                              'responder' => (PeerType.responder, 'Campus responder'),
                               'relay' => (PeerType.relay, 'Relay'),
                               'admin' => (PeerType.authority, 'Admin'),
-                              _ => (PeerType.civilian, 'Civilian'),
+                              _ => (PeerType.civilian, 'Student'),
                             };
                             return ListTile(
                               leading: Icon(

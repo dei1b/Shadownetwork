@@ -6,6 +6,7 @@ import '../../../admin_validation/presentation/desktop_validation_import_panel.d
 import '../../../admin_validation/presentation/providers/validation_import_provider.dart';
 import '../providers/admin_recovery_provider.dart';
 import '../widgets/admin_recovery_panel.dart';
+import '../widgets/registration_review_panel.dart';
 import 'browser_admin_dashboard_page.dart';
 import '../theme/admin_theme.dart';
 
@@ -17,6 +18,7 @@ class DesktopAdminShell extends ConsumerStatefulWidget {
 
 class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
   int _selected = 0;
+  int _deviceView = 0;
   final _files = DesktopFileDialogs();
   void _select(int index) {
     setState(() => _selected = index);
@@ -40,42 +42,78 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
       data: (repository) => IndexedStack(
         index: _selected,
         children: [
-          BrowserAdminDashboardPage(
-            key: ValueKey(
-              '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
-            ),
-            registry: repository,
-            desktopMode: true,
-            validationPanel: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 0,
+                        label: Text('Registered devices'),
+                      ),
+                      ButtonSegment(value: 1, label: Text('Requests')),
+                    ],
+                    selected: {_deviceView},
+                    onSelectionChanged: (selection) =>
+                        setState(() => _deviceView = selection.single),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _deviceView,
                   children: [
-                    Text(
-                      'Validation data',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      imports.when(
-                        data: (state) =>
-                            '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
-                        loading: () => 'Loading imported datasets…',
-                        error: (_, _) => 'Unable to load imported datasets.',
+                    BrowserAdminDashboardPage(
+                      key: ValueKey(
+                        '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
+                      ),
+                      registry: repository,
+                      desktopMode: true,
+                      validationPanel: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Validation data',
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                imports.when(
+                                  data: (state) =>
+                                      '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
+                                  loading: () => 'Loading imported datasets…',
+                                  error: (_, _) =>
+                                      'Unable to load imported datasets.',
+                                ),
+                              ),
+                              const Text(
+                                'Import phone exports to review run evidence and data completeness.',
+                              ),
+                              TextButton(
+                                onPressed: () => _select(1),
+                                child: const Text('Open validation data'),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
-                    const Text(
-                      'Import phone exports to review run evidence and data completeness.',
-                    ),
-                    TextButton(
-                      onPressed: () => _select(1),
-                      child: const Text('Open validation data'),
+                    RegistrationReviewPanel(
+                      registry: repository,
+                      onRegistryChanged: () => ref
+                          .read(adminRegistryRevisionProvider.notifier)
+                          .registryChanged(),
                     ),
                   ],
                 ),
               ),
-            ),
+            ],
           ),
           DesktopValidationImportPanel(
             onChooseFiles: _files.chooseValidationFiles,

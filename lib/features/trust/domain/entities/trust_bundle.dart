@@ -11,6 +11,7 @@ class TrustBundle {
     this.expiresAt,
     this.issuer,
     this.signature,
+    this.directoryProject,
     this.importedAt,
     this.bundleHash,
     this.isSignatureVerified = false,
@@ -25,6 +26,7 @@ class TrustBundle {
   final List<TrustedDevice> approvedDevices;
   final List<TrustedDevice> revokedDevices;
   final String? signature;
+  final String? directoryProject;
   final DateTime? importedAt;
   final String? bundleHash;
   final bool isSignatureVerified;
@@ -60,6 +62,7 @@ class TrustBundle {
       'issued_at': (issuedAt ?? generatedAt).toUtc().toIso8601String(),
       'expires_at': expiresAt?.toUtc().toIso8601String(),
       'issuer': issuer?.toJson(),
+      if (directoryProject != null) 'directory_project': directoryProject,
       'approved_devices': approvedDevices
           .map((device) => device.toJson())
           .toList(growable: false),
@@ -88,6 +91,7 @@ class TrustBundle {
       approvedDevices: approvedDevices,
       revokedDevices: revokedDevices,
       signature: signature,
+      directoryProject: directoryProject,
       importedAt: importedAt,
       bundleHash: bundleHash,
       isSignatureVerified: true,
@@ -127,6 +131,7 @@ class TrustBundle {
       approvedDevices: _parseDevices(json['approved_devices']),
       revokedDevices: _parseDevices(json['revoked_devices']),
       signature: json['signature'] as String?,
+      directoryProject: json['directory_project'] as String?,
     );
   }
 

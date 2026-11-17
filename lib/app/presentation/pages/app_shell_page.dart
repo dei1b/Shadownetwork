@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'startup_splash_page.dart';
+import '../../../features/registration/data/pilot_registration.dart';
+import '../../../features/trust/data/services/trust_directory_sync_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +21,28 @@ class AppShellPage extends ConsumerStatefulWidget {
 
 class _AppShellPageState extends ConsumerState<AppShellPage>
     with WidgetsBindingObserver {
+  Timer? _directoryTimer;
+
+  void _startDirectoryRefresh() {
+    if (!pilotRegistrationEnabled || !pilotRegistrationIsLive) return;
+    _directoryTimer?.cancel();
+    void refresh() {
+      if (!mounted) return;
+      unawaited(
+        ref
+            .read(trustDirectorySyncProvider)
+            .refresh()
+            .catchError((Object _) {}),
+      );
+    }
+
+    refresh();
+    _directoryTimer = Timer.periodic(
+      const Duration(minutes: 2),
+      (_) => refresh(),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -27,6 +51,7 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
       if (!mounted) return;
       final isVisible =
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+      if (isVisible) _startDirectoryRefresh();
       ref.read(relayRuntimeProvider.notifier).setBackground(!isVisible);
       ref.read(relayRuntimeProvider.notifier).start();
       unawaited(
@@ -39,15 +64,18 @@ class _AppShellPageState extends ConsumerState<AppShellPage>
 
   @override
   void dispose() {
+    _directoryTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) _directoryTimer?.cancel();
     final controller = ref.read(relayRuntimeProvider.notifier);
     switch (state) {
       case AppLifecycleState.resumed:
+        _startDirectoryRefresh();
         controller.setBackground(false);
         controller.start();
         unawaited(

@@ -7,9 +7,9 @@ enum RegisteredDeviceRole {
   String get label {
     switch (this) {
       case RegisteredDeviceRole.civilian:
-        return 'Civilian';
+        return 'Student';
       case RegisteredDeviceRole.responder:
-        return 'Responder';
+        return 'Campus responder';
       case RegisteredDeviceRole.relay:
         return 'Relay';
       case RegisteredDeviceRole.admin:
