@@ -69,15 +69,25 @@ jobs:
           printf '%s' "${ANDROID_RELEASE_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/shadownetwork-release.jks"
 
       - name: Build release APK
+        shell: bash
         env:
           SHADOW_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/shadownetwork-release.jks
           SHADOW_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
           SHADOW_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
           SHADOW_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-        run: >
-          flutter build apk --release
-          --build-name "${{ steps.app_version.outputs.version_name }}"
-          --build-number "${{ steps.app_version.outputs.build_number }}"
+          DNSC_ISSUER_FINGERPRINT: ${{ vars.DNSC_ISSUER_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$DNSC_ISSUER_FINGERPRINT" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Set DNSC_ISSUER_FINGERPRINT to the public SHA-256 fingerprint from PC Admin Backup & recovery."
+            exit 1
+          fi
+          DNSC_FIREBASE_PROJECT="$(jq -er '.project_info.project_id | select(type == "string" and length > 0)' android/app/google-services.json)"
+          flutter build apk --release \
+            --build-name "${{ steps.app_version.outputs.version_name }}" \
+            --build-number "${{ steps.app_version.outputs.build_number }}" \
+            --dart-define="DNSC_FIREBASE_PROJECT=${DNSC_FIREBASE_PROJECT}" \
+            --dart-define="DNSC_ISSUER_FINGERPRINT=${DNSC_ISSUER_FINGERPRINT}"
 
       - name: Verify permanent signing certificate
         shell: bash

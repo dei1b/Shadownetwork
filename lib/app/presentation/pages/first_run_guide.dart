@@ -9,10 +9,12 @@ class FirstRunGuideGate extends StatefulWidget {
     super.key,
     required this.shouldShow,
     required this.child,
+    this.registrationBuilder,
   });
 
   final Future<bool> shouldShow;
   final Widget child;
+  final Widget Function(VoidCallback onContinue)? registrationBuilder;
 
   @override
   State<FirstRunGuideGate> createState() => _FirstRunGuideGateState();
@@ -56,6 +58,15 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
   int _step = 0;
   bool _saving = false;
   bool _finished = false;
+  bool _showRegistration = false;
+
+  void _finishIntro() {
+    if (widget.registrationBuilder == null) {
+      _finish();
+    } else {
+      setState(() => _showRegistration = true);
+    }
+  }
 
   Future<void> _finish() async {
     if (_saving) return;
@@ -71,6 +82,7 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
   @override
   Widget build(BuildContext context) {
     if (_finished) return widget.child;
+    if (_showRegistration) return widget.registrationBuilder!(_finish);
     return FutureBuilder<bool>(
       future: widget.shouldShow,
       builder: (context, snapshot) {
@@ -141,7 +153,7 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
                               ),
                             ),
                             TextButton(
-                              onPressed: _saving ? null : _finish,
+                              onPressed: _saving ? null : _finishIntro,
                               child: const Text('Skip'),
                             ),
                           ],
@@ -180,7 +192,7 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
                               onPressed: _saving
                                   ? null
                                   : isLast
-                                  ? _finish
+                                  ? _finishIntro
                                   : () => setState(() => _step++),
                               child: Text(isLast ? 'Get started' : 'Next'),
                             ),

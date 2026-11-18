@@ -34,6 +34,13 @@ class SecureSosMessagePayload {
     final basePayload = _basePayload(message, hopCount: message.hopCount);
     if (signingIdentity != null) {
       basePayload['schema_version'] = signedSchemaVersion;
+      final compatibleCategory = _compatibleCategory(message.category);
+      if (compatibleCategory != message.category) {
+        // Older readers use category. The signed detail preserves the exact
+        // category for readers that support it.
+        basePayload['category'] = compatibleCategory.name;
+        basePayload['category_detail'] = message.category.name;
+      }
     }
     final recipient = message.recipient;
     final Map<String, Object?> security;
@@ -111,7 +118,7 @@ class SecureSosMessagePayload {
       recipient: recipient,
       isEncrypted: encrypted,
       body: body,
-      category: Category.values.byName(payload['category']! as String),
+      category: _readCategory(payload),
       status: MessageStatus.received,
       createdAt: DateTime.parse(timestamp['created_at']! as String),
       messageHash: hash,
@@ -174,6 +181,26 @@ class SecureSosMessagePayload {
         ? null
         : _peerPayload(message.recipient!),
   };
+
+  static Category _compatibleCategory(Category category) => switch (category) {
+    Category.fireSmoke || Category.electricalHazard => Category.fireElectrical,
+    Category.accidentInjury => Category.medical,
+    _ => category,
+  };
+
+  static Category _readCategory(Map<String, Object?> payload) {
+    final category = Category.values.byName(payload['category']! as String);
+    if (payload['schema_version'] == signedSchemaVersion) {
+      final detail = payload['category_detail'];
+      for (final candidate in Category.values) {
+        if (candidate.name == detail &&
+            _compatibleCategory(candidate) == category) {
+          return candidate;
+        }
+      }
+    }
+    return category;
+  }
 
   static String _authenticatedData(Map<String, Object?> payload) {
     final routing = payload['routing']! as Map<String, Object?>;

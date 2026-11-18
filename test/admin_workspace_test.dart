@@ -101,7 +101,11 @@ class _RestoringRegistry extends _Registry {
   Future<void> saveDevices(List<RegisteredDevice> devices) async =>
       saved = List.of(devices);
   @override
-  Future<String> buildTrustBundleJson(List<RegisteredDevice> devices) async {
+  Future<String> buildTrustBundleJson(
+    List<RegisteredDevice> devices, {
+    String? directoryProject,
+    int minimumPreviousVersion = 0,
+  }) async {
     publicationIds = devices.map((device) => device.deviceId).toList();
     // Capture the publication boundary without producing a fake signed bundle.
     throw StateError('Publication captured by test');
@@ -121,8 +125,11 @@ class _QrRegistry extends _Registry {
   final String bundle;
 
   @override
-  Future<String> buildTrustBundleJson(List<RegisteredDevice> devices) async =>
-      bundle;
+  Future<String> buildTrustBundleJson(
+    List<RegisteredDevice> devices, {
+    String? directoryProject,
+    int minimumPreviousVersion = 0,
+  }) async => bundle;
 }
 
 void main() {
@@ -397,11 +404,14 @@ void main() {
     (tester) async {
       await mount(tester, const Size(1440, 900));
       expect(find.text('Maria Santos').hitTestable(), findsOneWidget);
-      expect(find.text('Approve').hitTestable(), findsOneWidget);
-      expect(
-        find.text('Paste Phone Registration JSON').hitTestable(),
-        findsOneWidget,
-      );
+      final approve = find.text('Approve');
+      await tester.ensureVisible(approve);
+      await tester.pumpAndSettle();
+      expect(approve.hitTestable(), findsOneWidget);
+      final pasteRegistration = find.text('Paste Phone Registration JSON');
+      await tester.ensureVisible(pasteRegistration);
+      await tester.pumpAndSettle();
+      expect(pasteRegistration.hitTestable(), findsOneWidget);
       await tester.tap(find.text('Validation data').first);
       await tester.pumpAndSettle();
       expect(find.text('Choose JSON files'), findsOneWidget);

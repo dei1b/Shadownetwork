@@ -13,12 +13,22 @@ class ReviewApplication {
         (key, value) => MapEntry(key, _decode(value as Map)),
       );
 
+  ReviewApplication.fromCache({
+    required this.id,
+    required this.updateTime,
+    required this.fields,
+  });
+
   final String id;
   final String updateTime;
   final Map<String, dynamic> fields;
   String get status => fields['status'] as String;
   int get nextRevision => (fields['revision'] as int? ?? 0) + 1;
   List<dynamic> get history => fields['reviewHistory'] as List? ?? [];
+  Map<String, dynamic>? get profileChange {
+    final value = fields['profileChange'];
+    return value is Map ? Map<String, dynamic>.from(value) : null;
+  }
 
   static dynamic _decode(Map value) {
     if (value.containsKey('stringValue')) return value['stringValue'];
@@ -198,7 +208,9 @@ class RegistrationReviewApi {
 
   String get _databasePath => collection.pathSegments.skip(1).take(4).join('/');
 
-  Future<({int version, String bundle})?> readDirectory(String token) async {
+  Future<({int version, String bundle, String updateTime})?> readDirectory(
+    String token,
+  ) async {
     final response = await http
         .get(
           collection.replace(
@@ -209,10 +221,12 @@ class RegistrationReviewApi {
         .timeout(timeout);
     if (response.statusCode == 404) return null;
     _check(response);
-    final fields = (jsonDecode(response.body) as Map)['fields'] as Map;
+    final document = jsonDecode(response.body) as Map;
+    final fields = document['fields'] as Map;
     return (
       version: int.parse(fields['version']['integerValue'].toString()),
       bundle: fields['bundle']['stringValue'] as String,
+      updateTime: document['updateTime'] as String,
     );
   }
 
@@ -220,8 +234,23 @@ class RegistrationReviewApi {
     String token,
     ReviewApplication application,
     int version,
-    String bundle,
-  ) async {
+    String bundle, {
+    required String? directoryUpdateTime,
+  }) async {
+    final change = application.profileChange;
+    final changes =
+        application.status == 'published' &&
+            change != null &&
+            change['status'] == 'approved_pending_publication'
+        ? <String, dynamic>{
+            for (final key in ['displayName', 'studentNumber', 'courseYear'])
+              key: change[key],
+            'profileChange': {...change, 'status': 'published'},
+          }
+        : <String, dynamic>{
+            'status': 'published',
+            'publicationStatus': 'published',
+          };
     final path = '$_databasePath/documents';
     final response = await http
         .post(
@@ -232,14 +261,11 @@ class RegistrationReviewApi {
               {
                 'update': {
                   'name': '$path/pilotApplications/${application.id}',
-                  'fields': {
-                    'status': _encode('published'),
-                    'publicationStatus': _encode('published'),
-                  },
+                  'fields': changes.map(
+                    (key, value) => MapEntry(key, _encode(value)),
+                  ),
                 },
-                'updateMask': {
-                  'fieldPaths': ['status', 'publicationStatus'],
-                },
+                'updateMask': {'fieldPaths': changes.keys.toList()},
                 'currentDocument': {'updateTime': application.updateTime},
               },
               {
@@ -257,6 +283,9 @@ class RegistrationReviewApi {
                     'setToServerValue': 'REQUEST_TIME',
                   },
                 ],
+                'currentDocument': directoryUpdateTime == null
+                    ? {'exists': false}
+                    : {'updateTime': directoryUpdateTime},
               },
             ],
           }),

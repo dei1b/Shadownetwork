@@ -11,6 +11,24 @@ import '../data/registration_review_api.dart';
 import '../../trust/data/services/trust_directory_sync_service.dart';
 import '../../trust/presentation/providers/device_access_provider.dart';
 
+final registrationMatchesPhoneProvider = FutureProvider.autoDispose
+    .family<bool, String>((ref, binding) async {
+      final DeviceRegistrationQr registration;
+      try {
+        registration = DeviceRegistrationQr.fromJsonString(binding);
+      } on FormatException {
+        return false;
+      }
+      final peer = ref.watch(localPeerProvider.future);
+      final crypto = ref.watch(deviceCryptoIdentityProvider.future);
+      final signing = ref.watch(deviceSigningIdentityProvider.future);
+      final identity = await crypto;
+      return registration.deviceId == (await peer).id &&
+          registration.publicKey == identity.encodedPublicKey &&
+          registration.keyVersion == identity.keyVersion &&
+          registration.signingPublicKey == (await signing).encodedPublicKey;
+    });
+
 class PilotRegistrationEntry extends StatelessWidget {
   const PilotRegistrationEntry({super.key});
 
@@ -21,20 +39,27 @@ class PilotRegistrationEntry extends StatelessWidget {
       pilotRegistrationIsLive ? 'DNSC registration' : 'DNSC test registration',
     ),
     onTap: () => Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => const _PilotRegistrationPage()),
+      MaterialPageRoute(builder: (_) => const PilotRegistrationPage()),
     ),
   );
 }
 
-class _PilotRegistrationPage extends ConsumerStatefulWidget {
-  const _PilotRegistrationPage();
+class PilotRegistrationPage extends ConsumerStatefulWidget {
+  const PilotRegistrationPage({
+    super.key,
+    this.onContinue,
+    this.openCorrection = false,
+  });
+
+  final VoidCallback? onContinue;
+  final bool openCorrection;
 
   @override
-  ConsumerState<_PilotRegistrationPage> createState() =>
+  ConsumerState<PilotRegistrationPage> createState() =>
       _PilotRegistrationState();
 }
 
-class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
+class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   static const _labels = {
     'displayName': 'Full name',
     'studentNumber': 'Student number',
@@ -50,6 +75,7 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
   PilotRegistration? _repository;
   User? _user;
   bool _busy = true;
+  bool _submitting = false;
   bool _locked = false;
   bool _submitted = false;
   String? _device;
@@ -66,9 +92,13 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
     try {
       _repository = await PilotRegistration.open();
       await _loadUser();
+      if (mounted && widget.openCorrection && _user != null) {
+        await _readStatus();
+      }
     } catch (_) {
-      _message =
-          'Unable to load registration. Check the local Firebase emulator.';
+      _message = pilotRegistrationIsLive
+          ? 'Registration is unavailable. You can try again when online.'
+          : 'Unable to load registration. Check the local Firebase emulator.';
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -97,9 +127,15 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
         : 'Saved draft restored.';
   }
 
-  Future<void> _run(Future<void> Function() action) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    bool submitting = false,
+  }) async {
     if (_busy) return;
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _submitting = submitting;
+    });
     try {
       await action();
     } on FirebaseAuthException catch (error) {
@@ -107,9 +143,16 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
     } on StateError catch (error) {
       _message = error.message;
     } catch (_) {
-      _message = 'Unable to finish. Check the emulator connection and retry.';
+      _message = pilotRegistrationIsLive
+          ? 'Unable to finish. Check your internet connection and try again.'
+          : 'Unable to finish. Check the emulator connection and retry.';
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _submitting = false;
+        });
+      }
     }
   }
 
@@ -134,7 +177,9 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
     for (final entry in _fields.entries) entry.key: entry.value.text.trim(),
   };
 
-  Future<void> _refreshStatus() => _run(() async {
+  Future<void> _refreshStatus() => _run(_readStatus);
+
+  Future<void> _readStatus() async {
     final application = await _repository!.readStatus(_user!);
     if (!mounted) return;
     if (application == null) {
@@ -159,6 +204,15 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
     _correction = null;
     _submitted = true;
     if (application.status == 'published') {
+      final binding = application.fields['deviceRegistration'];
+      final matches =
+          binding is String &&
+          await ref.read(registrationMatchesPhoneProvider(binding).future);
+      if (!mounted) return;
+      if (!matches) {
+        _message = 'This account was approved for a different phone.';
+        return;
+      }
       _message = 'Access published. Syncing approval…';
       await ref.read(trustDirectorySyncProvider).refresh();
       if (!mounted) return;
@@ -174,7 +228,7 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
       'rejected' => 'Application rejected. $reason',
       _ => 'Submitted. Pending review.',
     };
-  });
+  }
 
   Future<void> _save() => _repository!.saveDraft(_user!.uid, {
     ..._details,
@@ -228,7 +282,7 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
       'submitted': true,
     });
     _message = 'Submitted. Pending review.';
-  });
+  }, submitting: true);
 
   @override
   void dispose() {
@@ -241,7 +295,10 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) =>
+      PopScope(canPop: !_submitting, child: _buildPage());
+
+  Widget _buildPage() => Scaffold(
     appBar: AppBar(
       title: Text(
         pilotRegistrationIsLive
@@ -249,9 +306,28 @@ class _PilotRegistrationState extends ConsumerState<_PilotRegistrationPage> {
             : 'DNSC test registration',
       ),
     ),
+    bottomNavigationBar: widget.onContinue == null
+        ? null
+        : SafeArea(
+            minimum: const EdgeInsets.all(16),
+            child: OutlinedButton(
+              onPressed: _submitting ? null : widget.onContinue,
+              child: Text(
+                _user == null ? 'Continue unverified' : 'Continue to Home',
+              ),
+            ),
+          ),
     body: ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (widget.onContinue != null)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 16),
+            child: Text(
+              'Sign in or create an account to request DNSC access. '
+              'You can use the app and send an SOS while waiting for approval.',
+            ),
+          ),
         if (!pilotRegistrationIsLive)
           const Text('Use synthetic details for this local test.'),
         if (_busy) const LinearProgressIndicator(),

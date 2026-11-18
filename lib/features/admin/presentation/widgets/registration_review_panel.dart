@@ -191,6 +191,70 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
   String _roleLabel(String role) =>
       role == 'responder' ? 'Campus responder' : 'Student';
 
+  Future<void> _reviewProfileChange(
+    ReviewApplication application, {
+    required bool approve,
+  }) => _run(() async {
+    final session = _session!;
+    await _api.update(session.token, application, {
+      'profileChange': {
+        ...application.profileChange!,
+        'status': approve ? 'approved_pending_publication' : 'rejected',
+        'reviewerUid': session.uid,
+      },
+    });
+    _applications = await _api.list(session.token);
+    if (approve) {
+      await _publishApproved(
+        _applications.singleWhere((item) => item.id == application.id),
+      );
+    } else {
+      _message = 'Profile change declined.';
+    }
+  });
+
+  Widget _profileChangePanel(ReviewApplication application) {
+    final change = application.profileChange!;
+    final status = change['status'] as String;
+    final canReview = !_busy && application.id != _session!.uid;
+    return Column(
+      children: [
+        ListTile(
+          title: Text('Profile change · ${_status(status)}'),
+          subtitle: Text(
+            "${change['displayName']} · ${change['studentNumber']} · "
+            "${change['courseYear']}",
+          ),
+        ),
+        if (status == 'submitted')
+          Wrap(
+            spacing: 8,
+            children: [
+              FilledButton(
+                onPressed: canReview
+                    ? () => _reviewProfileChange(application, approve: true)
+                    : null,
+                child: const Text('Approve profile change'),
+              ),
+              OutlinedButton(
+                onPressed: canReview
+                    ? () => _reviewProfileChange(application, approve: false)
+                    : null,
+                child: const Text('Decline'),
+              ),
+            ],
+          ),
+        if (status == 'approved_pending_publication')
+          FilledButton(
+            onPressed: canReview
+                ? () => _run(() => _publishApproved(application))
+                : null,
+            child: const Text('Publish profile change'),
+          ),
+      ],
+    );
+  }
+
   Future<void> _publishApproved(ReviewApplication application) async {
     final session = _session!;
     final registration = DeviceRegistrationQr.fromJsonString(
@@ -198,12 +262,21 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
     );
     await registration.verifySignature();
     final current = await _api.readDirectory(session.token);
+    final published = current == null
+        ? null
+        : TrustBundle.fromJsonString(current.bundle);
+    if (published?.bundleVersion != current?.version) {
+      throw StateError('The published directory version is inconsistent.');
+    }
     final now = DateTime.now().toUtc();
     final role = _assignedRole(application);
+    final change = application.status == 'published'
+        ? application.profileChange
+        : null;
     final source = await widget.registry.stageDirectoryApproval(
       RegisteredDevice(
         deviceId: registration.deviceId,
-        ownerName: application.fields['displayName'] as String,
+        ownerName: (change ?? application.fields)['displayName'] as String,
         role: role == 'responder'
             ? RegisteredDeviceRole.responder
             : RegisteredDeviceRole.civilian,
@@ -217,22 +290,18 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
       ),
       reviewProject,
       current?.version ?? 0,
-      assignRole: role != null,
+      publishedBundle: published,
+      assignRole: change == null && role != null,
+      updateOwnerName: change != null,
     );
     if (mounted) widget.onRegistryChanged();
     final bundle = TrustBundle.fromJsonString(source);
-    if (current != null &&
-        TrustBundle.fromJsonString(current.bundle).issuer?.publicKey !=
-            bundle.issuer?.publicKey) {
-      throw StateError(
-        'Restore the signing identity used for the existing directory.',
-      );
-    }
     await _api.publish(
       session.token,
       application,
       bundle.bundleVersion,
       source,
+      directoryUpdateTime: current?.updateTime,
     );
     _message = 'Signed access published.';
     _applications = await _api.list(session.token);
@@ -350,6 +419,8 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
                     title: const Text('Assigned role'),
                     subtitle: Text(_roleLabel(role)),
                   ),
+                if (application.profileChange != null)
+                  _profileChangePanel(application),
                 for (final entry in application.history)
                   ListTile(
                     title: Text(_status(entry['status'] as String)),

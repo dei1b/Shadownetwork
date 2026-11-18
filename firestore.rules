@@ -54,6 +54,56 @@ service cloud.firestore {
         && snapshot.publishedAt == request.time;
     }
 
+    function updateContact(uid, before, after) {
+      return request.auth != null && request.auth.uid == uid
+        && before.status == 'published'
+        && after.diff(before).affectedKeys().hasOnly(['phone', 'address'])
+        && validText(after.phone, 100, false)
+        && validText(after.address, 200, false);
+    }
+
+    function requestProfileChange(uid, before, after) {
+      let change = after.profileChange;
+      return request.auth != null && request.auth.uid == uid
+        && before.status == 'published'
+        && before.get('profileChange', {}).get('status', '') in ['', 'published', 'rejected']
+        && after.diff(before).affectedKeys().hasOnly(['profileChange'])
+        && change.keys().hasOnly(['displayName', 'studentNumber', 'courseYear', 'status'])
+        && change.status == 'submitted'
+        && validText(change.displayName, 100, true)
+        && validText(change.studentNumber, 100, true)
+        && validText(change.courseYear, 100, true)
+        && (change.displayName != before.displayName ||
+            change.studentNumber != before.studentNumber ||
+            change.courseYear != before.courseYear);
+    }
+
+    function reviewProfileChange(uid, before, after) {
+      let change = after.profileChange;
+      return reviewer() && request.auth.uid != uid
+        && before.status == 'published' && before.profileChange.status == 'submitted'
+        && after.diff(before).affectedKeys().hasOnly(['profileChange'])
+        && change.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
+        && change.reviewerUid == request.auth.uid
+        && change.status in ['approved_pending_publication', 'rejected'];
+    }
+
+    function publishProfileChange(uid, before, after) {
+      let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
+      return reviewer() && request.auth.uid != uid
+        && before.status == 'published'
+        && before.profileChange.status == 'approved_pending_publication'
+        && after.diff(before).affectedKeys().hasOnly([
+          'displayName', 'studentNumber', 'courseYear', 'profileChange'
+        ])
+        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status'])
+        && after.profileChange.status == 'published'
+        && after.displayName == before.profileChange.displayName
+        && after.studentNumber == before.profileChange.studentNumber
+        && after.courseYear == before.profileChange.courseYear
+        && snapshot.applicationUid == uid && snapshot.publishedAt == request.time;
+    }
+
     function directoryWrite(data) {
       let uid = data.applicationUid;
       let application = /databases/$(database)/documents/pilotApplications/$(uid);
@@ -61,8 +111,11 @@ service cloud.firestore {
         && data.keys().hasOnly(['applicationUid', 'version', 'bundle', 'publishedAt'])
         && validText(data.bundle, 250000, true)
         && data.version is int && data.version > 0 && data.publishedAt == request.time
-        && get(application).data.status == 'approved_pending_publication'
-        && getAfter(application).data.status == 'published';
+        && getAfter(application).data.status == 'published'
+        && (get(application).data.status == 'approved_pending_publication' ||
+          (get(application).data.status == 'published' &&
+            get(application).data.profileChange.status == 'approved_pending_publication' &&
+            getAfter(application).data.profileChange.status == 'published'));
     }
 
     match /trustDirectory/current {
@@ -93,7 +146,11 @@ service cloud.firestore {
       allow list: if reviewer();
       allow update: if review(uid, resource.data, request.resource.data)
         || correct(uid, resource.data, request.resource.data)
-        || published(uid, resource.data, request.resource.data);
+        || published(uid, resource.data, request.resource.data)
+        || updateContact(uid, resource.data, request.resource.data)
+        || requestProfileChange(uid, resource.data, request.resource.data)
+        || reviewProfileChange(uid, resource.data, request.resource.data)
+        || publishProfileChange(uid, resource.data, request.resource.data);
     }
   }
 }

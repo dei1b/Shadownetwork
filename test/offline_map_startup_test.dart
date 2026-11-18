@@ -234,7 +234,7 @@ void main() {
       ),
     );
     expect(headerText('Campus responder dashboard'), findsOneWidget);
-    expect(find.byTooltip('Settings'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsNothing);
     expect(find.text('VALIDATION TEST'), findsNothing);
     expect(find.text('Checking for SOS alerts…'), findsOneWidget);
     final normal = SosMessage(
@@ -355,6 +355,12 @@ void main() {
     await tester.pump();
     expect(headerText('Network'), findsOneWidget);
     expect(headerText('No phones seen recently'), findsOneWidget);
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(headerText('Profile'), findsOneWidget);
+    expect(find.text('This phone’s offline access'), findsOneWidget);
+    expect(find.textContaining('Campus responder'), findsOneWidget);
+    expect(find.text('Active on this phone'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
   });
@@ -493,6 +499,15 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Example dialog'), findsNothing);
+    expect(find.text('Map'), findsOneWidget);
+
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    expect(headerText('Profile'), findsOneWidget);
+    expect(find.text('Unregistered'), findsOneWidget);
+    expect(find.text('Phone registration'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
     expect(find.text('Map'), findsOneWidget);
 
     // Revisiting Home still lets Back return to the last visited tab.

@@ -68,10 +68,10 @@ class PilotRegistration {
     return PilotRegistration(auth);
   }
 
-  Future<File> _draftFile(String uid) async {
+  Future<File> _draftFile(String uid, {String kind = 'draft'}) async {
     final directory = await getApplicationSupportDirectory();
     return File(
-      '${directory.path}/dnsc-draft-${_liveProject == null ? '' : '${Uri.encodeComponent(_liveProject)}-'}${Uri.encodeComponent(uid)}.json',
+      '${directory.path}/dnsc-$kind-${_liveProject == null ? '' : '${Uri.encodeComponent(_liveProject)}-'}${Uri.encodeComponent(uid)}.json',
     );
   }
 
@@ -85,8 +85,12 @@ class PilotRegistration {
 
   Future<void> saveDraft(String uid, Map<String, dynamic> draft) async {
     final file = await _draftFile(uid);
+    await _writeLocal(file, draft);
+  }
+
+  Future<void> _writeLocal(File file, Map<String, dynamic> data) async {
     final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(jsonEncode(draft), flush: true);
+    await temporary.writeAsString(jsonEncode(data), flush: true);
     await temporary.rename(file.path);
   }
 
@@ -103,6 +107,43 @@ class PilotRegistration {
     final token = await user.getIdToken();
     if (token == null) throw StateError('Sign in again to check registration.');
     return RegistrationReviewApi(_collection).get(token, user.uid);
+  }
+
+  Future<ReviewApplication?> readCachedProfile(User user) async {
+    final file = await _draftFile(user.uid, kind: 'profile');
+    if (!await file.exists()) return null;
+    final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    return ReviewApplication.fromCache(
+      id: user.uid,
+      updateTime: data['updateTime'] as String,
+      fields: data['fields'] as Map<String, dynamic>,
+    );
+  }
+
+  Future<ReviewApplication?> refreshProfile(User user) async {
+    final application = await readStatus(user);
+    final file = await _draftFile(user.uid, kind: 'profile');
+    if (application == null) {
+      if (await file.exists()) await file.delete();
+    } else {
+      await _writeLocal(file, {
+        'updateTime': application.updateTime,
+        'fields': application.fields,
+      });
+    }
+    return application;
+  }
+
+  Future<void> updateProfile(
+    User user,
+    ReviewApplication application,
+    Map<String, dynamic> changes,
+  ) async {
+    final token = await user.getIdToken();
+    if (token == null) throw StateError('Sign in again before saving.');
+    await RegistrationReviewApi(
+      _collection,
+    ).update(token, application, changes);
   }
 
   Future<void> resubmit(

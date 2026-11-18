@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
+import '../features/registration/data/pilot_registration.dart';
+import '../features/registration/presentation/pilot_registration_page.dart';
 import '../features/trust/presentation/pages/trust_bundle_import_page.dart';
 import '../features/validation/presentation/pages/validation_session_page.dart';
 import 'presentation/pages/app_shell_page.dart';
@@ -26,6 +28,10 @@ class DisasterCommApp extends StatelessWidget {
           ? const AppShellPage()
           : FirstRunGuideGate(
               shouldShow: firstRunGuide!,
+              registrationBuilder: pilotRegistrationEnabled
+                  ? (onContinue) =>
+                        PilotRegistrationPage(onContinue: onContinue)
+                  : null,
               child: const AppShellPage(),
             ),
       builder: (context, child) => initialization == null

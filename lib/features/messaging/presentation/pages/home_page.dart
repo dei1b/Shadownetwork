@@ -13,6 +13,7 @@ import 'package:shadownetwork/core/constants/app_typography.dart';
 import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
+import 'package:shadownetwork/features/registration/presentation/profile_section.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
@@ -119,7 +120,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   LatLng? _myPosition;
   bool _isLocating = false;
   bool _isFollowing = false;
-  final bool _tileLoadFailed = false;
+  bool _mapStartupFailed = false;
   StreamSubscription<Position>? _positionSubscription;
 
   @override
@@ -136,10 +137,19 @@ class _HomePageState extends ConsumerState<HomePage> {
     try {
       final styleUri = await _offlineTileServer.start();
       if (!mounted) {
+        await _offlineTileServer.dispose();
         return;
       }
       setState(() => _offlineMapStyle = styleUri.toString());
-    } catch (_) {}
+    } catch (_) {
+      if (mounted) setState(() => _mapStartupFailed = true);
+    }
+  }
+
+  void _retryOfflineMapStyle() {
+    if (!_mapStartupFailed) return;
+    setState(() => _mapStartupFailed = false);
+    unawaited(_startOfflineMapStyle());
   }
 
   @override
@@ -741,7 +751,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   child: IndexedStack(
                     index: _selectedTab,
                     children: List.generate(
-                      4,
+                      5,
                       (tab) => TickerMode(
                         enabled: tab == _selectedTab,
                         child: !_visitedTabs.contains(tab)
@@ -768,6 +778,23 @@ class _HomePageState extends ConsumerState<HomePage> {
                                       )
                                     : tab == 3
                                     ? _buildPeersTabContent(peers)
+                                    : tab == 4
+                                    ? Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.stretch,
+                                        children: [
+                                          const _TabHeader(
+                                            title: 'Profile',
+                                            subtitle:
+                                                'Your DNSC account and phone registration',
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ProfileSection(
+                                            access: widget.accessProfile,
+                                            active: _selectedTab == tab,
+                                          ),
+                                        ],
+                                      )
                                     : _buildHomeTabContent(
                                         peers,
                                         messages,
@@ -810,11 +837,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                   label: approvalLabel,
                   positive: profile.isApproved,
                 ),
-          trailing: IconButton(
-            tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => Navigator.of(context).pushNamed('/settings'),
-          ),
         ),
         const SizedBox(height: 12),
         if (_isResponder) ...[
@@ -2147,6 +2169,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
             _NavItem(icon: Icons.map_outlined, label: 'SOS Map'),
             _NavItem(icon: Icons.monitor_heart_outlined, label: 'Network'),
+            _NavItem(icon: Icons.person_outline, label: 'Profile'),
           ]
         : const [
             _NavItem(icon: Icons.home_rounded, label: 'Home'),
@@ -2156,6 +2179,7 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
             _NavItem(icon: Icons.map_outlined, label: 'Maps'),
             _NavItem(icon: Icons.people_outline_rounded, label: 'Nearby'),
+            _NavItem(icon: Icons.person_outline, label: 'Profile'),
           ];
 
     return Container(
@@ -2371,7 +2395,13 @@ class _HomePageState extends ConsumerState<HomePage> {
                 return Stack(
                   children: [
                     if (mapStyle == null)
-                      const Positioned.fill(child: _OfflineMapPreparingView())
+                      Positioned.fill(
+                        child: _OfflineMapPreparingView(
+                          onRetry: _mapStartupFailed
+                              ? _retryOfflineMapStyle
+                              : null,
+                        ),
+                      )
                     else
                       Positioned.fill(
                         child: ml.MapLibreMap(
@@ -2461,16 +2491,16 @@ class _HomePageState extends ConsumerState<HomePage> {
               left: 10,
               top: 10,
               child: _MapStatusBadge(
-                icon: isViewingPanaboArea
+                icon: _mapStartupFailed
+                    ? Icons.error_outline
+                    : isViewingPanaboArea
                     ? Icons.map_outlined
-                    : _tileLoadFailed
-                    ? Icons.offline_bolt_outlined
                     : Icons.layers_outlined,
                 label: _mapTileStatusLabel(tileCacheStore),
-                color: isViewingPanaboArea
-                    ? const Color(0xFF2E8B57)
-                    : _tileLoadFailed
+                color: _mapStartupFailed
                     ? const Color(0xFFF39C12)
+                    : isViewingPanaboArea
+                    ? const Color(0xFF2E8B57)
                     : const Color(0xFF3F66C4),
               ),
             ),
@@ -2496,12 +2526,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   String _mapTileStatusLabel(AsyncValue<CacheStore> tileCacheStore) {
+    if (_mapStartupFailed) return 'Map unavailable';
     if (_isInsidePanabo(_currentCenter)) {
       return _offlineMapStyle == null ? 'Preparing offline map' : 'Offline map';
-    }
-
-    if (_tileLoadFailed) {
-      return 'Offline fallback';
     }
 
     return tileCacheStore.when(
@@ -3261,7 +3288,9 @@ class _MapOverlayMarker {
 }
 
 class _OfflineMapPreparingView extends StatelessWidget {
-  const _OfflineMapPreparingView();
+  const _OfflineMapPreparingView({required this.onRetry});
+
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -3281,30 +3310,36 @@ class _OfflineMapPreparingView extends StatelessWidget {
               ),
             ],
           ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.4,
-                  color: Color(0xFF2E8B57),
+          child: onRetry != null
+              ? OutlinedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry map'),
+                )
+              : const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: Color(0xFF2E8B57),
+                      ),
+                    ),
+                    SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'Loading map',
+                        style: TextStyle(
+                          color: Color(0xFF2E8B57),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-              SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  'Loading map',
-                  style: TextStyle(
-                    color: Color(0xFF2E8B57),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

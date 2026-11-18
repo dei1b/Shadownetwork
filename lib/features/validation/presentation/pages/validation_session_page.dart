@@ -167,7 +167,7 @@ class ValidationSessionPage extends ConsumerWidget {
             name: result.name,
             environment: result.environment,
             deviceId: localPeer.id,
-            deviceRole: profile.roleLabel.toLowerCase(),
+            deviceRole: profile.level.name,
             testRunId: result.testRunId,
             notes: result.notes,
           );

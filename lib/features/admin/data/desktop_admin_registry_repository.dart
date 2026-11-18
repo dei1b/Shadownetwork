@@ -219,13 +219,29 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     RegisteredDevice device,
     String project,
     int previousVersion, {
+    TrustBundle? publishedBundle,
     bool assignRole = false,
+    bool updateOwnerName = false,
   }) => _serialized(() async {
     final devices = await _loadDevices();
+    if (publishedBundle != null) {
+      final identity = await _requireIdentity();
+      if (publishedBundle.issuer?.publicKey != identity.publicKey) {
+        throw StateError(
+          'Restore the signing identity used for the existing directory.',
+        );
+      }
+      await _checkPublishedRoster(publishedBundle, project, devices);
+    }
     final index = devices.indexWhere(
       (entry) => entry.deviceId.toLowerCase() == device.deviceId.toLowerCase(),
     );
     if (index < 0) {
+      if (updateOwnerName) {
+        throw StateError(
+          'Restore the approved phone in the local registry first.',
+        );
+      }
       devices.add(device);
     } else {
       final existing = devices[index];
@@ -237,6 +253,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         );
       }
       devices[index] = existing.copyWith(
+        ownerName: updateOwnerName ? device.ownerName : existing.ownerName,
         status: RegisteredDeviceStatus.approved,
         role: assignRole ? device.role : existing.role,
         updatedAt: device.updatedAt,
@@ -252,6 +269,57 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     );
     return source;
   });
+
+  Future<void> _checkPublishedRoster(
+    TrustBundle published,
+    String project,
+    List<RegisteredDevice> devices,
+  ) async {
+    final signature = published.signature;
+    if (!published.isSignedVersion ||
+        published.directoryProject != project ||
+        signature == null ||
+        !await Ed25519().verify(
+          utf8.encode(
+            canonicalJsonEncode(published.toJson(includeSignature: false)),
+          ),
+          signature: Signature(
+            base64Url.decode(signature),
+            publicKey: SimplePublicKey(
+              base64Url.decode(published.issuer!.publicKey),
+              type: KeyPairType.ed25519,
+            ),
+          ),
+        )) {
+      throw StateError('The published campus directory could not be verified.');
+    }
+
+    final local = {
+      for (final device in devices)
+        device.deviceId.toLowerCase(): _trustDevice(device),
+    };
+    for (final remote in [
+      ...published.approvedDevices,
+      ...published.revokedDevices,
+    ]) {
+      final device = local[remote.deviceId.toLowerCase()];
+      if (device == null ||
+          device.publicKey != remote.publicKey ||
+          device.signingPublicKey != remote.signingPublicKey ||
+          device.keyVersion != remote.keyVersion ||
+          (remote.status == 'revoked' && device.status != 'revoked') ||
+          (device.status != 'approved' && device.status != 'revoked') ||
+          ((device.status != remote.status ||
+                  device.role != remote.role ||
+                  device.ownerName != remote.ownerName) &&
+              !device.updatedAt.isAfter(remote.updatedAt))) {
+        throw StateError(
+          'The local registry is missing or out of date for a published phone. '
+          'Restore the latest registry backup before publishing again.',
+        );
+      }
+    }
+  }
 
   Future<String> _buildTrustBundleJson(
     List<RegisteredDevice> devices,

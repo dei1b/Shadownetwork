@@ -10,6 +10,7 @@ import 'package:shadownetwork/features/admin/data/desktop_admin_registry_databas
 import 'package:shadownetwork/features/admin/data/desktop_admin_registry_repository.dart';
 import 'package:shadownetwork/features/admin/domain/entities/registered_device.dart';
 import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
+import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 
 class MemorySigningKeyStore implements AdminSigningKeyStore {
   String? value;
@@ -86,6 +87,44 @@ void main() {
       (await repository.loadDevices()).single.role,
       RegisteredDeviceRole.responder,
     );
+    final updatedSource = await repository.stageDirectoryApproval(
+      student.copyWith(ownerName: 'Reviewed name'),
+      'campus-demo',
+      trust.bundleVersion,
+      publishedBundle: trust,
+      updateOwnerName: true,
+    );
+    final updated = await TrustBundleStore().importBundleJson(updatedSource);
+    expect(updated.approvedDevices.single.ownerName, 'Reviewed name');
+    expect(updated.approvedDevices.single.role, 'responder');
+    expect(updated.approvedDevices.single.deviceId, student.deviceId);
+  });
+
+  test('a stale registry cannot replace a published roster', () async {
+    await repository.initializeIdentity();
+    final publishedDevice = device();
+    await repository.saveDevices([publishedDevice]);
+    final published = TrustBundle.fromJsonString(
+      await repository.stageDirectoryApproval(
+        publishedDevice,
+        'campus-demo',
+        0,
+      ),
+    );
+    await repository.saveDevices([]);
+    final versionBefore = (await repository.identityStatus()).bundleVersion;
+
+    await expectLater(
+      repository.stageDirectoryApproval(
+        device().copyWith(deviceId: 'new-student'),
+        'campus-demo',
+        published.bundleVersion,
+        publishedBundle: published,
+      ),
+      throwsStateError,
+    );
+    expect(await repository.loadDevices(), isEmpty);
+    expect((await repository.identityStatus()).bundleVersion, versionBefore);
   });
 
   test(

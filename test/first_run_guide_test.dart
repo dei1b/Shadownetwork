@@ -28,52 +28,63 @@ void main() {
   });
 
   for (final skip in [false, true]) {
-    testWidgets('${skip ? 'skipping' : 'finishing'} the guide opens Home', (
-      tester,
-    ) async {
-      await tester.binding.setSurfaceSize(const Size(320, 560));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        MaterialApp(
-          home: MediaQuery(
-            data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
-            child: FirstRunGuideGate(
-              shouldShow: Future.value(true),
-              child: const Scaffold(body: Text('Home ready')),
+    testWidgets(
+      '${skip ? 'skipping' : 'finishing'} offers registration first',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(320, 560));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            home: MediaQuery(
+              data: const MediaQueryData(textScaler: TextScaler.linear(1.5)),
+              child: FirstRunGuideGate(
+                shouldShow: Future.value(true),
+                registrationBuilder: (onContinue) => Scaffold(
+                  body: TextButton(
+                    onPressed: onContinue,
+                    child: const Text('Continue unverified'),
+                  ),
+                ),
+                child: const Scaffold(body: Text('Home ready')),
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Send an SOS'), findsOneWidget);
-      if (skip) {
-        await tester.tap(find.text('Skip'));
-      } else {
-        var previousTitle = 'Send an SOS';
-        for (final title in [
-          'Nearby phones pass it on',
-          'Use the offline map',
-          'Register with DNSC',
-        ]) {
-          await tester.ensureVisible(find.text('Next'));
-          await tester.tap(find.text('Next'));
-          await tester.pump();
-          await tester.pump(const Duration(milliseconds: 100));
-          expect(find.text(previousTitle), findsOneWidget);
-          expect(find.text(title), findsOneWidget);
-          await tester.pumpAndSettle();
-          expect(find.text(title), findsOneWidget);
-          expect(find.text(previousTitle), findsNothing);
-          expect(find.textContaining('Panabo'), findsNothing);
-          previousTitle = title;
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Send an SOS'), findsOneWidget);
+        if (skip) {
+          await tester.tap(find.text('Skip'));
+        } else {
+          var previousTitle = 'Send an SOS';
+          for (final title in [
+            'Nearby phones pass it on',
+            'Use the offline map',
+            'Register with DNSC',
+          ]) {
+            await tester.ensureVisible(find.text('Next'));
+            await tester.tap(find.text('Next'));
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 100));
+            expect(find.text(previousTitle), findsOneWidget);
+            expect(find.text(title), findsOneWidget);
+            await tester.pumpAndSettle();
+            expect(find.text(title), findsOneWidget);
+            expect(find.text(previousTitle), findsNothing);
+            expect(find.textContaining('Panabo'), findsNothing);
+            previousTitle = title;
+          }
+          await tester.ensureVisible(find.text('Get started'));
+          await tester.tap(find.text('Get started'));
         }
-        await tester.ensureVisible(find.text('Get started'));
-        await tester.tap(find.text('Get started'));
-      }
-      await tester.pumpAndSettle();
-      expect(find.text('Home ready'), findsOneWidget);
-      expect(await FirstRunGuideStore.shouldShow(identity), isFalse);
-      expect(tester.takeException(), isNull);
-    });
+        await tester.pumpAndSettle();
+        expect(find.text('Home ready'), findsNothing);
+        expect(await FirstRunGuideStore.shouldShow(identity), isTrue);
+        await tester.tap(find.text('Continue unverified'));
+        await tester.pumpAndSettle();
+        expect(find.text('Home ready'), findsOneWidget);
+        expect(await FirstRunGuideStore.shouldShow(identity), isFalse);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 }

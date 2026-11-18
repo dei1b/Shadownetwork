@@ -355,6 +355,7 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
                         ),
                         const SizedBox(height: 16),
                         DropdownButtonFormField<RegisteredDeviceRole>(
+                          isExpanded: true,
                           initialValue: selectedRole,
                           decoration: const InputDecoration(
                             labelText: 'Device role',
@@ -1120,6 +1121,7 @@ class _RegisterDeviceCard extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               DropdownButtonFormField<RegisteredDeviceRole>(
+                isExpanded: true,
                 initialValue: selectedRole,
                 decoration: const InputDecoration(
                   labelText: 'Role',

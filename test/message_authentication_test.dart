@@ -91,14 +91,57 @@ void main() {
     );
   }
 
-  SosMessage message({bool targeted = false}) => SosMessage(
+  SosMessage message({
+    bool targeted = false,
+    Category category = Category.rescue,
+  }) => SosMessage(
     id: 'sos-1',
     sender: sender,
     recipient: targeted ? recipient : null,
     body: 'Need rescue',
-    category: Category.rescue,
+    category: category,
     status: MessageStatus.queued,
     createdAt: DateTime.now().toUtc(),
+  );
+
+  test(
+    'new SOS categories relay with signed detail and legacy codes',
+    () async {
+      await register();
+      final identity = await DeviceIdentityStore(
+        secretStore: InMemorySecretValueStore(),
+      ).loadOrCreate();
+      for (final entry in {
+        Category.fireSmoke: 'fireElectrical',
+        Category.electricalHazard: 'fireElectrical',
+        Category.accidentInjury: 'medical',
+      }.entries) {
+        final prepared = await SecureSosMessagePayload.prepare(
+          message(category: entry.key),
+          encryptionService: encryption,
+          signingIdentity: signing,
+        );
+        final relayed = SecureSosMessagePayload.payloadJsonForRelay(
+          prepared.payloadJson,
+          hopCount: 2,
+        );
+        final payload = jsonDecode(relayed) as Map<String, Object?>;
+        expect(payload['category'], entry.value);
+        expect(SecureSosMessagePayload.hashPayload(relayed), prepared.hash);
+        expect(
+          (await auth.authenticate(relayed, repository)).status,
+          DeviceTrustStatus.approved,
+        );
+        final decoded = await SecureSosMessagePayload.decode(
+          payload,
+          localPeerId: recipient.id,
+          encryptionService: encryption,
+          localIdentity: identity,
+        );
+        expect(decoded.category, entry.key);
+        expect(decoded.hopCount, 2);
+      }
+    },
   );
 
   test(

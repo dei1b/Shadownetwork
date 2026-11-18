@@ -162,3 +162,63 @@ for (const [token, expected] of [[student.idToken, 200], [other.idToken, 403]]) 
   assert.equal(response.status, expected);
 }
 console.log('Atomic publication and approved-student directory access passed.');
+
+const active = await readApplication(student.idToken);
+const contact = {phone: string('09000000000'), address: string('Test address')};
+assert.equal((await patch(other.idToken, active, contact)).status, 403);
+assert.equal((await patch(student.idToken, active, {
+  ...contact, displayName: string('Unauthorized name'),
+})).status, 403);
+assert.equal((await patch(student.idToken, active, contact)).status, 200);
+
+const identityDetails = {
+  displayName: string('Updated Student'),
+  studentNumber: string('TEST-004'),
+  courseYear: string('Test course, second year'),
+};
+function profileChange(status, fields = {}) {
+  return {mapValue: {fields: {...identityDetails, status: string(status), ...fields}}};
+}
+const contactSaved = await readApplication(student.idToken);
+assert.equal(contactSaved.fields.address.stringValue, 'Test address');
+assert.equal((await patch(student.idToken, contactSaved, {
+  profileChange: profileChange('published'),
+})).status, 403);
+assert.equal((await patch(student.idToken, contactSaved, {
+  profileChange: profileChange('submitted'),
+})).status, 200);
+
+const pending = await readApplication(student.idToken);
+assert.equal(pending.fields.displayName.stringValue, 'Synthetic Student');
+assert.equal(pending.fields.status.stringValue, 'published');
+const directoryWhilePending = await fetch(`${records}/trustDirectory/current`, {
+  headers: {Authorization: `Bearer ${student.idToken}`},
+});
+assert.equal(directoryWhilePending.status, 200);
+const reviewer = {reviewerUid: string(admin.localId)};
+assert.equal((await patch(reviewerToken, pending, {
+  profileChange: profileChange('approved_pending_publication', {
+    ...reviewer, displayName: string('Altered by reviewer'),
+  }),
+})).status, 403);
+const review = await patch(reviewerToken, pending, {
+  profileChange: profileChange('approved_pending_publication', reviewer),
+});
+assert.equal(review.status, 200, await review.text());
+const reviewed = await readApplication(student.idToken);
+const publishFields = {...identityDetails, profileChange: profileChange('published', reviewer)};
+assert.equal((await patch(reviewerToken, reviewed, publishFields)).status, 403);
+
+const profilePublication = structuredClone(publication);
+profilePublication.writes[0].update.fields = publishFields;
+profilePublication.writes[0].updateMask.fieldPaths = Object.keys(publishFields);
+profilePublication.writes[0].currentDocument.updateTime = reviewed.updateTime;
+profilePublication.writes[1].update.fields.version = integer(2);
+const profileCommitted = await post(`${records}:commit`, profilePublication, reviewerToken);
+assert.equal(profileCommitted.status, 200, await profileCommitted.text());
+const updated = await readApplication(student.idToken);
+assert.equal(updated.fields.displayName.stringValue, 'Updated Student');
+assert.equal(updated.fields.status.stringValue, 'published');
+assert.deepEqual(updated.fields.reviewHistory, active.fields.reviewHistory);
+assert.equal(updated.fields.deviceRegistration.stringValue, active.fields.deviceRegistration.stringValue);
+console.log('Profile contact edits, review authorization, and atomic identity publication passed.');

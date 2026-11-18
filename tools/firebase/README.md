@@ -54,6 +54,10 @@ Run publication on the PC that holds the existing administrator signing identity
 
 For an Android build that can bootstrap trust on a fresh phone, set `DNSC_ISSUER_FINGERPRINT` to the full public fingerprint shown in **Backup & recovery** on the trusted signing PC. An Android phone with a previously pinned issuer can use that verified issuer. The signed directory also identifies its Firebase project.
 
+GitHub Actions reads the Firebase project from `android/app/google-services.json` and the campus issuer fingerprint from the repository variable `DNSC_ISSUER_FINGERPRINT`. The issuer fingerprint identifies the PC Admin directory key. The APK signing certificate uses its own repository variable.
+
+Before publishing, PC Admin verifies the existing signed directory and checks that the local registry includes its users and revocations. If the registry is stale, restore the latest backup before trying again. If another reviewer publishes during the current attempt, refresh and retry against the new directory.
+
 After publication, the applicant signs in on the registered phone and selects **Check review status**. Android also checks when the app resumes and every two minutes in the foreground. Offline phones use their saved verified trust state until it expires. Keep the signing identity backup available to recover the publisher.
 
 For a Windows build, pass the project ID and the existing Firebase client API key as Dart defines. The API key identifies the Firebase project. Reviewer access comes from the signed-in account claim.
