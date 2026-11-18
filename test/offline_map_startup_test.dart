@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
+import 'package:shadownetwork/app/presentation/pages/settings_page.dart';
 import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
@@ -23,6 +24,7 @@ import 'package:shadownetwork/features/messaging/presentation/providers/peer_loc
 import 'package:shadownetwork/features/messaging/presentation/providers/relay_runtime_provider.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_status.dart';
+import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 // Keep the home/map configuration real; replace only the native view boundary.
@@ -386,6 +388,10 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          deviceAccessProfileProvider.overrideWith(
+            (ref) async =>
+                const DeviceAccessProfile.unregistered(deviceId: 'test'),
+          ),
           nearbyPeersProvider.overrideWith((ref) async => []),
           sosMessagesProvider.overrideWith((ref) async => []),
           conversationsProvider.overrideWith((ref) async => []),
@@ -394,6 +400,11 @@ void main() {
           ),
         ],
         child: MaterialApp(
+          routes: {
+            '/settings': (_) => const SettingsPage(),
+            '/trust-bundle': (_) =>
+                const Scaffold(body: Text('Backup QR route')),
+          },
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(
               context,
@@ -505,7 +516,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(headerText('Profile'), findsOneWidget);
     expect(find.text('Unregistered'), findsOneWidget);
-    expect(find.text('Phone registration'), findsOneWidget);
+    expect(find.text('Phone registration'), findsNothing);
+    await tester.ensureVisible(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('DNSC registration'), findsNothing);
+    expect(find.text('Backup registration'), findsNothing);
+    await tester.tap(find.text('Advanced'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Backup registration'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Backup registration'));
+    await tester.pumpAndSettle();
+    expect(find.text('Backup QR route'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('Map'), findsOneWidget);
@@ -513,6 +541,7 @@ void main() {
     // Revisiting Home still lets Back return to the last visited tab.
     await tester.tap(find.text('Home'));
     await tester.pump();
+    expect(find.textContaining('Open Profile, then Settings'), findsOneWidget);
     expect(
       identical(tester.state(find.byType(ml.MapLibreMap)), cardState),
       isTrue,

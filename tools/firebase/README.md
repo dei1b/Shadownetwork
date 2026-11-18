@@ -28,7 +28,7 @@ flutter run --dart-define=DNSC_EMULATOR_HOST=10.0.2.2
 
 For a USB-connected test phone, forward ports 9099 and 8080 with `adb reverse tcp:PORT tcp:PORT`, then use `DNSC_EMULATOR_HOST=127.0.0.1`.
 
-Open Settings or Phone registration, then select DNSC test registration. Create a synthetic test account and fill in the student details. Save the draft, reopen the page, and submit. An unconfirmed submission can be retried using the same draft. If you restart the Firebase emulators without preserving their data, create a new test account.
+Open DNSC test registration during onboarding or from Profile. Create a synthetic test account and fill in the student details. Save the draft, reopen the page, and submit. An unconfirmed submission can be retried using the same draft. If you restart the Firebase emulators without preserving their data, create a new test account.
 
 Registration binds a submission to the phone's signed registration record. Server challenge verification and Windows review are separate implementation steps.
 
@@ -46,7 +46,7 @@ Open **Devices → Requests** and sign in with an existing Email/Password Fireba
 
 Expand an application to review its student details and signed phone ID. Select **Review and approve**, choose **Student** or **Campus responder**, and select **Approve and publish**. The approval records the role and publishes signed access to that phone. A correction request or rejection requires a reason. Firebase checks the status and revision, and each decision appends an audit entry. Refresh after a conflicting update.
 
-On Android, use **Check review status** to see the result. After a correction request, edit the requested details and submit again using the same phone keys.
+On Android, open DNSC registration to check the result automatically. **Check review status** lets you refresh manually. After a correction request, edit the requested details and submit again using the same phone keys.
 
 ## Publish and activate signed access
 
@@ -58,7 +58,9 @@ GitHub Actions reads the Firebase project from `android/app/google-services.json
 
 Before publishing, PC Admin verifies the existing signed directory and checks that the local registry includes its users and revocations. If the registry is stale, restore the latest backup before trying again. If another reviewer publishes during the current attempt, refresh and retry against the new directory.
 
-After publication, the applicant signs in on the registered phone and selects **Check review status**. Android also checks when the app resumes and every two minutes in the foreground. Offline phones use their saved verified trust state until it expires. Keep the signing identity backup available to recover the publisher.
+After publication, the applicant opens DNSC registration on the registered phone. It loads the last known review and checks for changes online. Android also checks for directory updates when the app resumes and every two minutes in the foreground. Offline phones use their saved verified trust state until it expires. Keep the signing identity backup available to recover the publisher.
+
+For offline enrollment or an administrator-provided approval code, open **Profile → Settings → Advanced → Backup registration**. The enrollment QR contains the phone ID and public keys. The reviewing administrator enters the owner details. The phone can scan, paste, or enter an approval code on the same page.
 
 For a Windows build, pass the project ID and the existing Firebase client API key as Dart defines. The API key identifies the Firebase project. Reviewer access comes from the signed-in account claim.
 

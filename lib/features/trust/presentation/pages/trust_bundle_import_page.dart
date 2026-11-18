@@ -4,8 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../../../registration/data/pilot_registration.dart';
-import '../../../registration/presentation/pilot_registration_page.dart';
 
 import '../../../messaging/domain/entities/peer.dart';
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
@@ -16,8 +14,6 @@ import '../../data/services/trust_bundle_store.dart';
 import '../../domain/entities/device_access_profile.dart';
 import '../../domain/entities/trust_bundle.dart';
 import '../providers/device_access_provider.dart';
-import '../widgets/user_information_form.dart';
-import '../../../security/data/services/user_information_store.dart';
 
 const _trustRed = Color(0xFFE83C3D);
 const _trustRedDark = Color(0xFF861A1A);
@@ -118,35 +114,25 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     Peer peer,
     DeviceCryptoIdentity identity,
   ) async {
-    final information = await UserInformationStore().load().catchError((
-      Object error,
-    ) {
+    final DeviceRegistrationQr registration;
+    try {
+      final signingIdentity = await ref.read(
+        deviceSigningIdentityProvider.future,
+      );
+      registration = await DeviceRegistrationQr.createSigned(
+        deviceId: peer.id,
+        identity: identity,
+        signingIdentity: signingIdentity,
+      );
+    } catch (_) {
       if (mounted) {
         _showSnackBar(
-          'Unable to load user information. Save your details again.',
+          'Could not prepare the registration code. Try again.',
           kind: FeedbackKind.error,
         );
       }
-      return null;
-    });
-    if (!mounted) return;
-    if (information == null) {
-      _showSnackBar(
-        'Save your user information before showing the registration QR.',
-        kind: FeedbackKind.warning,
-      );
       return;
     }
-    final signingIdentity = await ref.read(
-      deviceSigningIdentityProvider.future,
-    );
-    if (!mounted) return;
-    final registration = await DeviceRegistrationQr.createSigned(
-      deviceId: peer.id,
-      identity: identity,
-      signingIdentity: signingIdentity,
-      userInformation: information,
-    );
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -324,7 +310,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Phone registration'),
+        title: const Text('Backup registration'),
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
@@ -338,11 +324,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _TrustHeader(bundle: _bundle),
-                    if (pilotRegistrationEnabled)
-                      const PilotRegistrationEntry(),
                     const SizedBox(height: 18),
-                    const UserInformationForm(),
-                    const SizedBox(height: 24),
                     _DeviceIdentityCard(
                       localPeer: localPeer,
                       cryptoIdentity: cryptoIdentity,
@@ -498,8 +480,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return _TrustPanel(
       title: '1. Show your registration code',
-      subtitle:
-          'Save your information above, then show this code to the campus administrator.',
+      subtitle: 'Show this code to the campus administrator.',
       child: localPeer.when(
         data: (peer) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -744,16 +725,6 @@ class _DeviceRegistrationQrDialogState
                 ),
               ),
               const SizedBox(height: 6),
-              if (registration.userInformation case final information?) ...[
-                Text(information.fullName, textAlign: TextAlign.center),
-                Text(information.phoneNumber, textAlign: TextAlign.center),
-                Text(information.address, textAlign: TextAlign.center),
-                const SizedBox(height: 8),
-                const Text(
-                  'This code shares your contact information with the administrator.',
-                  textAlign: TextAlign.center,
-                ),
-              ],
               const Text(
                 'Show this code to the campus administrator.',
                 textAlign: TextAlign.center,

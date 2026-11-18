@@ -29,30 +29,15 @@ final registrationMatchesPhoneProvider = FutureProvider.autoDispose
           registration.signingPublicKey == (await signing).encodedPublicKey;
     });
 
-class PilotRegistrationEntry extends StatelessWidget {
-  const PilotRegistrationEntry({super.key});
-
-  @override
-  Widget build(BuildContext context) => ListTile(
-    leading: const Icon(Icons.school_outlined),
-    title: Text(
-      pilotRegistrationIsLive ? 'DNSC registration' : 'DNSC test registration',
-    ),
-    onTap: () => Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => const PilotRegistrationPage()),
-    ),
-  );
-}
-
 class PilotRegistrationPage extends ConsumerStatefulWidget {
   const PilotRegistrationPage({
     super.key,
     this.onContinue,
-    this.openCorrection = false,
+    this.openRegistration = PilotRegistration.open,
   });
 
   final VoidCallback? onContinue;
-  final bool openCorrection;
+  final Future<PilotRegistration> Function() openRegistration;
 
   @override
   ConsumerState<PilotRegistrationPage> createState() =>
@@ -79,6 +64,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   bool _locked = false;
   bool _submitted = false;
   String? _device;
+  String? _draftCorrectionRevision;
+  ReviewApplication? _application;
   ReviewApplication? _correction;
   String _message = '';
 
@@ -90,11 +77,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
 
   Future<void> _restore() async {
     try {
-      _repository = await PilotRegistration.open();
+      _repository = await widget.openRegistration();
       await _loadUser();
-      if (mounted && widget.openCorrection && _user != null) {
-        await _readStatus();
-      }
     } catch (_) {
       _message = pilotRegistrationIsLive
           ? 'Registration is unavailable. You can try again when online.'
@@ -109,22 +93,42 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     final draft = user == null
         ? <String, dynamic>{}
         : await _repository!.loadDraft(user.uid);
-    if (!mounted) return;
+    if (!mounted || _repository!.auth.currentUser?.uid != user?.uid) return;
     _user = user;
+    _application = null;
     _correction = null;
     for (final entry in _fields.entries) {
       entry.value.text = draft[entry.key] as String? ?? '';
     }
     _device = draft['deviceRegistration'] as String?;
+    _draftCorrectionRevision = draft['correctionRevision'] as String?;
     _locked = _device != null;
     _submitted = draft['submitted'] == true;
     _message = _submitted
-        ? 'Submitted. Pending review.'
+        ? 'Checking review status…'
         : _locked
         ? 'Submission incomplete. Retry to resume.'
         : draft.isEmpty
         ? ''
         : 'Saved draft restored.';
+    if (user == null) return;
+    setState(() {});
+    ReviewApplication? cached;
+    try {
+      cached = await _repository!.readCachedProfile(user);
+    } catch (_) {
+      // A damaged cache can be replaced by the next online refresh.
+    }
+    if (!_isCurrentUser(user)) return;
+    if (cached != null &&
+        !(cached.status == 'changes_requested' &&
+            _submitted &&
+            cached.updateTime == _draftCorrectionRevision)) {
+      await _applyStatus(cached, syncApproval: false);
+      if (!_isCurrentUser(user)) return;
+      setState(() {});
+    }
+    await _readStatus(showMissingApplication: _submitted || cached != null);
   }
 
   Future<void> _run(
@@ -179,17 +183,44 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
 
   Future<void> _refreshStatus() => _run(_readStatus);
 
-  Future<void> _readStatus() async {
-    final application = await _repository!.readStatus(_user!);
-    if (!mounted) return;
-    if (application == null) {
-      _message = 'No submitted application found.';
+  bool _isCurrentUser(User user) =>
+      mounted && _repository!.auth.currentUser?.uid == user.uid;
+
+  Future<void> _readStatus({bool showMissingApplication = true}) async {
+    final user = _user;
+    if (user == null) return;
+    final ReviewApplication? application;
+    try {
+      application = await _repository!.refreshProfile(user);
+    } catch (_) {
+      if (_isCurrentUser(user) && _application == null) {
+        _message = 'Review status unavailable. Try again when online.';
+      }
       return;
     }
+    if (!_isCurrentUser(user)) return;
+    if (application == null) {
+      _application = null;
+      _correction = null;
+      _submitted = false;
+      _locked = _device != null;
+      if (showMissingApplication) _message = 'No submitted application found.';
+      return;
+    }
+    await _applyStatus(application, syncApproval: true);
+  }
+
+  Future<void> _applyStatus(
+    ReviewApplication application, {
+    required bool syncApproval,
+  }) async {
+    final user = _user!;
+    _application = application;
     final history = application.history;
     final reason = history.isEmpty ? '' : history.last['reason'] as String;
     if (application.status == 'changes_requested') {
-      if (_correction?.updateTime != application.updateTime) {
+      if ((_correction?.updateTime ?? _draftCorrectionRevision) !=
+          application.updateTime) {
         for (final field in _fields.entries) {
           field.value.text = application.fields[field.key] as String? ?? '';
         }
@@ -204,19 +235,31 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     _correction = null;
     _submitted = true;
     if (application.status == 'published') {
+      _message = 'Access published. Checking this phone…';
       final binding = application.fields['deviceRegistration'];
       final matches =
           binding is String &&
           await ref.read(registrationMatchesPhoneProvider(binding).future);
-      if (!mounted) return;
+      if (!_isCurrentUser(user)) return;
       if (!matches) {
         _message = 'This account was approved for a different phone.';
         return;
       }
-      _message = 'Access published. Syncing approval…';
-      await ref.read(trustDirectorySyncProvider).refresh();
-      if (!mounted) return;
-      final access = await ref.read(deviceAccessProfileProvider.future);
+      var access = await ref.read(deviceAccessProfileProvider.future);
+      if (!_isCurrentUser(user)) return;
+      if (syncApproval && !access.isApproved) {
+        try {
+          await ref.read(trustDirectorySyncProvider).refresh();
+          if (!_isCurrentUser(user)) return;
+          access = await ref.read(deviceAccessProfileProvider.future);
+        } catch (_) {
+          if (_isCurrentUser(user)) {
+            _message = 'Access was published. Sync approval when online.';
+          }
+          return;
+        }
+      }
+      if (!_isCurrentUser(user)) return;
       _message = access.isApproved
           ? 'Access active on this phone.\n${access.roleLabel}'
           : 'Access was published. Check the registered phone and signing key.';
@@ -226,7 +269,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       'approved_pending_publication' =>
         'Approved. Waiting for access to be published.',
       'rejected' => 'Application rejected. $reason',
-      _ => 'Submitted. Pending review.',
+      'submitted' => 'Submitted. Pending review.',
+      _ => 'Review status unavailable.',
     };
   }
 
@@ -234,6 +278,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     ..._details,
     'deviceRegistration': _device,
     'submitted': _submitted,
+    'correctionRevision': _correction?.updateTime,
   });
 
   Future<void> _submit() => _run(() async {
@@ -274,12 +319,14 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     } else {
       await _repository!.resubmit(user, correction, details);
       _correction = null;
+      _application = null;
     }
     _submitted = true;
     await _repository!.saveDraft(user.uid, {
       ...details,
       'deviceRegistration': binding,
       'submitted': true,
+      'correctionRevision': correction?.updateTime,
     });
     _message = 'Submitted. Pending review.';
   }, submitting: true);
