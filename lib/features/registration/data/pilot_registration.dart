@@ -158,6 +158,12 @@ class PilotRegistration {
       'status': 'submitted',
       'revision': application.nextRevision,
     });
+    try {
+      final cached = await _draftFile(user.uid, kind: 'profile');
+      if (await cached.exists()) await cached.delete();
+    } on FileSystemException {
+      // The server accepted the correction. A cache error cannot undo it.
+    }
   }
 
   Future<void> submit(User user, Map<String, String> details) async {

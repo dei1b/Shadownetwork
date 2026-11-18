@@ -131,11 +131,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
 
   Future<void> _openRegistration() async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => PilotRegistrationPage(
-          openCorrection: _application?.status == 'changes_requested',
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => const PilotRegistrationPage()),
     );
     if (!mounted) return;
     await _loadAccount();
@@ -196,7 +192,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       'submitted' => 'Pending review',
       _ =>
         _draft['submitted'] == true
-            ? 'Pending review'
+            ? 'Review status unavailable'
             : _user == null
             ? 'Signed out'
             : 'Registration incomplete',
@@ -339,15 +335,6 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
             title: const Text('Manage DNSC account'),
             onTap: _busy ? null : _openRegistration,
           ),
-        ListTile(
-          leading: const Icon(Icons.qr_code_outlined),
-          title: const Text('Phone registration'),
-          subtitle: const Text('Register offline with an admin'),
-          onTap: () async {
-            await Navigator.of(context).pushNamed('/trust-bundle');
-            if (mounted && pilotRegistrationEnabled) await _loadAccount();
-          },
-        ),
         ListTile(
           leading: const Icon(Icons.settings_outlined),
           title: const Text('Settings'),

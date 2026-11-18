@@ -13,6 +13,7 @@ import 'package:shadownetwork/core/constants/app_typography.dart';
 import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
+import 'package:shadownetwork/features/registration/data/pilot_registration.dart';
 import 'package:shadownetwork/features/registration/presentation/profile_section.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
@@ -890,21 +891,23 @@ class _HomePageState extends ConsumerState<HomePage> {
       DeviceAccessLevel.keyMismatch => (
         Icons.key_off_rounded,
         'PHONE NEEDS TO BE REGISTERED AGAIN',
-        'Show your registration code to the campus administrator to restore campus responder access.',
+        'Open Backup registration in Advanced settings to get a code for the campus administrator.',
         const Color(0xFFFFE4E1),
         const Color(0xFF8B1E1E),
       ),
       DeviceAccessLevel.unregistered => (
         Icons.app_registration_rounded,
         'REGISTER THIS PHONE',
-        'You can send an SOS before registering. Open Phone Registration to submit your DNSC details for review.',
+        pilotRegistrationEnabled
+            ? 'You can send an SOS before registering. Open Profile to sign in or register with DNSC.'
+            : 'You can send an SOS before registering. Open Profile, then Settings and Advanced, to use Backup registration.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
       DeviceAccessLevel.outdatedBundle => (
         Icons.update_rounded,
         'APPROVAL EXPIRED',
-        'Ask the campus administrator for a new approval code. You can still send an SOS.',
+        'Open Profile to check approval. If the administrator gave you a new code, use Backup registration in Advanced settings.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
@@ -921,7 +924,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       color: background,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
+        onTap: () => _selectTab(4),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -2993,21 +2996,6 @@ class _HomePageState extends ConsumerState<HomePage> {
             ],
           ),
         ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: _ActionCard(
-            icon: const Icon(
-              Icons.qr_code_scanner_rounded,
-              color: Color(0xFFE83C3D),
-              size: 34,
-            ),
-            label: 'Phone registration',
-            labelColor: const Color(0xFFE83C3D),
-            subtitle: 'Register or update approval',
-            onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
-          ),
-        ),
       ],
     );
   }
@@ -3073,21 +3061,6 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: double.infinity,
-          child: _ActionCard(
-            icon: const Icon(
-              Icons.admin_panel_settings_outlined,
-              color: Color(0xFFE83C3D),
-              size: 34,
-            ),
-            label: 'DEVICE TRUST',
-            labelColor: const Color(0xFFE83C3D),
-            subtitle: 'View responder approval and device ID',
-            onTap: () => Navigator.of(context).pushNamed('/trust-bundle'),
-          ),
         ),
       ],
     );

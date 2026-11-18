@@ -5,8 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
-import 'package:shadownetwork/features/security/domain/entities/device_crypto_identity.dart';
-import 'package:shadownetwork/features/security/domain/entities/device_signing_identity.dart';
+import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
+import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
+import 'package:shadownetwork/features/security/domain/entities/device_registration_qr.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_trust_record.dart';
 import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/trust/domain/repositories/trust_repository.dart';
@@ -32,17 +33,13 @@ void main() {
     (tester) async {
       SharedPreferences.setMockInitialValues({});
       addTearDown(() => SharedPreferences.setMockInitialValues({}));
-      final key = List<int>.generate(32, (index) => index);
-      final identity = DeviceCryptoIdentity(
-        keyId: 'test',
-        keyVersion: 1,
-        privateKeyBytes: key,
-        publicKeyBytes: key,
-      );
-      final signingIdentity = DeviceSigningIdentity(
-        privateKeyBytes: key,
-        publicKeyBytes: key,
-      );
+      final secrets = InMemorySecretValueStore();
+      final identity = await DeviceIdentityStore(
+        secretStore: secrets,
+      ).loadOrCreate();
+      final signingIdentity = await DeviceSigningIdentityStore(
+        secretStore: secrets,
+      ).loadOrCreate();
       const peer = Peer(
         id: 'SN-RESIDENT-01',
         name: 'Resident',
@@ -69,7 +66,11 @@ void main() {
         ],
       );
       final messenger = tester.binding.defaultBinaryMessenger;
+      String? copied;
       messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String;
+        }
         return call.method == 'Clipboard.getData' ? {'text': code} : null;
       });
       addTearDown(
@@ -91,6 +92,20 @@ void main() {
           child: const MaterialApp(home: TrustBundleImportPage()),
         ),
       );
+      await tester.pumpAndSettle();
+      expect(find.text('Backup registration'), findsOneWidget);
+      expect(find.byType(TextFormField), findsNothing);
+      final showCode = find.text('Show my registration code');
+      await tester.ensureVisible(showCode);
+      await tester.tap(showCode);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy registration text'));
+      await tester.pumpAndSettle();
+      final registration = DeviceRegistrationQr.fromJsonString(copied!);
+      await registration.verifySignature();
+      expect(registration.deviceId, peer.id);
+      expect(registration.userInformation, isNull);
+      await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
       final paste = find.text('Paste copied code');
       await tester.ensureVisible(paste);
