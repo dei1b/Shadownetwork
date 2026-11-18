@@ -45,11 +45,11 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
     ),
     (
       icon: Icons.qr_code_2_rounded,
-      title: 'Register with your barangay',
+      title: 'Register with DNSC',
       body:
-          'Open Phone Registration, save your details, and show your '
-          'registration code to the barangay admin. Then scan the approval '
-          'code the admin gives you.',
+          'Open Phone Registration and submit your DNSC details for review. '
+          'Check your registration status when you are online. '
+          'A campus administrator can also help you register using a code.',
     ),
   ];
 

@@ -76,11 +76,12 @@ class SosCategoryPicker extends StatelessWidget {
                       Icon(
                         switch (category) {
                           Category.medical => Icons.local_hospital,
-                          Category.fireElectrical =>
-                            Icons.local_fire_department,
+                          Category.fireElectrical ||
+                          Category.fireSmoke => Icons.local_fire_department,
                           Category.safetyThreat => Icons.shield_outlined,
                           Category.rescue => Icons.accessibility_new,
-                          Category.publicHazard => Icons.warning_amber_rounded,
+                          Category.accidentInjury => Icons.healing,
+                          Category.electricalHazard => Icons.bolt,
                           _ => Icons.more_horiz,
                         },
                         color: const Color(0xFFE83C3D),

@@ -45,6 +45,7 @@ class _MapPlatform extends ml.MapLibrePlatform {
 
 class _MapController implements ml.MapLibreMapController {
   bool localRequestsEnabled = false;
+  final layerVisibility = <String, bool>{};
 
   @override
   Future<bool?> moveCamera(ml.CameraUpdate cameraUpdate) async => true;
@@ -52,6 +53,11 @@ class _MapController implements ml.MapLibreMapController {
   @override
   Future<void> forceOnlineMode() async {
     localRequestsEnabled = true;
+  }
+
+  @override
+  Future<void> setLayerVisibility(String layerId, bool visible) async {
+    layerVisibility[layerId] = visible;
   }
 
   @override
@@ -449,7 +455,7 @@ void main() {
     await tester.pump();
     expect(find.text('Map'), findsOneWidget);
     expect(find.text('See nearby phones and SOS alerts'), findsOneWidget);
-    expect(headerText('Panabo offline'), findsOneWidget);
+    expect(headerText('Offline map'), findsOneWidget);
     final fullMap = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
     final fullState = tester.state(find.byType(ml.MapLibreMap));
     expect(find.byType(ml.MapLibreMap, skipOffstage: false), findsNWidgets(2));
@@ -463,8 +469,20 @@ void main() {
     );
     final fullController = _MapController();
     fullMap.onMapCreated!(fullController);
+    fullMap.onStyleLoadedCallback!();
     await tester.pump();
     expect(fullController.localRequestsEnabled, isTrue);
+    expect(find.text('Go to DNSC'), findsOneWidget);
+    await tester.tap(find.byTooltip('Map layers and markers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DNSC campus overlay'));
+    await tester.pumpAndSettle();
+    expect(fullController.layerVisibility['dnsc-campus-overlay'], isFalse);
+    await tester.tap(find.byTooltip('Map layers and markers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DNSC campus overlay'));
+    await tester.pumpAndSettle();
+    expect(fullController.layerVisibility['dnsc-campus-overlay'], isTrue);
 
     final homeContext = tester.element(find.byType(HomePage));
     showDialog<void>(

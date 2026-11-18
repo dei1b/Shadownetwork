@@ -58,6 +58,13 @@ class OfflinePanaboTileServer {
         case 'style.json':
           await _serveStyle(request);
           return;
+        case 'dnsc-campus.png':
+          await _serveAsset(
+            request,
+            assetPath: 'assets/map_styles/dnsc_campus_overlay.png',
+            contentType: ContentType('image', 'png'),
+          );
+          return;
         case 'tiles':
           await _serveTile(request, segments);
           return;
@@ -125,7 +132,8 @@ class OfflinePanaboTileServer {
           'fonts/{fontstack}/{range}.pbf',
           '$baseUrl/fonts/{fontstack}/{range}.pbf',
         )
-        .replaceAll('sprites/ofm', '$baseUrl/sprites/ofm');
+        .replaceAll('sprites/ofm', '$baseUrl/sprites/ofm')
+        .replaceAll('"dnsc-campus.png"', '"$baseUrl/dnsc-campus.png"');
 
     await _writeBytes(
       request,

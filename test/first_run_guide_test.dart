@@ -53,7 +53,7 @@ void main() {
         for (final title in [
           'Nearby phones pass it on',
           'Use the offline map',
-          'Register with your barangay',
+          'Register with DNSC',
         ]) {
           await tester.ensureVisible(find.text('Next'));
           await tester.tap(find.text('Next'));

@@ -36,7 +36,7 @@ class _ChatRecipientPageState extends ConsumerState<ChatRecipientPage> {
                 child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
-                    'No registered phones available. Ask your barangay admin for a current approval code.',
+                    'No registered phones available. Ask your campus administrator for a current approval code.',
                     textAlign: TextAlign.center,
                   ),
                 ),

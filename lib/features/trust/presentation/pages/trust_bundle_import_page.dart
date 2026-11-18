@@ -191,7 +191,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       }
       setState(() => _error = error.message);
       _showSnackBar(
-        'Could not save the approval update. Ask the barangay admin for a current code.',
+        'Could not save the approval update. Ask the campus administrator for a current code.',
         kind: FeedbackKind.error,
       );
     } catch (_) {
@@ -218,9 +218,9 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Is this your barangay admin?'),
+          title: const Text('Is this your campus administrator?'),
           content: Text(
-            'Only continue if your barangay admin gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${bundle.issuer?.signingKeyId ?? 'unavailable'}',
+            'Only continue if your campus administrator gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${bundle.issuer?.signingKeyId ?? 'unavailable'}',
           ),
           actions: [
             TextButton(
@@ -272,31 +272,31 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         DeviceAccessLevel.unregistered => const ActionStatus(
           title: 'This phone is still unregistered',
           message:
-              'Show your registration code to the barangay admin and ask them to approve this phone.',
+              'Show your registration code to the campus administrator and ask them to approve this phone.',
           kind: FeedbackKind.warning,
         ),
         DeviceAccessLevel.revoked => const ActionStatus(
           title: 'Approval was removed',
           message:
-              'Contact the barangay admin to check this phone’s registration.',
+              'Contact the campus administrator to check this phone’s registration.',
           kind: FeedbackKind.warning,
         ),
         DeviceAccessLevel.keyMismatch => const ActionStatus(
           title: 'Register this phone again',
           message:
-              'Show your current registration code to the barangay admin and ask for a new approval code.',
+              'Show your current registration code to the campus administrator and ask for a new approval code.',
           kind: FeedbackKind.warning,
         ),
         DeviceAccessLevel.outdatedBundle => const ActionStatus(
           title: 'Approval code expired',
-          message: 'Ask the barangay admin for a current approval code.',
+          message: 'Ask the campus administrator for a current approval code.',
           kind: FeedbackKind.warning,
         ),
         _ => ActionStatus(
           title: 'This phone is approved',
           message: profile.canAccessResponderInterface
               ? 'Responder tools are ready to use.'
-              : 'This phone is now registered with the barangay.',
+              : 'This phone is now registered with DNSC.',
           kind: FeedbackKind.success,
         ),
       },
@@ -354,7 +354,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                     _TrustPanel(
                       title: "2. Scan the admin's approval code",
                       subtitle:
-                          'After registration, scan the code the barangay admin gives you. Use this step again when they give you an updated code.',
+                          'After registration, scan the code the campus administrator gives you. Use this step again when they give you an updated code.',
                       child: Column(
                         children: [
                           if (approval != null) ...[
@@ -473,8 +473,8 @@ class _TrustHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final saved = bundle;
     final message = saved == null
-        ? 'The barangay admin registers your phone and gives you an approval code. You can still send an SOS before registering.'
-        : 'An approval update from the barangay admin is saved on this phone.';
+        ? 'The campus administrator registers your phone and gives you an approval code. You can still send an SOS before registering.'
+        : 'An approval update from the campus administrator is saved on this phone.';
     return Text(message, style: Theme.of(context).textTheme.bodyMedium);
   }
 }
@@ -499,7 +499,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
     return _TrustPanel(
       title: '1. Show your registration code',
       subtitle:
-          'Save your information above, then show this code to the barangay admin.',
+          'Save your information above, then show this code to the campus administrator.',
       child: localPeer.when(
         data: (peer) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -755,7 +755,7 @@ class _DeviceRegistrationQrDialogState
                 ),
               ],
               const Text(
-                'Show this code to the barangay admin.',
+                'Show this code to the campus administrator.',
                 textAlign: TextAlign.center,
                 style: TextStyle(color: _trustMuted, fontSize: 12),
               ),
@@ -859,7 +859,7 @@ class _ManualImportCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrustPanel(
       title: 'Enter approval text',
-      subtitle: 'Use the text supplied by the barangay admin.',
+      subtitle: 'Use the text supplied by the campus administrator.',
       child: Column(
         children: [
           TextField(
@@ -895,7 +895,7 @@ class _BundleSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return _TrustPanel(
       title: 'Saved approval update',
-      subtitle: 'The latest update from the barangay admin.',
+      subtitle: 'The latest update from the campus administrator.',
       child: bundle == null
           ? const Text(
               'No approval update saved. You can still send an SOS.',

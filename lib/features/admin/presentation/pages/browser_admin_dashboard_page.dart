@@ -1083,7 +1083,7 @@ class _RegisterDeviceCard extends StatelessWidget {
                 controller: ownerController,
                 decoration: const InputDecoration(
                   labelText: 'User full name / Unit name',
-                  hintText: 'Example: Barangay Health Responder',
+                  hintText: 'Example: Campus responder',
                   prefixIcon: Icon(Icons.badge_rounded),
                   border: OutlineInputBorder(),
                 ),

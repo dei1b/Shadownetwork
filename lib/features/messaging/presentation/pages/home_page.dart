@@ -58,6 +58,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     ...messaging.Category.sosCategories,
   };
   bool _showMapPeers = true;
+  bool _showCampusOverlay = true;
+  bool _fullMapStyleReady = false;
+  bool _changingCampusOverlay = false;
   bool _showMapLocation = true;
   bool _isCheckingAppUpdate = false;
   bool _isSyncingRelay = false;
@@ -86,6 +89,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   static const String _mapFilterAllMarkers = 'all-markers';
+  static const String _campusOverlayLayer = 'dnsc-campus-overlay';
+  static const LatLng _campusCenter = LatLng(7.31399542, 125.67054432);
   static const String _mapFilterPeers = 'peers';
   static const String _mapFilterLocation = 'location';
 
@@ -147,6 +152,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     _activityGeneration = generation;
     _homeMapController = null;
     _fullMapController = null;
+    _fullMapStyleReady = false;
   }
 
   @override
@@ -343,6 +349,34 @@ class _HomePageState extends ConsumerState<HomePage> {
     _mapController?.moveCamera(
       ml.CameraUpdate.newLatLngZoom(_toMapLibreLatLng(center), zoom),
     );
+  }
+
+  void _focusCampus() {
+    const zoom = 16.2;
+    setState(() {
+      _isFollowing = false;
+      _currentCenter = _campusCenter;
+      _currentZoom = zoom;
+    });
+    _moveMap(_campusCenter, zoom);
+  }
+
+  Future<void> _setCampusOverlay(bool visible) async {
+    final controller = _fullMapController;
+    if (controller == null || _changingCampusOverlay) return;
+    setState(() => _changingCampusOverlay = true);
+    try {
+      await controller.setLayerVisibility(_campusOverlayLayer, visible);
+      if (mounted && identical(controller, _fullMapController)) {
+        setState(() => _showCampusOverlay = visible);
+      }
+    } catch (_) {
+      if (mounted && identical(controller, _fullMapController)) {
+        _showMessage('Could not change the campus overlay. Try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _changingCampusOverlay = false);
+    }
   }
 
   void _showMessage(String message, {FeedbackKind kind = FeedbackKind.error}) {
@@ -636,7 +670,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     if (_chatPickerOpen) return;
     if (!widget.accessProfile.isApproved) {
       _showMessage(
-        'Register this phone with your barangay to start a private chat.',
+        'Register this phone with DNSC to start a private chat.',
         kind: FeedbackKind.info,
       );
       return;
@@ -841,14 +875,14 @@ class _HomePageState extends ConsumerState<HomePage> {
       DeviceAccessLevel.unregistered => (
         Icons.app_registration_rounded,
         'REGISTER THIS PHONE',
-        'You can send an SOS before registering. To register, show your code to the barangay admin and scan their approval code.',
+        'You can send an SOS before registering. Open Phone Registration to submit your DNSC details for review.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
       DeviceAccessLevel.outdatedBundle => (
         Icons.update_rounded,
         'APPROVAL EXPIRED',
-        'Ask the barangay admin for a new approval code. You can still send an SOS.',
+        'Ask the campus administrator for a new approval code. You can still send an SOS.',
         const Color(0xFFFFF1D6),
         const Color(0xFF7A4B00),
       ),
@@ -1024,12 +1058,47 @@ class _HomePageState extends ConsumerState<HomePage> {
                 badge:
                     _offlineMapStyle != null && _isInsidePanabo(_currentCenter)
                     ? const _TabHeaderBadge(
-                        label: 'Panabo offline',
+                        label: 'Offline map',
                         positive: true,
                       )
                     : null,
               ),
               const SizedBox(height: 8),
+              Wrap(
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.center_focus_strong),
+                    label: const Text('Go to DNSC'),
+                    onPressed: _focusCampus,
+                  ),
+                  TextButton.icon(
+                    icon: const Icon(Icons.school_outlined),
+                    label: const Text('Campus buildings'),
+                    onPressed: () => Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => Scaffold(
+                          appBar: AppBar(
+                            title: const Text('DNSC campus buildings'),
+                          ),
+                          body: SafeArea(
+                            child: InteractiveViewer(
+                              maxScale: 12,
+                              child: SizedBox.expand(
+                                child: Image.asset(
+                                  'assets/home/dnsc_campus_map.jpg',
+                                  fit: BoxFit.contain,
+                                  semanticLabel:
+                                      'DNSC campus map with building names',
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               if (scroll)
                 SizedBox(
                   height: (constraints.maxHeight * 0.4)
@@ -1810,6 +1879,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.medical ||
       messaging.Category.fireElectrical ||
       messaging.Category.safetyThreat ||
+      messaging.Category.fireSmoke ||
+      messaging.Category.accidentInjury ||
+      messaging.Category.electricalHazard ||
       messaging.Category.publicHazard ||
       messaging.Category.other => 'SOS',
       messaging.Category.food ||
@@ -1826,6 +1898,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.medical ||
       messaging.Category.fireElectrical ||
       messaging.Category.safetyThreat ||
+      messaging.Category.fireSmoke ||
+      messaging.Category.accidentInjury ||
+      messaging.Category.electricalHazard ||
       messaging.Category.publicHazard ||
       messaging.Category.other => category.label,
       messaging.Category.food => 'Food Request',
@@ -1839,10 +1914,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   String _shortLabelForCategory(messaging.Category category) {
     return switch (category.sosCategory) {
       messaging.Category.medical => 'Medical',
-      messaging.Category.fireElectrical => 'Fire / Electrical',
+      messaging.Category.fireSmoke => 'Fire or Smoke',
       messaging.Category.safetyThreat => 'Safety Threat',
-      messaging.Category.rescue => 'Flood / Rescue',
-      messaging.Category.publicHazard => 'Public Hazard',
+      messaging.Category.accidentInjury => 'Accident or Injury',
+      messaging.Category.electricalHazard => 'Electrical Hazard',
       _ => 'Other Assistance',
     };
   }
@@ -1857,7 +1932,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.transport => 'RIDE',
       messaging.Category.information => 'INFO',
       messaging.Category.other => 'OTHER',
-      messaging.Category.fireElectrical => 'FIRE',
+      messaging.Category.fireElectrical ||
+      messaging.Category.fireSmoke => 'FIRE',
+      messaging.Category.accidentInjury => 'INJURY',
+      messaging.Category.electricalHazard => 'ELECTRICAL',
       messaging.Category.safetyThreat => 'SAFETY',
       messaging.Category.publicHazard => 'HAZARD',
     };
@@ -1873,7 +1951,10 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.transport => Icons.directions_bus,
       messaging.Category.information => Icons.info,
       messaging.Category.other => Icons.more_horiz,
-      messaging.Category.fireElectrical => Icons.local_fire_department,
+      messaging.Category.fireElectrical ||
+      messaging.Category.fireSmoke => Icons.local_fire_department,
+      messaging.Category.accidentInjury => Icons.healing,
+      messaging.Category.electricalHazard => Icons.bolt,
       messaging.Category.safetyThreat => Icons.shield_outlined,
       messaging.Category.publicHazard => Icons.warning_amber_rounded,
     };
@@ -1884,6 +1965,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       messaging.Category.rescue ||
       messaging.Category.medical ||
       messaging.Category.fireElectrical ||
+      messaging.Category.fireSmoke ||
+      messaging.Category.accidentInjury ||
+      messaging.Category.electricalHazard ||
       messaging.Category.safetyThreat => const Color(0xFFE83C3D),
       messaging.Category.food ||
       messaging.Category.shelter ||
@@ -1978,7 +2062,8 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String _peerTypeLabel(messaging.Peer peer) {
     return switch (peer.type) {
-      messaging.PeerType.responder || messaging.PeerType.authority => 'Campus responder',
+      messaging.PeerType.responder ||
+      messaging.PeerType.authority => 'Campus responder',
       messaging.PeerType.relay => 'Relay',
       messaging.PeerType.civilian => 'Student',
       messaging.PeerType.unknown => 'User',
@@ -2329,6 +2414,17 @@ class _HomePageState extends ConsumerState<HomePage> {
                             }
                             setState(() {});
                           },
+                          onStyleLoadedCallback: () {
+                            if (!showLegend ||
+                                !mounted ||
+                                activityGeneration != _activityGeneration) {
+                              return;
+                            }
+                            setState(() => _fullMapStyleReady = true);
+                            if (!_showCampusOverlay) {
+                              unawaited(_setCampusOverlay(false));
+                            }
+                          },
                           onCameraMove: (cameraPosition) {
                             final active = showLegend
                                 ? _selectedTab == 2
@@ -2401,9 +2497,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   String _mapTileStatusLabel(AsyncValue<CacheStore> tileCacheStore) {
     if (_isInsidePanabo(_currentCenter)) {
-      return _offlineMapStyle == null
-          ? 'Preparing offline map'
-          : 'Panabo offline';
+      return _offlineMapStyle == null ? 'Preparing offline map' : 'Offline map';
     }
 
     if (_tileLoadFailed) {
@@ -2579,7 +2673,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildMapLegend() {
     return PopupMenuButton<Object>(
-      tooltip: 'Filter map markers',
+      tooltip: 'Map layers and markers',
       offset: const Offset(0, 8),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       onSelected: _handleMapLegendSelection,
@@ -2598,6 +2692,19 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
             label: 'All markers',
+          ),
+        ),
+        PopupMenuItem<Object>(
+          value: _campusOverlayLayer,
+          enabled: _fullMapStyleReady && !_changingCampusOverlay,
+          child: _MapLegendChoice(
+            selected: _showCampusOverlay,
+            marker: const SizedBox(
+              width: 34,
+              height: 34,
+              child: Icon(Icons.school_outlined),
+            ),
+            label: 'DNSC campus overlay',
           ),
         ),
         const PopupMenuDivider(height: 8),
@@ -2701,6 +2808,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _handleMapLegendSelection(Object value) {
+    if (value == _campusOverlayLayer) {
+      unawaited(_setCampusOverlay(!_showCampusOverlay));
+      return;
+    }
     setState(() {
       if (value == _mapFilterAllMarkers) {
         _visibleMapCategories

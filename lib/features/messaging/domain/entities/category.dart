@@ -10,25 +10,33 @@ enum Category {
   // Append codes: existing enum positions are persisted as lookup IDs.
   fireElectrical,
   safetyThreat,
-  publicHazard;
+  publicHazard,
+  fireSmoke,
+  accidentInjury,
+  electricalHazard;
 
   static const sosCategories = [
     medical,
-    fireElectrical,
+    fireSmoke,
     safetyThreat,
-    rescue,
-    publicHazard,
+    accidentInjury,
+    electricalHazard,
     other,
   ];
 
   // Retired categories remain readable but share the Other filter in the new UI.
   Category get sosCategory => switch (this) {
     food || water || shelter || transport || information => other,
+    fireElectrical => fireSmoke,
+    rescue || publicHazard => other,
     _ => this,
   };
 
   String get label => switch (this) {
     medical => 'Medical Assistance',
+    fireSmoke => 'Fire or Smoke',
+    accidentInjury => 'Accident or Injury',
+    electricalHazard => 'Electrical Hazard',
     fireElectrical => 'Fire & Electrical Danger',
     safetyThreat => 'Safety Threat',
     rescue => 'Flood & Rescue',

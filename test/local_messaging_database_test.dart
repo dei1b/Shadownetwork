@@ -37,6 +37,9 @@ void main() {
       'fireElectrical',
       'safetyThreat',
       'publicHazard',
+      'fireSmoke',
+      'accidentInjury',
+      'electricalHazard',
     ]);
     expect(peerTypes.map((row) => row['code']), [
       'civilian',
