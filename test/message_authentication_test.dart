@@ -424,6 +424,44 @@ void main() {
     },
   );
 
+  test(
+    'a field-test logging failure leaves the SOS saved and queued',
+    () async {
+      final container = ProviderContainer(
+        overrides: [
+          localMessagingDatabaseProvider.overrideWith((ref) async => db),
+          deviceSigningIdentityProvider.overrideWith((ref) async => signing),
+        ],
+      );
+      addTearDown(container.dispose);
+      final metrics = await container.read(
+        validationMetricsRepositoryProvider.future,
+      );
+      await metrics.startSession(
+        name: 'Local SOS',
+        environment: 'indoor',
+        deviceId: sender.id,
+        deviceRole: 'civilian',
+        testRunId: 'SOS-TEST',
+      );
+      await db.execute("""
+        CREATE TRIGGER fail_event_write BEFORE INSERT ON message_events
+        BEGIN SELECT RAISE(ABORT, 'injected event write failure'); END
+      """);
+
+      await container.read(saveSosMessageProvider)(message());
+
+      final repository = await container.read(
+        sosMessageRepositoryProvider.future,
+      );
+      final queue = await container.read(scfServiceProvider.future);
+      expect(
+        (await repository.getMessages()).single.messageHash,
+        (await queue.getStoredEnvelopes()).single.messageHash,
+      );
+    },
+  );
+
   test('outbound queue failure rolls back the visible SOS', () async {
     await register();
     final network = MockScfTransportNetwork();

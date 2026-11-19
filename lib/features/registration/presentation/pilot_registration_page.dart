@@ -45,10 +45,13 @@ class PilotRegistrationPage extends ConsumerStatefulWidget {
 }
 
 class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
-  static const _labels = {
+  static const _requiredDetailLabels = {
     'displayName': 'Full name',
     'studentNumber': 'Student number',
     'courseYear': 'Course and year',
+  };
+  static const _labels = {
+    ..._requiredDetailLabels,
     'phone': 'Phone number (optional)',
     'address': 'Address (optional)',
   };
@@ -57,10 +60,16 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   };
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _requiredFocusNodes = {
+    'email': FocusNode(),
+    'password': FocusNode(),
+    for (final key in _requiredDetailLabels.keys) key: FocusNode(),
+  };
+  Set<String> _missingFields = {};
   PilotRegistration? _repository;
   User? _user;
   bool _busy = true;
-  bool _submitting = false;
+  bool _navigationLocked = false;
   bool _locked = false;
   bool _submitted = false;
   String? _device;
@@ -97,6 +106,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     _user = user;
     _application = null;
     _correction = null;
+    _missingFields.clear();
     for (final entry in _fields.entries) {
       entry.value.text = draft[entry.key] as String? ?? '';
     }
@@ -133,12 +143,12 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
 
   Future<void> _run(
     Future<void> Function() action, {
-    bool submitting = false,
+    bool lockNavigation = false,
   }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
-      _submitting = submitting;
+      _navigationLocked = lockNavigation;
     });
     try {
       await action();
@@ -154,28 +164,34 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _submitting = false;
+          _navigationLocked = false;
         });
       }
     }
   }
 
-  Future<void> _authenticate({required bool create}) => _run(() async {
-    final auth = _repository!.auth;
+  Future<void> _authenticate({required bool create}) async {
     final email = _email.text.trim();
     final password = _password.text;
-    if (create) {
-      await auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-    } else {
-      await auth.signInWithEmailAndPassword(email: email, password: password);
+    if (_busy ||
+        !_validateRequiredFields({'email': email, 'password': password})) {
+      return;
     }
-    if (!mounted) return;
-    _password.clear();
-    await _loadUser();
-  });
+    await _run(() async {
+      final auth = _repository!.auth;
+      if (create) {
+        await auth.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } else {
+        await auth.signInWithEmailAndPassword(email: email, password: password);
+      }
+      if (!mounted) return;
+      _password.clear();
+      await _loadUser();
+    }, lockNavigation: true);
+  }
 
   Map<String, String> get _details => {
     for (final entry in _fields.entries) entry.key: entry.value.text.trim(),
@@ -221,6 +237,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     if (application.status == 'changes_requested') {
       if ((_correction?.updateTime ?? _draftCorrectionRevision) !=
           application.updateTime) {
+        _missingFields.clear();
         for (final field in _fields.entries) {
           field.value.text = application.fields[field.key] as String? ?? '';
         }
@@ -281,15 +298,52 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     'correctionRevision': _correction?.updateTime,
   });
 
-  Future<void> _submit() => _run(() async {
-    final details = _details;
-    if ([
-      'displayName',
-      'studentNumber',
-      'courseYear',
-    ].any((key) => details[key]!.isEmpty)) {
-      throw StateError('Fill in the required details.');
+  bool _validateRequiredFields(Map<String, String> values) {
+    final missing = {
+      for (final entry in values.entries)
+        if (entry.value.isEmpty) entry.key,
+    };
+    setState(() => _missingFields = missing);
+    if (missing.isEmpty) return true;
+
+    final focusNode = _requiredFocusNodes[missing.first]!;
+    focusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final fieldContext = focusNode.context;
+      if (fieldContext != null) {
+        Scrollable.ensureVisible(fieldContext, alignment: 0.1);
+      }
+    });
+    return false;
+  }
+
+  void _clearFieldError(String key, String value) {
+    if (value.isNotEmpty && _missingFields.contains(key)) {
+      setState(() => _missingFields.remove(key));
     }
+  }
+
+  InputDecoration _requiredDecoration(String key, String label) =>
+      InputDecoration(
+        labelText: '$label (required)',
+        errorText: _missingFields.contains(key)
+            ? 'Enter your ${label.toLowerCase()}.'
+            : null,
+        errorMaxLines: 2,
+      );
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    final details = _details;
+    if (_validateRequiredFields({
+      for (final key in _requiredDetailLabels.keys) key: details[key]!,
+    })) {
+      await _submitDetails(details);
+    }
+  }
+
+  Future<void> _submitDetails(Map<String, String> details) => _run(() async {
     final peer = ref.read(localPeerProvider.future);
     final crypto = ref.read(deviceCryptoIdentityProvider.future);
     final signing = ref.read(deviceSigningIdentityProvider.future);
@@ -329,7 +383,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       'correctionRevision': correction?.updateTime,
     });
     _message = 'Submitted. Pending review.';
-  }, submitting: true);
+  }, lockNavigation: true);
 
   @override
   void dispose() {
@@ -338,12 +392,15 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     for (final controller in _fields.values) {
       controller.dispose();
     }
+    for (final node in _requiredFocusNodes.values) {
+      node.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) =>
-      PopScope(canPop: !_submitting, child: _buildPage());
+      PopScope(canPop: !_navigationLocked, child: _buildPage());
 
   Widget _buildPage() => Scaffold(
     appBar: AppBar(
@@ -358,92 +415,108 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
         : SafeArea(
             minimum: const EdgeInsets.all(16),
             child: OutlinedButton(
-              onPressed: _submitting ? null : widget.onContinue,
+              onPressed: _navigationLocked ? null : widget.onContinue,
               child: Text(
-                _user == null ? 'Continue unverified' : 'Continue to Home',
+                _user == null
+                    ? 'Continue without an account'
+                    : 'Continue to Home',
+                textAlign: TextAlign.center,
               ),
             ),
           ),
-    body: ListView(
+    body: SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      children: [
-        if (widget.onContinue != null)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 16),
-            child: Text(
-              'Sign in or create an account to request DNSC access. '
-              'You can use the app and send an SOS while waiting for approval.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.onContinue != null)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Sign in or create an account to request DNSC access. '
+                'You can send an SOS right away, even without an account. '
+                'To register later or check your status, open Profile.',
+              ),
             ),
-          ),
-        if (!pilotRegistrationIsLive)
-          const Text('Use synthetic details for this local test.'),
-        if (_busy) const LinearProgressIndicator(),
-        if (_message.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Semantics(liveRegion: true, child: Text(_message)),
-          ),
-        if (_repository != null && _user == null) ...[
-          TextField(
-            controller: _email,
-            enabled: !_busy,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: 'Email'),
-          ),
-          TextField(
-            controller: _password,
-            enabled: !_busy,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Password'),
-          ),
-          FilledButton(
-            onPressed: _busy ? null : () => _authenticate(create: true),
-            child: const Text('Create account'),
-          ),
-          TextButton(
-            onPressed: _busy ? null : () => _authenticate(create: false),
-            child: const Text('Sign in'),
-          ),
-        ],
-        if (_user != null) ...[
-          TextButton(
-            onPressed: _busy ? null : _refreshStatus,
-            child: const Text('Check review status'),
-          ),
-          if (!_submitted) ...[
-            for (final entry in _labels.entries)
-              TextField(
-                controller: _fields[entry.key],
-                enabled: !_busy && !_locked,
-                maxLength: entry.key == 'address' ? 200 : 100,
-                decoration: InputDecoration(labelText: entry.value),
-              ),
-            if (!_locked)
-              TextButton(
-                onPressed: _busy
-                    ? null
-                    : () => _run(() async {
-                        await _save();
-                        _message = 'Draft saved on this phone.';
-                      }),
-                child: const Text('Save draft'),
-              ),
+          if (!pilotRegistrationIsLive)
+            const Text('Use synthetic details for this local test.'),
+          if (_busy) const LinearProgressIndicator(),
+          if (_message.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Semantics(liveRegion: true, child: Text(_message)),
+            ),
+          if (_repository != null && _user == null) ...[
+            TextField(
+              controller: _email,
+              focusNode: _requiredFocusNodes['email'],
+              enabled: !_busy,
+              keyboardType: TextInputType.emailAddress,
+              onChanged: (value) => _clearFieldError('email', value.trim()),
+              decoration: _requiredDecoration('email', 'Email'),
+            ),
+            TextField(
+              controller: _password,
+              focusNode: _requiredFocusNodes['password'],
+              enabled: !_busy,
+              obscureText: true,
+              onChanged: (value) => _clearFieldError('password', value),
+              decoration: _requiredDecoration('password', 'Password'),
+            ),
             FilledButton(
-              onPressed: _busy ? null : _submit,
-              child: Text(_locked ? 'Retry submission' : 'Submit for review'),
+              onPressed: _busy ? null : () => _authenticate(create: true),
+              child: const Text('Create account'),
+            ),
+            TextButton(
+              onPressed: _busy ? null : () => _authenticate(create: false),
+              child: const Text('Sign in'),
             ),
           ],
-          TextButton(
-            onPressed: _busy
-                ? null
-                : () => _run(() async {
-                    await _repository!.auth.signOut();
-                    await _loadUser();
-                  }),
-            child: const Text('Sign out'),
-          ),
+          if (_user != null) ...[
+            TextButton(
+              onPressed: _busy ? null : _refreshStatus,
+              child: const Text('Check review status'),
+            ),
+            if (!_submitted) ...[
+              for (final entry in _labels.entries)
+                TextField(
+                  controller: _fields[entry.key],
+                  focusNode: _requiredFocusNodes[entry.key],
+                  enabled: !_busy && !_locked,
+                  maxLength: entry.key == 'address' ? 200 : 100,
+                  onChanged: (value) =>
+                      _clearFieldError(entry.key, value.trim()),
+                  decoration: _requiredDetailLabels.containsKey(entry.key)
+                      ? _requiredDecoration(entry.key, entry.value)
+                      : InputDecoration(labelText: entry.value),
+                ),
+              if (!_locked)
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _run(() async {
+                          await _save();
+                          _message = 'Draft saved on this phone.';
+                        }),
+                  child: const Text('Save draft'),
+                ),
+              FilledButton(
+                onPressed: _busy ? null : _submit,
+                child: Text(_locked ? 'Retry submission' : 'Submit for review'),
+              ),
+            ],
+            TextButton(
+              onPressed: _busy
+                  ? null
+                  : () => _run(() async {
+                      await _repository!.auth.signOut();
+                      await _loadUser();
+                    }),
+              child: const Text('Sign out'),
+            ),
+          ],
         ],
-      ],
+      ),
     ),
   );
 }

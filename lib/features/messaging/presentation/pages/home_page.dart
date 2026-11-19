@@ -54,7 +54,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   int _selectedTab = 0;
   final List<int> _tabHistory = [];
   final Set<int> _visitedTabs = {0};
-  int _selectedMessageFilter = 0;
+  String? _selectedMessageFilter;
   int _selectedPeerFilter = 0;
   final Set<messaging.Category> _visibleMapCategories = {
     ...messaging.Category.sosCategories,
@@ -68,6 +68,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _isSyncingRelay = false;
   bool _isSharingLocation = false;
   bool _sosComposerOpen = false;
+  _SosDraft _sosDraft = _SosDraft();
   bool _chatPickerOpen = false;
 
   bool get _isResponder => widget.accessProfile.canAccessResponderInterface;
@@ -95,6 +96,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   static const LatLng _campusCenter = LatLng(7.31399542, 125.67054432);
   static const String _mapFilterPeers = 'peers';
   static const String _mapFilterLocation = 'location';
+  static const _sosActionColor = Color(0xFFCC3032);
 
   static const LatLng _mapCenter = LatLng(7.3026, 125.6888);
   static const double _minZoom = 10;
@@ -199,6 +201,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   Future<void> _startFollowing({bool showError = true}) async {
+    if (!mounted) return;
+    setState(() => _isFollowing = true);
     final canLocate = await _ensureLocationReady(showError: showError);
     if (!canLocate) {
       if (mounted) {
@@ -214,7 +218,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       return;
     }
 
-    setState(() => _isFollowing = true);
     await _locateMe(showError: showError);
 
     await _positionSubscription?.cancel();
@@ -272,16 +275,15 @@ class _HomePageState extends ConsumerState<HomePage> {
         return null;
       }
 
-      final targetZoom = _currentZoom < 16 ? 16.0 : _currentZoom;
-
       setState(() {
-        _isFollowing = true;
         _myPosition = myPoint;
-        _currentCenter = myPoint;
-        _currentZoom = targetZoom;
+        if (_isFollowing) {
+          _currentCenter = myPoint;
+          if (_currentZoom < 16) _currentZoom = 16;
+        }
       });
 
-      _moveMap(myPoint, targetZoom);
+      if (_isFollowing) _moveMap(myPoint, _currentZoom);
       return myPoint;
     } catch (_) {
       if (showError) {
@@ -575,11 +577,12 @@ class _HomePageState extends ConsumerState<HomePage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      enableDrag: true,
-      isDismissible: true,
+      enableDrag: false,
+      isDismissible: false,
       backgroundColor: Colors.transparent,
       builder: (context) {
         return _SosComposerSheet(
+          draft: _sosDraft,
           location: _myPosition,
           approvalUnavailable: approvalUnavailable,
           messageTabLabel: _isResponder ? 'Alerts' : 'Messages',
@@ -591,10 +594,11 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
 
     if (created == true && mounted) {
+      _sosDraft = _SosDraft();
       await _showTaskCompletionPopup(
         title: 'SOS Created',
         message:
-            'Saved on this phone. Nearby phones can relay it to rescuers. Delivery is still pending.',
+            'Saved on this phone. Nearby phones can relay it to campus responders. Delivery is still pending.',
         icon: Icons.check_rounded,
       );
     }
@@ -680,8 +684,9 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _startNewChat() async {
     if (_chatPickerOpen) return;
     if (!widget.accessProfile.isApproved) {
+      _selectTab(4);
       _showMessage(
-        'Register this phone with DNSC to start a private chat.',
+        'Check phone access in Profile to start a private chat.',
         kind: FeedbackKind.info,
       );
       return;
@@ -689,10 +694,12 @@ class _HomePageState extends ConsumerState<HomePage> {
     _chatPickerOpen = true;
     try {
       final peer = await Navigator.of(context).push<messaging.Peer>(
-        MaterialPageRoute(builder: (_) => const ChatRecipientPage()),
+        MaterialPageRoute(
+          builder: (_) => ChatRecipientPage(onOpenProfile: () => _selectTab(4)),
+        ),
       );
       if (!mounted || peer == null) return;
-      _selectTab(1, messageFilter: 0);
+      _selectTab(1, messageFilter: 'CHATS');
       await _openConversation(peer);
     } catch (_) {
       if (mounted) {
@@ -706,7 +713,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
-  void _selectTab(int tab, {int? messageFilter, int? peerFilter}) {
+  void _selectTab(int tab, {String? messageFilter, int? peerFilter}) {
     if (tab == _selectedTab && messageFilter == null && peerFilter == null) {
       return;
     }
@@ -744,70 +751,56 @@ class _HomePageState extends ConsumerState<HomePage> {
       },
       child: Scaffold(
         backgroundColor: Colors.white,
+        bottomNavigationBar: SafeArea(top: false, child: _buildBottomBar()),
         body: AuthBackground(
           child: SafeArea(
-            child: Column(
-              children: [
-                Expanded(
-                  child: IndexedStack(
-                    index: _selectedTab,
-                    children: List.generate(
-                      5,
-                      (tab) => TickerMode(
-                        enabled: tab == _selectedTab,
-                        child: !_visitedTabs.contains(tab)
-                            ? const SizedBox.shrink()
-                            : tab == 2
-                            ? _buildMapTabContent(
-                                peers,
-                                messages,
-                                tileCacheStore,
-                              )
-                            : SingleChildScrollView(
-                                key: PageStorageKey('home-tab-$tab'),
-                                physics: const BouncingScrollPhysics(),
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  12,
-                                  16,
-                                  20,
+            bottom: false,
+            child: IndexedStack(
+              index: _selectedTab,
+              children: List.generate(
+                5,
+                (tab) => TickerMode(
+                  enabled: tab == _selectedTab,
+                  child: !_visitedTabs.contains(tab)
+                      ? const SizedBox.shrink()
+                      : tab == 2
+                      ? _buildMapTabContent(peers, messages, tileCacheStore)
+                      : SingleChildScrollView(
+                          key: PageStorageKey('home-tab-$tab'),
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                          child: tab == 1
+                              ? _buildMessagesTabContent(
+                                  messages,
+                                  conversations,
+                                )
+                              : tab == 3
+                              ? _buildPeersTabContent(peers)
+                              : tab == 4
+                              ? Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    const _TabHeader(
+                                      title: 'Profile',
+                                      subtitle:
+                                          'Your DNSC account and phone registration',
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ProfileSection(
+                                      access: widget.accessProfile,
+                                      active: _selectedTab == tab,
+                                    ),
+                                  ],
+                                )
+                              : _buildHomeTabContent(
+                                  peers,
+                                  messages,
+                                  tileCacheStore,
                                 ),
-                                child: tab == 1
-                                    ? _buildMessagesTabContent(
-                                        messages,
-                                        conversations,
-                                      )
-                                    : tab == 3
-                                    ? _buildPeersTabContent(peers)
-                                    : tab == 4
-                                    ? Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.stretch,
-                                        children: [
-                                          const _TabHeader(
-                                            title: 'Profile',
-                                            subtitle:
-                                                'Your DNSC account and phone registration',
-                                          ),
-                                          const SizedBox(height: 12),
-                                          ProfileSection(
-                                            access: widget.accessProfile,
-                                            active: _selectedTab == tab,
-                                          ),
-                                        ],
-                                      )
-                                    : _buildHomeTabContent(
-                                        peers,
-                                        messages,
-                                        tileCacheStore,
-                                      ),
-                              ),
-                      ),
-                    ),
-                  ),
+                        ),
                 ),
-                _buildBottomBar(),
-              ],
+              ),
             ),
           ),
         ),
@@ -972,9 +965,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   ) {
     final summary = messages.when(
       data: (items) {
-        final count = items
-            .where((message) => _matchesSosFeedFilter(message, 'SOS'))
-            .length;
+        final count = items.where(_isActiveIncomingSos).length;
         return count == 1
             ? '1 SOS alert on this phone'
             : '$count SOS alerts on this phone';
@@ -987,7 +978,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       color: const Color(0xFFE83C3D),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
-        onTap: () => _selectTab(1, messageFilter: 1),
+        onTap: () => _selectTab(1, messageFilter: 'INCOMING'),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
@@ -1168,8 +1159,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     AsyncValue<List<messaging.Conversation>> conversations,
   ) {
     final List<(String, IconData, String)> filters = [
+      if (_isResponder) ...[
+        ('Active SOS', Icons.sos_rounded, 'INCOMING'),
+        ('Chats', Icons.chat_outlined, 'CHATS'),
+      ],
       ('All Messages', Icons.chat_bubble_outline_rounded, 'ALL'),
       ('SOS Alerts', Icons.sos_rounded, 'SOS'),
+      if (!_isResponder) ('Chats', Icons.chat_outlined, 'CHATS'),
       ('Archive', Icons.archive_outlined, 'ARCHIVE'),
       ('Requests', Icons.pan_tool_outlined, 'REQUEST'),
       ('Updates', Icons.campaign_outlined, 'UPDATE'),
@@ -1177,11 +1173,48 @@ class _HomePageState extends ConsumerState<HomePage> {
       ('Quarantine', Icons.gpp_bad_rounded, 'QUARANTINE'),
     ];
 
-    final String activeType =
-        filters[_selectedMessageFilter.clamp(0, filters.length - 1)].$3;
+    final activeType =
+        filters.any((filter) => filter.$3 == _selectedMessageFilter)
+        ? _selectedMessageFilter!
+        : filters.first.$3;
     if (widget.accessProfile.deviceId == 'unknown') {
       ref.watch(localPeerProvider);
     }
+    final showChats =
+        activeType == 'CHATS' ||
+        activeType == 'ALL' ||
+        activeType == 'SPAM' ||
+        activeType == 'QUARANTINE';
+    final showSos = activeType != 'CHATS';
+    final visibleConversations = showChats
+        ? (conversations.valueOrNull ?? const <messaging.Conversation>[]).where(
+            (conversation) => shouldShowConversationForFilter(
+              conversation: conversation,
+              activeFilter: activeType == 'CHATS' ? 'ALL' : activeType,
+            ),
+          )
+        : const <messaging.Conversation>[];
+    final visibleSos = showSos
+        ? (messages.valueOrNull ?? const <messaging.SosMessage>[])
+              .where(
+                (message) => activeType == 'INCOMING'
+                    ? _isActiveIncomingSos(message)
+                    : _matchesSosFeedFilter(message, activeType),
+              )
+              .toList()
+        : <messaging.SosMessage>[];
+    if (activeType == 'INCOMING') {
+      visibleSos.sort(
+        (a, b) => (b.receivedAt ?? b.createdAt).compareTo(
+          a.receivedAt ?? a.createdAt,
+        ),
+      );
+    }
+    final loading =
+        (showChats && conversations.isLoading) ||
+        (showSos && messages.isLoading);
+    final loadFailed =
+        (showChats && conversations.hasError) || (showSos && messages.hasError);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1213,7 +1246,9 @@ class _HomePageState extends ConsumerState<HomePage> {
                   borderRadius: BorderRadius.circular(30),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(30),
-                    onTap: () => setState(() => _selectedMessageFilter = index),
+                    onTap: () => setState(
+                      () => _selectedMessageFilter = filters[index].$3,
+                    ),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
@@ -1250,79 +1285,44 @@ class _HomePageState extends ConsumerState<HomePage> {
           ),
         ),
         const SizedBox(height: 14),
-        if (activeType == 'ALL' ||
-            activeType == 'SPAM' ||
-            activeType == 'QUARANTINE')
-          conversations.when(
-            data: (items) {
-              final visibleConversations = items
-                  .where((conversation) {
-                    return shouldShowConversationForFilter(
-                      conversation: conversation,
-                      activeFilter: activeType,
-                    );
-                  })
-                  .toList(growable: false);
-
-              return visibleConversations.isEmpty
-                  ? const SizedBox.shrink()
-                  : Column(
-                      children: [
-                        ...visibleConversations.map(
-                          (conversation) => _buildConversationCard(
-                            conversation,
-                            isSpam:
-                                conversation.latestModerationStatus ==
-                                messaging.MessageModerationStatus.spam,
-                            isRevoked:
-                                conversation.latestTrustStatus ==
-                                DeviceTrustStatus.revoked,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                      ],
-                    );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
+        for (final conversation in visibleConversations)
+          _buildConversationCard(
+            conversation,
+            isSpam:
+                conversation.latestModerationStatus ==
+                messaging.MessageModerationStatus.spam,
+            isRevoked:
+                conversation.latestTrustStatus == DeviceTrustStatus.revoked,
           ),
-        messages.when(
-          data: (items) {
-            final filteredMessages = items
-                .where((message) => _matchesSosFeedFilter(message, activeType))
-                .toList(growable: false);
-
-            if (filteredMessages.isEmpty) {
-              return _buildEmptyState(
-                icon: Icons.chat_bubble_outline_rounded,
-                message: activeType == 'ARCHIVE'
-                    ? 'No archived SOS alerts yet.'
-                    : 'No local messages yet.',
-              );
-            }
-
-            return Column(
-              children: filteredMessages
-                  .map((message) {
-                    final ownSenderLabel = _ownSosSenderLabel(message);
-                    return _buildMessageFeedCard(
-                      _messageFeedItemFromSosMessage(message, ownSenderLabel),
-                      isOwnSos: ownSenderLabel != null,
-                      onTap: () => _openSosMessage(message),
-                    );
-                  })
-                  .toList(growable: false),
-            );
-          },
-          loading: () => const Padding(
+        for (final message in visibleSos)
+          _buildMessageFeedCard(
+            _messageFeedItemFromSosMessage(
+              message,
+              _ownSosSenderLabel(message),
+            ),
+            isOwnSos: _ownSosSenderLabel(message) != null,
+            onTap: () => _openSosMessage(message),
+          ),
+        if (loadFailed)
+          _buildEmptyState(
+            icon: Icons.error_outline_rounded,
+            message: 'Some messages could not be loaded.',
+          )
+        else if (loading && visibleConversations.isEmpty && visibleSos.isEmpty)
+          const Padding(
             padding: EdgeInsets.symmetric(vertical: 20),
             child: Center(child: CircularProgressIndicator()),
+          )
+        else if (visibleConversations.isEmpty && visibleSos.isEmpty)
+          _buildEmptyState(
+            icon: Icons.chat_bubble_outline_rounded,
+            message: switch (activeType) {
+              'ARCHIVE' => 'No archived SOS alerts yet.',
+              'INCOMING' => 'No active incoming SOS alerts.',
+              'CHATS' => 'No private chats yet.',
+              _ => 'No messages in this view.',
+            },
           ),
-          error: (_, _) => _buildEmptyState(
-            icon: Icons.error_outline_rounded,
-            message: 'Unable to load local messages.',
-          ),
-        ),
         Container(
           width: double.infinity,
           margin: const EdgeInsets.only(top: 8),
@@ -1732,14 +1732,16 @@ class _HomePageState extends ConsumerState<HomePage> {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    Row(
+                    Wrap(
+                      spacing: 7,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         _TrustStatusBadge(
                           status:
                               conversation.latestTrustStatus ??
                               DeviceTrustStatus.unknown,
                         ),
-                        const SizedBox(width: 7),
                         Text(
                           status.toUpperCase(),
                           style: TextStyle(
@@ -1808,6 +1810,9 @@ class _HomePageState extends ConsumerState<HomePage> {
       onMessageSender: isLocalSender
           ? null
           : () => _openConversation(message.sender, linkedSosMessage: message),
+      onShowOnMap: message.latitude == null || message.longitude == null
+          ? null
+          : () => _focusSosLocation(message),
     );
     if (!mounted || updateResponse != true) return;
     final moveToArchive = canUpdateArchive
@@ -1850,6 +1855,26 @@ class _HomePageState extends ConsumerState<HomePage> {
           kind: FeedbackKind.error,
         );
       }
+    }
+  }
+
+  bool _isActiveIncomingSos(messaging.SosMessage message) =>
+      (message.receivedAt != null ||
+          (message.status == messaging.MessageStatus.received &&
+              !_isLocalPeerId(message.sender.id))) &&
+      _matchesSosFeedFilter(message, 'SOS');
+
+  void _focusSosLocation(messaging.SosMessage message) {
+    setState(() {
+      _isFollowing = false;
+      _currentCenter = LatLng(message.latitude!, message.longitude!);
+      _currentZoom = _defaultZoom;
+      _visibleMapCategories.add(message.category.sosCategory);
+    });
+    if (_selectedTab == 2) {
+      _moveMap(_currentCenter, _currentZoom);
+    } else {
+      _selectTab(2);
     }
   }
 
@@ -2209,7 +2234,11 @@ class _HomePageState extends ConsumerState<HomePage> {
               selected: active,
               button: true,
               child: InkWell(
-                onTap: () => _selectTab(i),
+                key: ValueKey('mobile-nav-$i'),
+                onTap: () => _selectTab(
+                  i,
+                  messageFilter: i == 1 && _isResponder ? 'INCOMING' : null,
+                ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minHeight: 48),
                   child: Column(
@@ -2228,10 +2257,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                         items[i].label,
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 9,
+                          fontSize: 12,
+                          height: 1.15,
                           fontWeight: FontWeight.w500,
                           color: active
-                              ? const Color(0xFFE73F3F)
+                              ? _sosActionColor
                               : const Color(0xFF717173),
                         ),
                       ),
@@ -2248,7 +2278,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Widget _buildSosButton() {
     return Material(
-      color: const Color(0xFFE83C3D),
+      color: _sosActionColor,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         key: const ValueKey('open-sos-composer'),
@@ -2300,7 +2330,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Alert rescuers in the area',
+                        'Alert campus responders',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 11,
@@ -2509,19 +2539,29 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           Positioned(
             right: 10,
-            top: 10,
-            child: Column(
+            bottom: 10,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                _MapControlButton(icon: Icons.add, onTap: _zoomIn),
-                const SizedBox(height: 8),
-                _MapControlButton(icon: Icons.remove, onTap: _zoomOut),
+                _MapControlButton(
+                  icon: Icons.add,
+                  label: 'Zoom in',
+                  onTap: _zoomIn,
+                ),
+                const SizedBox(width: 8),
+                _MapControlButton(
+                  icon: Icons.remove,
+                  label: 'Zoom out',
+                  onTap: _zoomOut,
+                ),
+                const SizedBox(width: 8),
+                _MapControlButton(
+                  icon: Icons.explore,
+                  label: 'Reset map north',
+                  onTap: _resetNorth,
+                ),
               ],
             ),
-          ),
-          Positioned(
-            right: 10,
-            bottom: 10,
-            child: _MapControlButton(icon: Icons.explore, onTap: _resetNorth),
           ),
         ],
       ),
@@ -3025,7 +3065,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                 label: 'CHAT FEED',
                 labelColor: const Color(0xFFE83C3D),
                 subtitle: 'Coordinate responses',
-                onTap: () => _selectTab(1, messageFilter: 0),
+                onTap: () => _selectTab(1, messageFilter: 'CHATS'),
               ),
             ),
           ],
@@ -3703,9 +3743,14 @@ class _PeerScanningRow extends StatelessWidget {
 }
 
 class _MapControlButton extends StatelessWidget {
-  const _MapControlButton({required this.icon, required this.onTap});
+  const _MapControlButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
   final IconData icon;
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -3713,13 +3758,12 @@ class _MapControlButton extends StatelessWidget {
     return Material(
       color: Colors.white.withValues(alpha: 0.95),
       borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
-        child: SizedBox(
-          width: 30,
-          height: 30,
-          child: Icon(icon, size: 18, color: const Color(0xFF4B4B4B)),
+      child: SizedBox.square(
+        dimension: 48,
+        child: IconButton(
+          onPressed: onTap,
+          tooltip: label,
+          icon: Icon(icon, size: 22, color: const Color(0xFF4B4B4B)),
         ),
       ),
     );
@@ -3927,8 +3971,15 @@ class _PeerMapMarker extends StatelessWidget {
   }
 }
 
+class _SosDraft {
+  String body = '';
+  messaging.Category? category;
+  String? recipientId;
+}
+
 class _SosComposerSheet extends StatefulWidget {
   const _SosComposerSheet({
+    required this.draft,
     required this.location,
     required this.approvalUnavailable,
     required this.messageTabLabel,
@@ -3937,6 +3988,7 @@ class _SosComposerSheet extends StatefulWidget {
     required this.onSend,
   });
 
+  final _SosDraft draft;
   final LatLng? location;
   final bool approvalUnavailable;
   final String messageTabLabel;
@@ -3955,10 +4007,11 @@ class _SosComposerSheet extends StatefulWidget {
 }
 
 class _SosComposerSheetState extends State<_SosComposerSheet> {
+  static const _broadcast = 'broadcast';
+  static const _accent = _HomePageState._sosActionColor;
+
   late final TextEditingController _messageController;
   late LatLng? _location;
-  messaging.Category _selectedCategory = messaging.Category.medical;
-  TrustedDevice? _selectedRecipient;
   bool _updatingLocation = false;
   bool _sending = false;
   String? _sendError;
@@ -3967,7 +4020,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
   @override
   void initState() {
     super.initState();
-    _messageController = TextEditingController();
+    _messageController = TextEditingController(text: widget.draft.body);
     _location = widget.location;
   }
 
@@ -3977,590 +4030,354 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
     super.dispose();
   }
 
+  Future<void> _updateLocation() async {
+    setState(() {
+      _updatingLocation = true;
+      _locationError = null;
+    });
+    final updated = await widget.onUpdateLocation();
+    if (!mounted) return;
+    setState(() {
+      _updatingLocation = false;
+      if (updated != null) {
+        _location = updated;
+      } else {
+        _locationError = _location == null
+            ? 'Couldn’t get your location. Add a nearby landmark to your message.'
+            : 'Couldn’t update your location. The last location shown will be attached.';
+      }
+    });
+  }
+
+  Future<void> _send() async {
+    if (_sending) return;
+    final body = widget.draft.body.trim();
+    final category = widget.draft.category;
+    final recipientId = widget.draft.recipientId;
+    final recipient = widget.trustedRecipients
+        .where((device) => device.deviceId == recipientId)
+        .firstOrNull;
+    final error = switch ((body.isEmpty, category, recipientId, recipient)) {
+      (true, _, _, _) => 'Describe the emergency before sending.',
+      (_, null, _, _) => 'Choose an SOS category.',
+      (_, _, String _, null) => 'Choose a campus responder or broadcast.',
+      _ => null,
+    };
+    if (error != null) {
+      setState(() => _sendError = error);
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _sending = true;
+      _sendError = null;
+    });
+    try {
+      await widget.onSend(body, category!, recipient, _location);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _sending = false;
+        _sendError = switch (error) {
+          MessageEncryptionException() => error.message,
+          SosRecipientUnavailableException() => error.message,
+          _ =>
+            'Couldn’t save the SOS. Check ${widget.messageTabLabel} before retrying.',
+        };
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final theme = Theme.of(context);
+    final recipientId = widget.draft.recipientId;
+    final colors = theme.colorScheme;
+    final close = _sending ? null : () => Navigator.of(context).pop();
+    final sectionLabel = AppTypography.caption.copyWith(
+      fontWeight: FontWeight.w700,
+      letterSpacing: 0.6,
+    );
+    final fieldBorder = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+    );
+    final previousRecipientUnavailable =
+        recipientId != null &&
+        !widget.trustedRecipients.any(
+          (device) => device.deviceId == recipientId,
+        );
     final location = _location;
-    final locationText = location == null
-        ? 'No GPS location attached'
+    final coordinates = location == null
+        ? null
         : '${location.latitude.abs().toStringAsFixed(4)}° '
               '${location.latitude >= 0 ? 'N' : 'S'}, '
               '${location.longitude.abs().toStringAsFixed(4)}° '
               '${location.longitude >= 0 ? 'E' : 'W'}';
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: bottomInset),
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF6F6F7),
-          borderRadius: BorderRadius.circular(22),
+    return PopScope(
+      canPop: !_sending,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
-        child: SingleChildScrollView(
-          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD8D8D8),
-                    borderRadius: BorderRadius.circular(99),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFE83C3D),
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'SOS',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 18,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
+        child: Material(
+          color: colors.brightness == Brightness.light
+              ? colors.onPrimary
+              : colors.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          child: SafeArea(
+            top: false,
+            minimum: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Flexible(
+                  child: SingleChildScrollView(
+                    keyboardDismissBehavior:
+                        ScrollViewKeyboardDismissBehavior.onDrag,
+                    padding: const EdgeInsets.only(bottom: 12),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        Row(
+                          children: [
+                            const CircleAvatar(
+                              radius: 24,
+                              backgroundColor: _accent,
+                              foregroundColor: Colors.white,
+                              child: Icon(Icons.notification_important_rounded),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Semantics(
+                                    header: true,
+                                    child: Text(
+                                      'Send SOS Message',
+                                      style: AppTypography.headlineLarge
+                                          .copyWith(fontSize: 24),
+                                    ),
+                                  ),
+                                  const Text(
+                                    'Alert campus responders',
+                                    style: AppTypography.caption,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              onPressed: close,
+                              tooltip: 'Close SOS composer',
+                              icon: const Icon(Icons.close),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 20),
+                        Text('WHAT IS THE EMERGENCY?', style: sectionLabel),
+                        const SizedBox(height: 8),
+                        SosCategoryPicker(
+                          accent: _accent,
+                          selected: widget.draft.category,
+                          onChanged: _sending
+                              ? null
+                              : (category) => setState(
+                                  () => widget.draft.category = category,
+                                ),
+                        ),
+                        const SizedBox(height: 16),
                         Text(
-                          'Send SOS Message',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF1F1F1F),
+                          'Emergency details',
+                          style: AppTypography.titleMedium.copyWith(
+                            fontSize: 16,
                           ),
                         ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Request urgent assistance',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF737373),
+                        const SizedBox(height: 12),
+                        Semantics(
+                          label: 'Emergency details',
+                          child: TextField(
+                            controller: _messageController,
+                            enabled: !_sending,
+                            maxLength: 250,
+                            minLines: 2,
+                            maxLines: 3,
+                            style: AppTypography.bodyMedium,
+                            decoration: InputDecoration(
+                              border: fieldBorder,
+                              filled: false,
+                              hintStyle: AppTypography.bodyMedium.copyWith(
+                                color: colors.onSurfaceVariant,
+                              ),
+                              hintText:
+                                  'What happened? Add a nearby landmark if known.',
+                            ),
+                            onChanged: (value) => widget.draft.body = value,
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F1F1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.location_on, color: _accent),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      location == null
+                                          ? 'No location yet. You can still send.'
+                                          : 'Location attached',
+                                      style: AppTypography.bodyMedium.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                    if (coordinates != null)
+                                      Text(
+                                        coordinates,
+                                        style: AppTypography.caption,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Flexible(
+                                flex: 2,
+                                child: TextButton.icon(
+                                  style: TextButton.styleFrom(
+                                    foregroundColor: _accent,
+                                    backgroundColor: Colors.transparent,
+                                    minimumSize: const Size(48, 48),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                  ),
+                                  onPressed: _updatingLocation || _sending
+                                      ? null
+                                      : _updateLocation,
+                                  icon: const Icon(Icons.refresh, size: 18),
+                                  label: Text(
+                                    _updatingLocation
+                                        ? 'Finding location…'
+                                        : 'Update',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_locationError != null)
+                          ActionStatus(
+                            message: _locationError!,
+                            kind: FeedbackKind.warning,
+                          ),
+                        const SizedBox(height: 16),
+                        Text('SEND TO', style: sectionLabel),
+                        const SizedBox(height: 8),
+                        Semantics(
+                          label: 'Send to',
+                          child: DropdownButtonFormField<String>(
+                            initialValue: previousRecipientUnavailable
+                                ? null
+                                : recipientId ?? _broadcast,
+                            isExpanded: true,
+                            itemHeight: null,
+                            style: AppTypography.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                            decoration: InputDecoration(
+                              border: fieldBorder,
+                              filled: false,
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: _broadcast,
+                                child: Text('Broadcast to campus responders'),
+                              ),
+                              for (final device in widget.trustedRecipients)
+                                DropdownMenuItem(
+                                  value: device.deviceId,
+                                  child: Text(device.ownerName),
+                                ),
+                            ],
+                            onChanged: _sending
+                                ? null
+                                : (value) => setState(() {
+                                    widget.draft.recipientId =
+                                        value == _broadcast ? null : value;
+                                  }),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (previousRecipientUnavailable)
+                          const ActionStatus(
+                            message:
+                                'The saved recipient is unavailable. Choose who should receive this SOS.',
+                            kind: FeedbackKind.warning,
+                          )
+                        else if (widget.approvalUnavailable)
+                          const ActionStatus(
+                            message:
+                                'Couldn’t load approved recipients. You can still broadcast this SOS.',
+                            kind: FeedbackKind.warning,
+                          )
+                        else
+                          Text(
+                            recipientId == null
+                                ? 'Nearby phones can relay this SOS to campus responders.'
+                                : 'Nearby phones can relay this SOS. Only the chosen responder can read it.',
+                            style: theme.textTheme.bodySmall,
+                          ),
                       ],
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                'Emergency details',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF222222),
                 ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _messageController,
-                maxLength: 250,
-                minLines: 3,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  hintText: 'What happened? Add a nearby landmark if known.',
-                  counterText: '',
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFE83C3D)),
-                  ),
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  '${_messageController.text.length}/250',
-                  style: const TextStyle(
-                    color: Color(0xFF8A8A8A),
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'SOS category',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF222222),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SosCategoryPicker(
-                selected: _selectedCategory,
-                onChanged: _sending
-                    ? null
-                    : (category) =>
-                          setState(() => _selectedCategory = category),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Receiver',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF222222),
-                ),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedRecipient?.deviceId ?? 'broadcast',
-                isExpanded: true,
-                iconEnabledColor: const Color(0xFFE83C3D),
-                dropdownColor: Colors.white,
-                style: const TextStyle(
-                  color: Color(0xFF222222),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                ),
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: const Color(0xFFFFF8F8),
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFF2A4A5)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Color(0xFFE83C3D)),
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.verified_user_rounded,
-                    color: Color(0xFFE83C3D),
-                  ),
-                ),
-                items: [
-                  DropdownMenuItem(
-                    value: 'broadcast',
-                    child: _ReceiverDropdownOption(
-                      title: 'Broadcast to rescuers',
-                      subtitle: 'For all approved rescuers',
-                      roleLabel: 'Campus responders',
-                      icon: Icons.campaign_rounded,
-                    ),
-                  ),
-                  ...widget.trustedRecipients.map(
-                    (device) => DropdownMenuItem(
-                      value: device.deviceId,
-                      child: _ReceiverDropdownOption(
-                        title: device.ownerName,
-                        subtitle: _shortDeviceId(device.deviceId),
-                        roleLabel: 'Approved rescuer',
-                        icon: Icons.health_and_safety_rounded,
-                      ),
-                    ),
-                  ),
-                ],
-                selectedItemBuilder: (context) {
-                  return [
-                    const _ReceiverDropdownOption(
-                      title: 'Broadcast',
-                      subtitle: 'Approved rescuers',
-                      roleLabel: 'Campus responders',
-                      icon: Icons.campaign_rounded,
-                      compact: true,
-                    ),
-                    ...widget.trustedRecipients.map(
-                      (device) => _ReceiverDropdownOption(
-                        title: device.ownerName,
-                        subtitle: _shortDeviceId(device.deviceId),
-                        roleLabel: 'Approved rescuer',
-                        icon: Icons.health_and_safety_rounded,
-                        compact: true,
-                      ),
-                    ),
-                  ];
-                },
-                onChanged: (value) {
-                  setState(() {
-                    _selectedRecipient = value == null || value == 'broadcast'
-                        ? null
-                        : widget.trustedRecipients.firstWhere(
-                            (device) => device.deviceId == value,
-                          );
-                  });
-                },
-              ),
-              const SizedBox(height: 6),
-              Text(
-                _selectedRecipient == null
-                    ? 'Nearby phones can pass this SOS along. Only approved rescuers receive the alert in the app.'
-                    : 'Targeted SOS is encrypted. Other phones can relay it, but only ${_selectedRecipient!.ownerName} can view it.',
-                style: const TextStyle(color: Color(0xFF777777), fontSize: 12),
-              ),
-              if (widget.approvalUnavailable) ...[
-                const SizedBox(height: 8),
-                const ActionStatus(
-                  message:
-                      'Couldn’t load approved recipients. You can still broadcast this SOS.',
-                  kind: FeedbackKind.warning,
-                ),
-              ],
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFEFF0),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
+                if (_sendError != null)
+                  ActionStatus(message: _sendError!, kind: FeedbackKind.error),
+                Row(
                   children: [
-                    const Icon(
-                      Icons.location_on,
-                      color: Color(0xFF8B1618),
-                      size: 23,
+                    TextButton(
+                      onPressed: close,
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(48, 48),
+                        textStyle: AppTypography.labelLarge,
+                        backgroundColor: const Color(0xFFEDEDED),
+                        foregroundColor: colors.onSurface,
+                      ),
+                      child: const Text('Cancel'),
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Location attached to SOS',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF2C2C2C),
-                              fontSize: 16,
-                            ),
-                          ),
-                          Text(
-                            locationText,
-                            style: const TextStyle(
-                              color: Color(0xFF777777),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: _updatingLocation || _sending
-                          ? null
-                          : () async {
-                              setState(() {
-                                _updatingLocation = true;
-                                _locationError = null;
-                              });
-                              final updated = await widget.onUpdateLocation();
-                              if (!mounted) return;
-                              setState(() {
-                                _updatingLocation = false;
-                                if (updated != null) {
-                                  _location = updated;
-                                } else {
-                                  _locationError = _location == null
-                                      ? 'Couldn’t get your location. Add a nearby landmark to your message.'
-                                      : 'Couldn’t update your location. The last location shown will be attached.';
-                                }
-                              });
-                            },
-                      icon: _updatingLocation
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.gps_fixed),
-                      label: const Text('Update'),
-                      style: TextButton.styleFrom(
-                        foregroundColor: const Color(0xFFE83C3D),
+                      child: FilledButton.icon(
+                        onPressed: _sending ? null : _send,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(0, 48),
+                          textStyle: AppTypography.labelLarge,
+                          backgroundColor: _HomePageState._sosActionColor,
+                          foregroundColor: Colors.white,
+                        ),
+                        icon: const Icon(Icons.send_rounded),
+                        label: Text(_sending ? 'Saving SOS…' : 'Send SOS'),
                       ),
                     ),
                   ],
                 ),
-              ),
-              if (_locationError != null) ...[
-                const SizedBox(height: 8),
-                ActionStatus(
-                  message: _locationError!,
-                  kind: FeedbackKind.warning,
-                ),
               ],
-              if (_sendError != null) ...[
-                ActionStatus(message: _sendError!, kind: FeedbackKind.error),
-                const SizedBox(height: 12),
-              ],
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _sending
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        side: const BorderSide(color: Color(0xFFE83C3D)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: const Text(
-                        'CANCEL',
-                        style: TextStyle(
-                          color: Color(0xFFD23434),
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _sending
-                          ? null
-                          : () async {
-                              final navigator = Navigator.of(context);
-                              final body = _messageController.text.trim();
-                              if (body.isEmpty) {
-                                setState(
-                                  () => _sendError =
-                                      'Describe the emergency before sending.',
-                                );
-                                return;
-                              }
-
-                              setState(() {
-                                _sending = true;
-                                _sendError = null;
-                              });
-                              try {
-                                await widget.onSend(
-                                  body,
-                                  _selectedCategory,
-                                  _selectedRecipient,
-                                  _location,
-                                );
-                                if (mounted) {
-                                  navigator.pop(true);
-                                }
-                              } catch (error) {
-                                if (mounted) {
-                                  setState(() {
-                                    _sending = false;
-                                    _sendError =
-                                        error is MessageEncryptionException
-                                        ? error.message
-                                        : error
-                                              is SosRecipientUnavailableException
-                                        ? error.message
-                                        : 'Unable to complete the SOS action. Check ${widget.messageTabLabel} before sending again. Your draft is still here.';
-                                  });
-                                }
-                              }
-                            },
-                      icon: const Icon(Icons.near_me, color: Colors.white),
-                      label: Text(
-                        _sending ? 'SAVING SOS...' : 'SEND SOS',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        backgroundColor: const Color(0xFFE83C3D),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
-}
-
-class _ReceiverDropdownOption extends StatelessWidget {
-  const _ReceiverDropdownOption({
-    required this.title,
-    required this.subtitle,
-    required this.roleLabel,
-    required this.icon,
-    this.compact = false,
-  });
-
-  final String title;
-  final String subtitle;
-  final String roleLabel;
-  final IconData icon;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    if (compact) {
-      return Row(
-        children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: const Color(0xFFE83C3D), size: 15),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              title,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF222222),
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              roleLabel.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Color(0xFF8B1618),
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      children: [
-        Container(
-          width: compact ? 30 : 34,
-          height: compact ? 30 : 34,
-          decoration: BoxDecoration(
-            color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, color: const Color(0xFFE83C3D), size: 18),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: const Color(0xFF222222),
-                        fontSize: compact ? 13 : 14,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE83C3D).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      roleLabel.toUpperCase(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Color(0xFF8B1618),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 1),
-              Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF777777),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-String _shortDeviceId(String deviceId) {
-  if (deviceId.length <= 14) {
-    return deviceId;
-  }
-  return '${deviceId.substring(0, 6)}...${deviceId.substring(deviceId.length - 5)}';
 }
 
 class _TaskCompletionPopup extends StatelessWidget {

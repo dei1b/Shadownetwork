@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -27,7 +25,6 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   bool _showSplash = true;
   bool _activityVisible = false;
   Future<void>? _imageReady;
-  Timer? _splashTimer;
   int _visibilityRevision = 0;
   int _activityGeneration = 0;
 
@@ -41,12 +38,13 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
       if (!mounted) return;
       switch (call.method) {
         case 'opened':
-          _activityVisible = true;
+          // Android reports creation before the new activity resumes.
+          _activityVisible = false;
+          _visibilityRevision++;
           setState(() {
             _activityGeneration++;
             _showSplash = true;
           });
-          _scheduleDismissal();
         case 'reattached':
           setState(() => _activityGeneration++);
         case 'visible':
@@ -75,14 +73,18 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _activityVisible = state == AppLifecycleState.resumed;
     _visibilityRevision++;
-    _splashTimer?.cancel();
-    if (state == AppLifecycleState.resumed) {
+    if (_activityVisible) {
       _scheduleDismissal();
     }
   }
 
   Future<void> _scheduleDismissal() async {
-    if (!_showSplash || !_initialized || _imageReady == null) return;
+    if (!_showSplash ||
+        !_initialized ||
+        !_activityVisible ||
+        _imageReady == null) {
+      return;
+    }
     final revision = ++_visibilityRevision;
     await _imageReady;
     if (!mounted || revision != _visibilityRevision) return;
@@ -90,10 +92,8 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
       if (!mounted || revision != _visibilityRevision || !_activityVisible) {
         return;
       }
-      _splashTimer?.cancel();
-      _splashTimer = Timer(const Duration(milliseconds: 1800), () {
-        if (mounted) setState(() => _showSplash = false);
-      });
+      // Paint the splash in this frame and expose the child in the next one.
+      setState(() => _showSplash = false);
     });
     WidgetsBinding.instance.ensureVisualUpdate();
   }
@@ -101,7 +101,6 @@ class StartupGateState extends State<StartupGate> with WidgetsBindingObserver {
   @override
   void dispose() {
     _visibilityRevision++;
-    _splashTimer?.cancel();
     _visibilityChannel.setMethodCallHandler(null);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

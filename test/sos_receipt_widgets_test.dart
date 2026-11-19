@@ -33,6 +33,9 @@ void main() {
         () => _now,
       ),
     );
+    expect(find.text('2026-10-14 01:59:59 UTC'), findsOneWidget);
+    expect(find.text('Clock mismatch detected'), findsNothing);
+    await _toggleDeliveryDetails(tester);
     expect(find.text('Clock mismatch detected'), findsOneWidget);
     expect(
       find.textContaining('The receipt precedes creation.'),
@@ -78,6 +81,7 @@ void main() {
         );
         await tester.tap(find.text('Open SOS'));
         await tester.pumpAndSettle();
+        await _toggleDeliveryDetails(tester);
         await tester.ensureVisible(find.byTooltip('Copy full message hash'));
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Copy full message hash'));
@@ -230,9 +234,14 @@ void main() {
           MediaQuery(
             data: MediaQueryData(
               size: Size(width, 900),
-              textScaler: TextScaler.linear(1.5),
+              textScaler: TextScaler.linear(2),
             ),
-            child: SosDetailSheet(message: _message(), onMessageSender: () {}),
+            child: SosDetailSheet(
+              message: _message().copyWith(latitude: 7, longitude: 125),
+              onShowOnMap: () {},
+              onMessageSender: () {},
+              onUpdateResponse: () {},
+            ),
           ),
           () => _now,
         ),
@@ -242,8 +251,12 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('Message sender'), findsOneWidget);
       expect(
+        tester.getSize(find.widgetWithText(FilledButton, 'Show on map')).height,
+        greaterThanOrEqualTo(48),
+      );
+      expect(
         tester.getBottomLeft(find.text('Message sender')).dy,
-        lessThan(tester.getTopLeft(find.text('TIMING & ROUTING')).dy),
+        lessThan(tester.getTopLeft(find.text('Delivery details')).dy),
       );
     });
   }
@@ -269,6 +282,9 @@ void main() {
       _app(
         SosDetailSheet(
           message: _message().copyWith(
+            latitude: 7.30263,
+            longitude: 125.68881,
+            trustOwnerName: 'Registered Resident',
             trustStatus: DeviceTrustStatus.revoked,
             moderationStatus: MessageModerationStatus.spam,
             moderationReason: 'Repeated SOS',
@@ -279,15 +295,28 @@ void main() {
         () => _now,
       ),
     );
+    for (final label in ['Sender', 'Emergency', 'Location', 'Received time']) {
+      expect(find.text(label), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text(label)).dy,
+        lessThan(tester.getTopLeft(find.text('Message sender')).dy),
+      );
+    }
+    expect(find.text('Registered Resident'), findsOneWidget);
+    expect(find.text('Medical Assistance'), findsOneWidget);
+    expect(find.text('7.30263, 125.68881'), findsOneWidget);
+    expect(find.text('GPS accuracy ±8.5 m'), findsOneWidget);
+    expect(find.text('2026-10-14 02:01:42 UTC'), findsOneWidget);
+    expect(find.text('Hop count'), findsNothing);
+    expect(find.text('Trust'), findsNothing);
+    await _toggleDeliveryDetails(tester);
     for (final label in [
       'Created time',
-      'Received time',
       'Hop count',
       'Last transport',
-      'Sender',
+      'Sender device ID',
       'Last relay peer',
       'Message hash',
-      'GPS accuracy',
       'TTL',
       'Trust',
       'Moderation',
@@ -295,9 +324,7 @@ void main() {
       expect(find.text(label), findsOneWidget);
     }
     expect(find.text('2026-10-14 02:00:00 UTC'), findsOneWidget);
-    expect(find.text('2026-10-14 02:01:42 UTC'), findsOneWidget);
     expect(find.text('relay-b'), findsOneWidget);
-    expect(find.text('±8.5 m'), findsOneWidget);
     expect(find.text('Revoked • Quarantine'), findsOneWidget);
     expect(find.text('Spam'), findsOneWidget);
     expect(find.text('Repeated SOS'), findsOneWidget);
@@ -311,6 +338,9 @@ void main() {
       {'text': _hash},
     );
     expect(find.text('Message hash copied'), findsOneWidget);
+    await _toggleDeliveryDetails(tester);
+    expect(find.text('Hop count'), findsNothing);
+    expect(find.text('Registered Resident'), findsOneWidget);
   });
 
   testWidgets(
@@ -326,6 +356,7 @@ void main() {
           () => now,
         ),
       );
+      await _toggleDeliveryDetails(tester);
       expect(find.text('1s remaining'), findsOneWidget);
       now = now.add(const Duration(seconds: 1));
       await tester.pump(const Duration(seconds: 1));
@@ -351,7 +382,10 @@ void main() {
           () => _now,
         ),
       );
-      expect(find.text('Not recorded'), findsNWidgets(5));
+      expect(find.text('No GPS location attached'), findsOneWidget);
+      expect(find.text('Not recorded'), findsOneWidget);
+      await _toggleDeliveryDetails(tester);
+      expect(find.text('Not recorded'), findsNWidgets(4));
       expect(find.byTooltip('Copy full message hash'), findsNothing);
     },
   );
@@ -393,6 +427,120 @@ void main() {
       expect(find.byType(SosDetailSheet), findsNothing);
     },
   );
+
+  testWidgets('Show on map pops the sheet before calling Home', (tester) async {
+    var mapCalls = 0;
+    bool? result = true;
+    await tester.pumpWidget(
+      _app(
+        Builder(
+          builder: (context) => TextButton(
+            onPressed: () async {
+              result = await showSosDetailSheet(
+                context,
+                message: _message().copyWith(latitude: 7, longitude: 125),
+                canUpdateResponse: true,
+                onMessageSender: () {},
+                onShowOnMap: () {
+                  expect(Navigator.of(context).canPop(), isFalse);
+                  mapCalls++;
+                },
+              );
+            },
+            child: const Text('Open SOS'),
+          ),
+        ),
+        () => _now,
+      ),
+    );
+    await tester.tap(find.text('Open SOS'));
+    await tester.pumpAndSettle();
+    final showOnMap = find.widgetWithText(FilledButton, 'Show on map');
+    final messageSender = find.widgetWithText(OutlinedButton, 'Message sender');
+    final markResponded = find.widgetWithText(OutlinedButton, 'Mark responded');
+    for (final action in [showOnMap, messageSender, markResponded]) {
+      expect(tester.getSize(action).height, greaterThanOrEqualTo(48));
+    }
+    expect(
+      tester.getTopLeft(showOnMap).dy,
+      lessThan(tester.getTopLeft(messageSender).dy),
+    );
+    await tester.ensureVisible(showOnMap);
+    await tester.tap(showOnMap);
+    await tester.pumpAndSettle();
+    expect(mapCalls, 1);
+    expect(result, isNull);
+    expect(find.byType(SosDetailSheet), findsNothing);
+    expect(find.text('Open SOS'), findsOneWidget);
+  });
+
+  testWidgets('Show on map requires both valid coordinates and a callback', (
+    tester,
+  ) async {
+    for (final (message, callback) in [
+      (_message().copyWith(latitude: 7), () {}),
+      (_message().copyWith(latitude: 91, longitude: 125), () {}),
+      (_message().copyWith(latitude: 7, longitude: double.nan), () {}),
+      (_message().copyWith(latitude: 7, longitude: 125), null),
+    ]) {
+      await tester.pumpWidget(
+        _app(
+          SosDetailSheet(message: message, onShowOnMap: callback),
+          () => _now,
+        ),
+      );
+      expect(find.text('Show on map'), findsNothing);
+    }
+  });
+
+  testWidgets('response and archive actions return an update result', (
+    tester,
+  ) async {
+    for (final (own, archived, label) in [
+      (false, false, 'Mark responded'),
+      (false, true, 'Restore alert'),
+      (true, false, 'Archive SOS'),
+      (true, true, 'Restore SOS'),
+    ]) {
+      bool? result;
+      await tester.pumpWidget(
+        _app(
+          Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                result = await showSosDetailSheet(
+                  context,
+                  message: _message().copyWith(
+                    respondedAt: !own && archived ? _now : null,
+                    archivedAt: own && archived ? _now : null,
+                  ),
+                  ownSenderLabel: own ? 'You' : null,
+                  canUpdateArchive: own,
+                  canUpdateResponse: !own,
+                );
+              },
+              child: const Text('Open SOS'),
+            ),
+          ),
+          () => _now,
+        ),
+      );
+      await tester.tap(find.text('Open SOS'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text(label));
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+      expect(result, isTrue, reason: label);
+      expect(find.byType(SosDetailSheet), findsNothing);
+    }
+  });
+}
+
+Future<void> _toggleDeliveryDetails(WidgetTester tester) async {
+  final disclosure = find.text('Delivery details');
+  await tester.ensureVisible(disclosure);
+  await tester.tap(disclosure);
+  await tester.pumpAndSettle();
 }
 
 Widget _app(Widget child, DateTime Function() now) => ProviderScope(

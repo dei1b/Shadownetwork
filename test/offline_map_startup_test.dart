@@ -12,6 +12,7 @@ import 'package:shadownetwork/app/presentation/pages/settings_page.dart';
 import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/category.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/chat_message.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/conversation.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_moderation_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/message_status.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
@@ -135,7 +136,24 @@ void main() {
                 return true;
               };
             }),
-            conversationsProvider.overrideWith((ref) async => []),
+            conversationsProvider.overrideWith(
+              (ref) async => [
+                Conversation(
+                  id: 'old-chat',
+                  localPeerId: 'resident',
+                  remotePeer: const Peer(
+                    id: 'classmate',
+                    name: 'Classmate',
+                    type: PeerType.civilian,
+                    isConnected: false,
+                  ),
+                  createdAt: DateTime.utc(2026, 11, 1),
+                  updatedAt: DateTime.utc(2026, 11, 1),
+                  unreadCount: 0,
+                  latestBody: 'Old private chat',
+                ),
+              ],
+            ),
             relayRuntimeProvider.overrideWith(_NoopRelayRuntime.new),
             mapTileCacheStoreProvider.overrideWith(
               (ref) async => MemCacheStore(),
@@ -159,6 +177,13 @@ void main() {
             .last,
       );
       await tester.pumpAndSettle();
+      if (level == DeviceAccessLevel.responder) {
+        expect(find.text('No active incoming SOS alerts.'), findsOneWidget);
+        final all = find.text('All Messages');
+        await tester.ensureVisible(all);
+        await tester.tap(all);
+        await tester.pumpAndSettle();
+      }
       final card = find.byKey(const ValueKey('sos-card-own'));
       await tester.tap(card);
       await tester.pumpAndSettle();
@@ -166,6 +191,8 @@ void main() {
       await tester.tap(find.text('Archive SOS'));
       await tester.pumpAndSettle();
       expect(card, findsNothing);
+      expect(find.text('Old private chat'), findsOneWidget);
+      expect(find.text('No messages in this view.'), findsNothing);
       final filter = find.text('Archive');
       await tester.ensureVisible(filter);
       await tester.tap(filter);
@@ -181,6 +208,20 @@ void main() {
       await tester.tap(allMessages);
       await tester.pumpAndSettle();
       expect(card, findsOneWidget);
+      if (level == DeviceAccessLevel.responder) {
+        tester.platformDispatcher.textScaleFactorTestValue = 2;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        addTearDown(tester.view.resetPhysicalSize);
+        for (final size in [const Size(360, 740), const Size(740, 360)]) {
+          tester.view.physicalSize = size * tester.view.devicePixelRatio;
+          await tester.pumpAndSettle();
+          expect(find.text('Dashboard'), findsOneWidget);
+          final dashboard = find.byKey(const ValueKey('mobile-nav-0'));
+          expect(dashboard.hitTestable(), findsOneWidget);
+          expect(tester.getSize(dashboard).height, greaterThanOrEqualTo(48));
+          expect(tester.takeException(), isNull);
+        }
+      }
     });
   }
 
@@ -192,7 +233,19 @@ void main() {
     addTearDown(() => ml.MapLibrePlatform.createInstance = originalFactory);
     const channel = MethodChannel('flutter.baseflow.com/geolocator');
     final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (_) async => false);
+    final position = Completer<Map<String, double>>();
+    messenger.setMockMethodCallHandler(
+      channel,
+      (call) async => switch (call.method) {
+        'isLocationServiceEnabled' => true,
+        'checkPermission' => 2,
+        'getCurrentPosition' => position.future,
+        _ => null,
+      },
+    );
+    const updates = MethodChannel('flutter.baseflow.com/geolocator_updates');
+    messenger.setMockMethodCallHandler(updates, (_) async => null);
+    addTearDown(() => messenger.setMockMethodCallHandler(updates, null));
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     final messages = Completer<List<SosMessage>>();
     final archived = StateProvider<bool>((ref) => false);
@@ -218,7 +271,24 @@ void main() {
               return true;
             };
           }),
-          conversationsProvider.overrideWith((ref) async => []),
+          conversationsProvider.overrideWith(
+            (ref) async => [
+              Conversation(
+                id: 'old-chat',
+                localPeerId: 'responder',
+                remotePeer: const Peer(
+                  id: 'old-contact',
+                  name: 'Old contact',
+                  type: PeerType.civilian,
+                  isConnected: false,
+                ),
+                createdAt: DateTime.utc(2026, 11, 1),
+                updatedAt: DateTime.utc(2026, 11, 1),
+                unreadCount: 0,
+                latestBody: 'Old private chat',
+              ),
+            ],
+          ),
           relayRuntimeProvider.overrideWith(_ScannedRelayRuntime.new),
           mapTileCacheStoreProvider.overrideWith(
             (ref) async => MemCacheStore(),
@@ -251,6 +321,8 @@ void main() {
       category: Category.medical,
       status: MessageStatus.received,
       createdAt: DateTime.now(),
+      latitude: 7.3139,
+      longitude: 125.6705,
     );
     const local = Peer(
       id: 'RESPONDER',
@@ -259,7 +331,13 @@ void main() {
       isConnected: false,
     );
     messages.complete([
-      normal,
+      normal.copyWith(
+        id: 'received-local-id',
+        sender: local,
+        receivedAt: normal.createdAt.subtract(const Duration(minutes: 5)),
+      ),
+      normal.copyWith(receivedAt: normal.createdAt),
+      normal.copyWith(id: 'local-replay', sender: local),
       normal.copyWith(
         id: 'own',
         sender: local,
@@ -268,7 +346,6 @@ void main() {
         moderationStatus: MessageModerationStatus.spam,
         moderationReason: 'jaccard_similarity',
       ),
-      normal.copyWith(id: 'received-local-id', sender: local),
       normal.copyWith(id: 'request', category: Category.water),
       normal.copyWith(id: 'update', category: Category.information),
       normal.copyWith(id: 'revoked', trustStatus: DeviceTrustStatus.revoked),
@@ -278,15 +355,38 @@ void main() {
       ),
     ]);
     await tester.pump();
-    expect(find.text('3 SOS alerts on this phone'), findsOneWidget);
+    expect(find.text('2 SOS alerts on this phone'), findsOneWidget);
     await tester.tap(find.text('Open SOS alerts'));
     await tester.pump();
     expect(headerText('Alerts'), findsOneWidget);
     expect(find.byKey(const ValueKey('sos-card-emergency')), findsOneWidget);
-    for (final id in ['request', 'update', 'revoked', 'spam']) {
+    for (final id in ['request', 'update', 'revoked', 'spam', 'local-replay']) {
       expect(find.byKey(ValueKey('sos-card-$id')), findsNothing);
     }
+    final incomingCard = find.byKey(const ValueKey('sos-card-emergency'));
+    final olderIncomingCard = find.byKey(
+      const ValueKey('sos-card-received-local-id'),
+    );
+    expect(
+      tester.getTopLeft(incomingCard).dy,
+      lessThan(tester.getTopLeft(olderIncomingCard).dy),
+    );
+    expect(find.text('Old private chat'), findsNothing);
     final ownCard = find.byKey(const ValueKey('sos-card-own'));
+    expect(ownCard, findsNothing);
+    await tester.tap(find.text('Chats'));
+    await tester.pump();
+    expect(find.text('Old private chat'), findsOneWidget);
+    expect(incomingCard, findsNothing);
+    await tester.tap(find.text('Dashboard'));
+    await tester.pump();
+    await tester.tap(find.text('Alerts'));
+    await tester.pump();
+    expect(incomingCard, findsOneWidget);
+    final all = find.text('All Messages');
+    await tester.ensureVisible(all);
+    await tester.tap(all);
+    await tester.pump();
     await tester.ensureVisible(ownCard);
     await tester.pump();
     expect(
@@ -312,18 +412,45 @@ void main() {
     expect(find.text('SOS details'), findsOneWidget);
     expect(find.text('Message sender'), findsNothing);
     expect(find.text('Mark responded'), findsNothing);
+    await tester.ensureVisible(find.text('Delivery details'));
+    await tester.tap(find.text('Delivery details'));
+    await tester.pumpAndSettle();
     expect(find.text('Created on this phone'), findsOneWidget);
     expect(find.text('Moderation'), findsNothing);
     expect(find.text('Saved on this phone · Delivery pending'), findsWidgets);
     await tester.tap(find.byTooltip('Close SOS details'));
     await tester.pumpAndSettle();
 
-    final incomingCard = find.byKey(const ValueKey('sos-card-emergency'));
+    final active = find.text('Active SOS');
+    await tester.ensureVisible(active);
+    await tester.tap(active);
+    await tester.pump();
     await tester.ensureVisible(incomingCard);
     await tester.pump();
     await tester.tap(incomingCard);
     await tester.pumpAndSettle();
     expect(find.text('Message sender'), findsOneWidget);
+    await tester.tap(find.text('Show on map'));
+    await tester.pumpAndSettle();
+    expect(find.text('SOS details'), findsNothing);
+    expect(headerText('SOS Map'), findsOneWidget);
+    for (var attempt = 0; attempt < 50; attempt++) {
+      if (find.byType(ml.MapLibreMap).evaluate().isNotEmpty) break;
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump();
+    }
+    position.complete({'latitude': 7.3026, 'longitude': 125.6888});
+    await tester.pumpAndSettle();
+    final map = tester.widget<ml.MapLibreMap>(find.byType(ml.MapLibreMap));
+    expect(map.initialCameraPosition?.target.latitude, normal.latitude);
+    expect(map.initialCameraPosition?.target.longitude, normal.longitude);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(incomingCard);
+    await tester.tap(incomingCard);
+    await tester.pumpAndSettle();
     expect(find.text('Mark responded'), findsOneWidget);
     await tester.tap(find.text('Mark responded'));
     await tester.pumpAndSettle();
@@ -489,6 +616,11 @@ void main() {
     fullMap.onStyleLoadedCallback!();
     await tester.pump();
     expect(fullController.localRequestsEnabled, isTrue);
+    for (final label in ['Zoom in', 'Zoom out', 'Reset map north']) {
+      final control = find.byTooltip(label);
+      expect(control.hitTestable(), findsOneWidget);
+      expect(tester.getSize(control), const Size(48, 48));
+    }
     expect(find.text('Go to DNSC'), findsOneWidget);
     await tester.tap(find.byTooltip('Map layers and markers'));
     await tester.pumpAndSettle();
@@ -675,6 +807,8 @@ void main() {
     );
 
     SosMessage? saved;
+    final saveCompletion = Completer<void>();
+    var saveCount = 0;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -704,6 +838,8 @@ void main() {
             ),
           ),
           saveSosMessageProvider.overrideWithValue((message) async {
+            saveCount++;
+            await saveCompletion.future;
             saved = message;
           }),
         ],
@@ -762,8 +898,25 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Broadcast'), findsOneWidget);
-    expect(find.text('No GPS location attached'), findsOneWidget);
+    expect(find.text('Broadcast to campus responders'), findsOneWidget);
+    expect(find.text('No location yet. You can still send.'), findsOneWidget);
+
+    final details = find.byType(TextField);
+    await tester.enterText(details, 'Need help near the school.');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    await tester.tap(open);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(details).controller!.text,
+      'Need help near the school.',
+    );
+    tester.view.viewInsets = const FakeViewPadding(bottom: 600);
+    addTearDown(tester.view.resetViewInsets);
+    await tester.pump();
+    expect(find.text('Send SOS').hitTestable(), findsOneWidget);
+    tester.view.resetViewInsets();
+    await tester.pump();
 
     final update = find.text('Update');
     gpsEnabled = true;
@@ -783,13 +936,23 @@ void main() {
     );
     expect(find.text('7.3026° N, 125.6888° E'), findsOneWidget);
 
-    final details = find.byType(TextField);
-    await tester.ensureVisible(details);
-    await tester.enterText(details, 'Need help near the school.');
-    final send = find.text('SEND SOS');
-    await tester.ensureVisible(send);
+    final send = find.text('Send SOS');
     await tester.tap(send);
     await tester.pump();
+    expect(find.text('Choose an SOS category.'), findsOneWidget);
+    expect(saveCount, 0);
+    final category = find.text('Medical Assistance');
+    await tester.ensureVisible(category);
+    await tester.tap(category);
+    await tester.pump();
+    await tester.tap(send);
+    await tester.pump();
+    expect(find.text('Saving SOS…'), findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.text('Saving SOS…'), findsOneWidget);
+    expect(saveCount, 1);
+    saveCompletion.complete();
     await tester.pump(const Duration(milliseconds: 450));
     await tester.pump();
 

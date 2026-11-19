@@ -42,7 +42,7 @@ void main() {
                 registrationBuilder: (onContinue) => Scaffold(
                   body: TextButton(
                     onPressed: onContinue,
-                    child: const Text('Continue unverified'),
+                    child: const Text('Continue without an account'),
                   ),
                 ),
                 child: const Scaffold(body: Text('Home ready')),
@@ -73,13 +73,14 @@ void main() {
             expect(find.textContaining('Panabo'), findsNothing);
             previousTitle = title;
           }
+          expect(find.textContaining('Open Profile'), findsOneWidget);
           await tester.ensureVisible(find.text('Get started'));
           await tester.tap(find.text('Get started'));
         }
         await tester.pumpAndSettle();
         expect(find.text('Home ready'), findsNothing);
         expect(await FirstRunGuideStore.shouldShow(identity), isTrue);
-        await tester.tap(find.text('Continue unverified'));
+        await tester.tap(find.text('Continue without an account'));
         await tester.pumpAndSettle();
         expect(find.text('Home ready'), findsOneWidget);
         expect(await FirstRunGuideStore.shouldShow(identity), isFalse);
