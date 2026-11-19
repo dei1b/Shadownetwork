@@ -46,12 +46,11 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
           'Turn on location and allow access to see where you are.',
     ),
     (
-      icon: Icons.qr_code_2_rounded,
+      icon: Icons.app_registration_rounded,
       title: 'Register with DNSC',
       body:
-          'Open Phone Registration and submit your DNSC details for review. '
-          'Check your registration status when you are online. '
-          'A campus administrator can also help you register using a code.',
+          'Open Profile to sign in or register with DNSC and check your '
+          'review status when online. You can send an SOS right away.',
     ),
   ];
 
@@ -99,6 +98,10 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
     final step = _steps[_step];
     final progress = 'Step ${_step + 1} of ${_steps.length}';
     final isLast = _step == _steps.length - 1;
+    final body = isLast && widget.registrationBuilder == null
+        ? 'Open Profile to check this phone’s access. For help registering, '
+              'open Settings, then Advanced and Backup registration.'
+        : step.body;
     final stepContent = Semantics(
       key: ValueKey(_step),
       liveRegion: true,
@@ -116,7 +119,7 @@ class _FirstRunGuideGateState extends State<FirstRunGuideGate> {
             child: Text(step.title, style: theme.textTheme.headlineLarge),
           ),
           const SizedBox(height: 10),
-          Text(step.body, style: theme.textTheme.bodyMedium),
+          Text(body, style: theme.textTheme.bodyMedium),
         ],
       ),
     );

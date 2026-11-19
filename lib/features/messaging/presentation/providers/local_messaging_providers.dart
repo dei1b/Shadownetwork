@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dio_cache_interceptor/dio_cache_interceptor.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http_cache_file_store/http_cache_file_store.dart';
 import 'package:path/path.dart' as path;
@@ -414,7 +415,6 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
     final repository = await ref.read(sosMessageRepositoryProvider.future);
     final spamDetectionService = ref.read(spamDetectionServiceProvider);
     final trustRepository = await ref.read(trustRepositoryProvider.future);
-    final metrics = await ref.read(validationMetricsRepositoryProvider.future);
     final senderTrust = await trustRepository.getDevice(message.sender.id);
     final trustedMessage = message.copyWith(
       trustStatus: senderTrust.status,
@@ -453,14 +453,21 @@ final saveSosMessageProvider = Provider<Future<void> Function(SosMessage)>((
       securedMessage,
       outgoingPayloadJson: prepared.payloadJson,
     );
-    await metrics.captureEvent(
-      type: ValidationEventType.sosQueued,
-      occurredAt: securedMessage.createdAt,
-      messageHash: prepared.hash,
-      payloadType: RelayPayloadCodec.payloadType(prepared.payloadJson),
-      peerId: securedMessage.recipient?.id,
-      hopCount: securedMessage.hopCount,
-    );
+    try {
+      final metrics = await ref.read(
+        validationMetricsRepositoryProvider.future,
+      );
+      await metrics.captureEvent(
+        type: ValidationEventType.sosQueued,
+        occurredAt: securedMessage.createdAt,
+        messageHash: prepared.hash,
+        payloadType: RelayPayloadCodec.payloadType(prepared.payloadJson),
+        peerId: securedMessage.recipient?.id,
+        hopCount: securedMessage.hopCount,
+      );
+    } catch (error) {
+      debugPrint('Could not record SOS queue metrics (${error.runtimeType}).');
+    }
     ref.invalidate(sosMessagesProvider);
     ref.invalidate(nearbyPeersProvider);
   };
