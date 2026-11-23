@@ -647,7 +647,7 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
     expect(headerText('Profile'), findsOneWidget);
-    expect(find.text('Unregistered'), findsOneWidget);
+    expect(find.textContaining('Phone approval needed'), findsOneWidget);
     expect(find.text('Phone registration'), findsNothing);
     await tester.ensureVisible(find.text('Settings'));
     await tester.pumpAndSettle();

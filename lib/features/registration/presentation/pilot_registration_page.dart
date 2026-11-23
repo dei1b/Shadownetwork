@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../messaging/presentation/providers/local_messaging_providers.dart';
@@ -33,10 +34,12 @@ class PilotRegistrationPage extends ConsumerStatefulWidget {
   const PilotRegistrationPage({
     super.key,
     this.onContinue,
+    this.initiallyCreatingAccount = false,
     this.openRegistration = PilotRegistration.open,
   });
 
   final VoidCallback? onContinue;
+  final bool initiallyCreatingAccount;
   final Future<PilotRegistration> Function() openRegistration;
 
   @override
@@ -69,7 +72,11 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   PilotRegistration? _repository;
   User? _user;
   bool _busy = true;
+  bool _restoreFailed = false;
+  late bool _createAccount = widget.initiallyCreatingAccount;
+  bool _showPassword = false;
   bool _navigationLocked = false;
+  bool _reviewIsStale = false;
   bool _locked = false;
   bool _submitted = false;
   String? _device;
@@ -87,8 +94,10 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   Future<void> _restore() async {
     try {
       _repository = await widget.openRegistration();
+      if (!mounted) return;
       await _loadUser();
     } catch (_) {
+      _restoreFailed = true;
       _message = pilotRegistrationIsLive
           ? 'Registration is unavailable. You can try again when online.'
           : 'Unable to load registration. Check the local Firebase emulator.';
@@ -105,6 +114,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     if (!mounted || _repository!.auth.currentUser?.uid != user?.uid) return;
     _user = user;
     _application = null;
+    _reviewIsStale = false;
     _correction = null;
     _missingFields.clear();
     for (final entry in _fields.entries) {
@@ -153,7 +163,19 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     try {
       await action();
     } on FirebaseAuthException catch (error) {
-      _message = error.message ?? 'Sign-in failed.';
+      _message = switch (error.code) {
+        'invalid-email' => 'Enter a valid email address.',
+        'invalid-credential' || 'wrong-password' || 'user-not-found' =>
+          'Check your email and password, or reset your password.',
+        'email-already-in-use' =>
+          'This email already has an account. Sign in instead.',
+        'weak-password' => 'Choose a stronger password.',
+        'network-request-failed' =>
+          'Check your internet connection and try again.',
+        'too-many-requests' =>
+          'Too many attempts. Wait a moment and try again.',
+        _ => 'Could not complete the account request. Try again.',
+      };
     } on StateError catch (error) {
       _message = error.message;
     } catch (_) {
@@ -188,9 +210,24 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
         await auth.signInWithEmailAndPassword(email: email, password: password);
       }
       if (!mounted) return;
+      TextInput.finishAutofillContext();
       _password.clear();
       await _loadUser();
     }, lockNavigation: true);
+  }
+
+  Future<void> _resetPassword() async {
+    final email = _email.text.trim();
+    if (_busy || !_validateRequiredFields({'email': email})) return;
+    await _run(() async {
+      try {
+        await _repository!.auth.sendPasswordResetEmail(email: email);
+      } on FirebaseAuthException catch (error) {
+        if (error.code != 'user-not-found') rethrow;
+      }
+      _message =
+          'If an account exists for this email, a password reset link will be sent.';
+    });
   }
 
   Map<String, String> get _details => {
@@ -209,12 +246,16 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     try {
       application = await _repository!.refreshProfile(user);
     } catch (_) {
-      if (_isCurrentUser(user) && _application == null) {
-        _message = 'Review status unavailable. Try again when online.';
+      if (_isCurrentUser(user)) {
+        _reviewIsStale = _application != null;
+        if (!_reviewIsStale) {
+          _message = 'Review status unavailable. Try again when online.';
+        }
       }
       return;
     }
     if (!_isCurrentUser(user)) return;
+    _reviewIsStale = false;
     if (application == null) {
       _application = null;
       _correction = null;
@@ -259,7 +300,9 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           await ref.read(registrationMatchesPhoneProvider(binding).future);
       if (!_isCurrentUser(user)) return;
       if (!matches) {
-        _message = 'This account was approved for a different phone.';
+        _message = 'Your account is approved, but this phone needs approval again. '
+            'This can happen after clearing app data or changing phones. '
+            'Contact the campus administrator to approve this installation.';
         return;
       }
       var access = await ref.read(deviceAccessProfileProvider.future);
@@ -344,6 +387,10 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   }
 
   Future<void> _submitDetails(Map<String, String> details) => _run(() async {
+    final user = _user!;
+    final repository = _repository!;
+    final correction = _correction;
+    final existingBinding = _device;
     final peer = ref.read(localPeerProvider.future);
     final crypto = ref.read(deviceCryptoIdentityProvider.future);
     final signing = ref.read(deviceSigningIdentityProvider.future);
@@ -352,31 +399,33 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       identity: await crypto,
       signingIdentity: await signing,
     );
-    if (!mounted) return;
     final binding = jsonEncode(registration.toJson());
-    if (_device != null && _device != binding) {
+    if (existingBinding != null && existingBinding != binding) {
       throw StateError('This draft belongs to different device keys.');
     }
     _device = binding;
     _locked = true;
-    await _save();
-    if (!mounted) return;
-    setState(() => _message = 'Submitting application…');
-    final user = _user!;
-    final correction = _correction;
+    await repository.saveDraft(user.uid, {
+      ...details,
+      'deviceRegistration': binding,
+      'submitted': false,
+      'correctionRevision': correction?.updateTime,
+    });
+    if (mounted) setState(() => _message = 'Submitting application…');
+    if (repository.auth.currentUser?.uid != user.uid) return;
     if (correction == null) {
-      await _repository!.submit(user, {
+      await repository.submit(user, {
         ...details,
         'status': 'submitted',
         'deviceRegistration': binding,
       });
     } else {
-      await _repository!.resubmit(user, correction, details);
+      await repository.resubmit(user, correction, details);
       _correction = null;
       _application = null;
     }
     _submitted = true;
-    await _repository!.saveDraft(user.uid, {
+    await repository.saveDraft(user.uid, {
       ...details,
       'deviceRegistration': binding,
       'submitted': true,
@@ -415,9 +464,9 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
         : SafeArea(
             minimum: const EdgeInsets.all(16),
             child: OutlinedButton(
-              onPressed: _navigationLocked ? null : widget.onContinue,
+              onPressed: widget.onContinue,
               child: Text(
-                _user == null
+                _user == null && !_navigationLocked
                     ? 'Continue without an account'
                     : 'Continue to Home',
                 textAlign: TextAlign.center,
@@ -441,43 +490,135 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           if (!pilotRegistrationIsLive)
             const Text('Use synthetic details for this local test.'),
           if (_busy) const LinearProgressIndicator(),
+          if (_navigationLocked && widget.onContinue != null)
+            Text(
+              _user == null
+                  ? 'You can open Home for SOS now. Your account may still sign in when the request finishes.'
+                  : 'You can open Home for SOS while your application finishes sending.',
+            ),
           if (_message.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Semantics(liveRegion: true, child: Text(_message)),
+              child: Semantics(
+                liveRegion: true,
+                child: Text(
+                  _reviewIsStale
+                      ? 'Last known status\n$_message\nConnect to check for updates.'
+                      : _message,
+                ),
+              ),
             ),
-          if (_repository != null && _user == null) ...[
-            TextField(
-              controller: _email,
-              focusNode: _requiredFocusNodes['email'],
-              enabled: !_busy,
-              keyboardType: TextInputType.emailAddress,
-              onChanged: (value) => _clearFieldError('email', value.trim()),
-              decoration: _requiredDecoration('email', 'Email'),
-            ),
-            TextField(
-              controller: _password,
-              focusNode: _requiredFocusNodes['password'],
-              enabled: !_busy,
-              obscureText: true,
-              onChanged: (value) => _clearFieldError('password', value),
-              decoration: _requiredDecoration('password', 'Password'),
-            ),
+          if (_restoreFailed)
             FilledButton(
-              onPressed: _busy ? null : () => _authenticate(create: true),
-              child: const Text('Create account'),
+              onPressed: _busy
+                  ? null
+                  : () {
+                      setState(() {
+                        _busy = true;
+                        _restoreFailed = false;
+                        _message = '';
+                      });
+                      _restore();
+                    },
+              child: const Text('Retry'),
             ),
-            TextButton(
-              onPressed: _busy ? null : () => _authenticate(create: false),
-              child: const Text('Sign in'),
+          if (!_restoreFailed && _repository != null && _user == null)
+            AutofillGroup(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    _createAccount
+                        ? 'Create a DNSC account'
+                        : 'Sign in to DNSC',
+                    style: Theme.of(context).textTheme.headlineLarge,
+                  ),
+                  TextField(
+                    controller: _email,
+                    focusNode: _requiredFocusNodes['email'],
+                    enabled: !_busy,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
+                    textInputAction: TextInputAction.next,
+                    onChanged: (value) =>
+                        _clearFieldError('email', value.trim()),
+                    decoration: _requiredDecoration('email', 'Email'),
+                  ),
+                  TextField(
+                    controller: _password,
+                    focusNode: _requiredFocusNodes['password'],
+                    enabled: !_busy,
+                    obscureText: !_showPassword,
+                    autofillHints: [
+                      _createAccount
+                          ? AutofillHints.newPassword
+                          : AutofillHints.password,
+                    ],
+                    onSubmitted: (_) => _authenticate(create: _createAccount),
+                    onChanged: (value) => _clearFieldError('password', value),
+                    decoration: _requiredDecoration('password', 'Password')
+                        .copyWith(
+                          suffixIcon: IconButton(
+                            tooltip: _showPassword
+                                ? 'Hide password'
+                                : 'Show password',
+                            onPressed: _busy
+                                ? null
+                                : () => setState(
+                                    () => _showPassword = !_showPassword,
+                                  ),
+                            icon: Icon(
+                              _showPassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                            ),
+                          ),
+                        ),
+                  ),
+                  if (!_createAccount)
+                    TextButton(
+                      onPressed: _busy ? null : _resetPassword,
+                      child: const Text('Forgot password?'),
+                    ),
+                  FilledButton(
+                    onPressed: _busy
+                        ? null
+                        : () => _authenticate(create: _createAccount),
+                    child: Text(_createAccount ? 'Create account' : 'Sign in'),
+                  ),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () => setState(() {
+                            _createAccount = !_createAccount;
+                            _showPassword = false;
+                            _missingFields.clear();
+                            _message = '';
+                            _password.clear();
+                          }),
+                    child: Text(
+                      _createAccount ? 'Back to sign in' : 'Create an account',
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-          if (_user != null) ...[
-            TextButton(
-              onPressed: _busy ? null : _refreshStatus,
-              child: const Text('Check review status'),
-            ),
+          if (!_restoreFailed && _user != null) ...[
+            if (_submitted || _locked || _correction != null)
+              TextButton(
+                onPressed: _busy ? null : _refreshStatus,
+                child: const Text('Check review status'),
+              ),
             if (!_submitted) ...[
+              Text(
+                _correction == null
+                    ? 'Request campus access'
+                    : 'Update your application',
+                style: Theme.of(context).textTheme.headlineLarge,
+              ),
+              const Text(
+                'The campus administrator reviews your details after you submit.',
+              ),
               for (final entry in _labels.entries)
                 TextField(
                   controller: _fields[entry.key],

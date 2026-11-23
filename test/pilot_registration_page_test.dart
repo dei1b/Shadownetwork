@@ -4,21 +4,31 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
+import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
+import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/registration/data/pilot_registration.dart';
 import 'package:shadownetwork/features/registration/data/registration_review_api.dart';
 import 'package:shadownetwork/features/registration/presentation/pilot_registration_page.dart';
+import 'package:shadownetwork/features/registration/presentation/profile_section.dart';
+import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
+import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
 
 class _Student extends Fake implements User {
   @override
   String get uid => 'student';
+
+  @override
+  String get email => 'student@example.test';
 }
 
 class _Auth extends Fake implements FirebaseAuth {
   _Auth(this.currentUser);
 
   final signIn = Completer<UserCredential>();
+  String? resetEmail;
 
   @override
   final User? currentUser;
@@ -28,6 +38,14 @@ class _Auth extends Fake implements FirebaseAuth {
     required String email,
     required String password,
   }) => signIn.future;
+
+  @override
+  Future<void> sendPasswordResetEmail({
+    required String email,
+    ActionCodeSettings? actionCodeSettings,
+  }) async {
+    resetEmail = email;
+  }
 }
 
 class _Registration extends PilotRegistration {
@@ -37,6 +55,10 @@ class _Registration extends PilotRegistration {
   ReviewApplication? cached;
   ReviewApplication? online;
   bool offline = false;
+  bool failUpdate = false;
+  Map<String, dynamic>? savedChanges;
+  final submission = Completer<void>();
+  final submissionStarted = Completer<void>();
   int refreshes = 0;
   Map<String, dynamic> draft = {'submitted': true};
 
@@ -56,6 +78,22 @@ class _Registration extends PilotRegistration {
     refreshes++;
     if (offline) throw StateError('Connection unavailable');
     return cached = online;
+  }
+
+  @override
+  Future<void> updateProfile(
+    User user,
+    ReviewApplication application,
+    Map<String, dynamic> changes,
+  ) async {
+    if (failUpdate) throw StateError('Connection unavailable');
+    savedChanges = changes;
+  }
+
+  @override
+  Future<void> submit(User user, Map<String, String> details) {
+    submissionStarted.complete();
+    return submission.future;
   }
 }
 
@@ -142,9 +180,7 @@ void main() {
     expect(tester.widget<EditableText>(email).focusNode.hasFocus, isTrue);
   });
 
-  testWidgets('first-run guest access waits for an in-flight sign-in', (
-    tester,
-  ) async {
+  testWidgets('first-run Home stays available during sign-in', (tester) async {
     final registration = _Registration(signedIn: false);
     var continued = false;
     await open(tester, registration, onContinue: () => continued = true);
@@ -155,17 +191,171 @@ void main() {
     await tester.enterText(find.byType(TextField).last, 'test-password');
     await tester.tap(find.text('Sign in'));
     await tester.pump();
-    final guest = find.widgetWithText(
-      OutlinedButton,
-      'Continue without an account',
-    );
-    expect(tester.widget<OutlinedButton>(guest).onPressed, isNull);
+    expect(find.text('Continue without an account'), findsNothing);
+    await tester.tap(find.text('Continue to Home'));
+    expect(continued, isTrue);
     (registration.auth as _Auth).signIn.completeError(
       FirebaseAuthException(code: 'network-request-failed'),
     );
     await tester.pumpAndSettle();
-    await tester.tap(guest);
-    expect(continued, isTrue);
+    expect(find.text('Continue without an account'), findsOneWidget);
+  });
+
+  testWidgets('password recovery uses the sign-in email without a password', (
+    tester,
+  ) async {
+    final registration = _Registration(signedIn: false);
+    await open(tester, registration);
+    await tester.enterText(
+      find.byType(TextField).first,
+      'student@example.test',
+    );
+    await tester.tap(find.text('Forgot password?'));
+    await tester.pumpAndSettle();
+    expect((registration.auth as _Auth).resetEmail, 'student@example.test');
+    expect(find.textContaining('password reset link'), findsOneWidget);
+    await tester.tap(find.text('Create an account'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create a DNSC account'), findsOneWidget);
+    expect(find.text('Forgot password?'), findsNothing);
+  });
+
+  testWidgets('submission can finish after first-run Home opens', (
+    tester,
+  ) async {
+    var firstRunDone = false;
+    final registration = _Registration()
+      ..draft = {
+        'displayName': 'Test Student',
+        'studentNumber': '2026-1234',
+        'courseYear': 'BSIT 1',
+      };
+    final secrets = InMemorySecretValueStore();
+    final identity = await DeviceIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    final signing = await DeviceSigningIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localPeerProvider.overrideWith(
+            (ref) async => const Peer(
+              id: 'this-phone',
+              name: 'Test',
+              type: PeerType.civilian,
+              isConnected: false,
+            ),
+          ),
+          deviceCryptoIdentityProvider.overrideWith((ref) async => identity),
+          deviceSigningIdentityProvider.overrideWith((ref) async => signing),
+        ],
+        child: MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              return firstRunDone
+                  ? const Scaffold(body: Text('SOS Home'))
+                  : PilotRegistrationPage(
+                      openRegistration: () async => registration,
+                      onContinue: () => setState(() => firstRunDone = true),
+                    );
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final submit = find.text('Submit for review');
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pump();
+    await tester.runAsync(
+      () => registration.submissionStarted.future.timeout(
+        const Duration(seconds: 5),
+      ),
+    );
+    expect(registration.draft['submitted'], isFalse);
+    await tester.tap(find.text('Continue to Home'));
+    await tester.pumpAndSettle();
+    expect(find.text('SOS Home'), findsOneWidget);
+    registration.submission.complete();
+    await tester.pump();
+    expect(registration.draft['submitted'], isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('registration can retry after initialization fails', (
+    tester,
+  ) async {
+    var attempts = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          home: PilotRegistrationPage(
+            openRegistration: () async {
+              if (++attempts == 1) throw StateError('Unavailable');
+              return _Registration(signedIn: false);
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Sign in to DNSC'), findsOneWidget);
+    expect(attempts, 2);
+  });
+
+  testWidgets('Profile keeps typed contact details after a failed save', (
+    tester,
+  ) async {
+    final registration = _Registration()
+      ..online = _application('published')
+      ..failUpdate = true;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          registrationMatchesPhoneProvider(
+            'this-phone',
+          ).overrideWith((ref) async => true),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: ProfileSection(
+                active: true,
+                access: const DeviceAccessProfile(
+                  deviceId: 'this-phone',
+                  level: DeviceAccessLevel.civilian,
+                ),
+                openRegistration: () async => registration,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Personal details'));
+    await tester.pumpAndSettle();
+    final edit = find.text('Edit phone and address');
+    await tester.ensureVisible(edit);
+    await tester.tap(edit);
+    await tester.pumpAndSettle();
+    final address = find.widgetWithText(TextFormField, 'Address');
+    await tester.enterText(address, 'Updated address');
+    await tester.pump();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not save your changes'), findsOneWidget);
+    expect(find.text('Updated address'), findsOneWidget);
+    registration.failUpdate = false;
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(registration.savedChanges?['address'], 'Updated address');
+    expect(find.text('Contact details saved.'), findsOneWidget);
   });
 
   for (final size in [const Size(360, 640), const Size(640, 360)]) {
@@ -253,6 +443,7 @@ void main() {
     await open(tester, registration);
     expect(registration.refreshes, 2);
     expect(find.textContaining('Access active on this phone.'), findsOneWidget);
+    expect(find.textContaining('Last known status'), findsOneWidget);
     expect(find.textContaining('Pending review'), findsNothing);
   });
 
@@ -274,7 +465,7 @@ void main() {
         ..online = _application('published', binding: 'other-phone'),
     );
     expect(
-      find.textContaining('approved for a different phone'),
+      find.textContaining('this phone needs approval again'),
       findsOneWidget,
     );
     expect(find.textContaining('Access active on this phone'), findsNothing);

@@ -33,7 +33,13 @@ class PilotRegistration {
   final String? _liveProject;
   static Future<PilotRegistration>? _instance;
 
-  static Future<PilotRegistration> open() => _instance ??= _connect();
+  static Future<PilotRegistration> open() => _instance ??= _connect().then(
+    (registration) => registration,
+    onError: (Object error, StackTrace stack) {
+      _instance = null;
+      Error.throwWithStackTrace(error, stack);
+    },
+  );
 
   static Future<PilotRegistration> _connect() async {
     if (pilotRegistrationIsLive) {

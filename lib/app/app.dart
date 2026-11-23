@@ -38,8 +38,12 @@ class DisasterCommApp extends StatelessWidget {
           ? child!
           : StartupGate(initialization: initialization!, child: child!),
       routes: {
-        '/login': (context) => const LoginPage(),
-        '/signup': (context) => const SignUpPage(),
+        '/login': (context) => pilotRegistrationEnabled
+            ? const PilotRegistrationPage()
+            : const LoginPage(),
+        '/signup': (context) => pilotRegistrationEnabled
+            ? const PilotRegistrationPage(initiallyCreatingAccount: true)
+            : const SignUpPage(),
         '/app': (context) => const AppShellPage(),
         '/trust-bundle': (context) => const TrustBundleImportPage(),
         '/settings': (context) => const SettingsPage(),
