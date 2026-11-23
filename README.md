@@ -2,7 +2,11 @@
 
 Shadow Network is an Android-first Flutter application for disaster coordination when internet access is unreliable or unavailable. It lets people create and exchange SOS and chat messages, keeps message data on the device, and forwards messages opportunistically between nearby devices using Bluetooth Low Energy (BLE) and Wi-Fi Direct.
 
-The project also includes a browser-based administrator dashboard for device registration and trust-bundle management. The dashboard is a companion tool; the field messaging app is designed around local storage and peer-to-peer communication.
+The Windows admin companion handles device registration, trust bundles, and field-validation imports. A browser dashboard also supports device registration and trust-bundle management.
+
+- [Download the Android APK](https://github.com/dei1b/Shadownetwork/releases)
+- [Read the project wiki](https://github.com/dei1b/Shadownetwork/wiki) for Android setup, offline relay, campus administration, and testing.
+- [Contribute to the project](CONTRIBUTING.md) or [report a vulnerability privately](SECURITY.md).
 
 ## What the app does
 
@@ -13,7 +17,8 @@ The project also includes a browser-based administrator dashboard for device reg
 - **Protect and verify messages:** support encrypted targeted messages, device signing identities, and trust decisions for approved, unknown, or revoked devices.
 - **Review relay status:** see connection and delivery status while the app manages its relay runtime, including Android foreground-service operation.
 - **Record field sessions:** collect delivery, discovery, latency, propagation, hop, transport, fallback, and battery telemetry, then copy session summaries as JSON or CSV.
-- **Manage device registration:** use the browser admin dashboard to register devices and export trust bundles for mobile import.
+- **Manage device registration:** use the admin tools to register devices and export trust bundles for mobile import.
+- **Review field validation:** import mobile session exports in Windows Admin and inspect SOS delivery and phone-to-phone handoff metrics.
 
 Wireless range, delivery, background behavior, battery use, and multi-device relay depend on Android device capabilities and require validation on the target devices. The app includes mock transport and automated tests for development; these do not replace physical-device field trials.
 
@@ -25,6 +30,7 @@ lib/
   core/                      Shared styles, tokens, and widgets
   features/                  Authentication, messaging, trust, maps, validation, admin
   main.dart                  Android/mobile entry point
+  admin_desktop_main.dart    Windows admin entry point
   admin_web_main.dart        Browser admin entry point
 assets/                      App images and offline map data
 android/                     Android application and native relay integration
@@ -38,7 +44,7 @@ The offline map tiles, fonts, styles, and sprites under `assets/` are runtime as
 
 - Flutter SDK **3.41.7** (stable; the CI workflow uses this version)
 - Dart SDK compatible with the version constraint in `pubspec.yaml` (`^3.11.5`)
-- Java 17 and Android SDK for Android builds
+- JDK 21 and Android SDK to match the Android release workflow
 - An Android device or emulator for running the mobile app
 
 ## Get started
@@ -71,7 +77,15 @@ flutter build apk --release
 
 The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
 
-## Browser admin dashboard
+## Admin apps
+
+Run Windows Admin from the repository root on a Windows development machine:
+
+```sh
+flutter run -d windows -t lib/admin_desktop_main.dart
+```
+
+### Browser dashboard
 
 Run the administrator dashboard locally in Edge:
 
@@ -79,7 +93,7 @@ Run the administrator dashboard locally in Edge:
 flutter run -d edge -t lib/admin_web_main.dart --web-port 8080
 ```
 
-Then visit [http://localhost:8080](http://localhost:8080). Use a consistent local origin when returning to the dashboard because browser-local storage is tied to that origin. Admin registry persistence is browser-local; it is not a shared cloud service.
+Then visit [http://localhost:8080](http://localhost:8080). Use the same local origin each time so the dashboard can access the registry stored in that browser.
 
 ## Android permissions and connectivity
 
