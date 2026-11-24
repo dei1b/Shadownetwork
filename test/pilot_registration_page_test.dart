@@ -169,7 +169,9 @@ void main() {
     tester,
   ) async {
     await open(tester, _Registration(signedIn: false));
-    await tester.tap(find.text('Sign in'));
+    final submit = find.byKey(const ValueKey('auth-submit-button'));
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
     await tester.pumpAndSettle();
     expect(find.text('Enter your email.'), findsOneWidget);
     expect(find.text('Enter your password.'), findsOneWidget);
@@ -189,7 +191,9 @@ void main() {
       'student@example.test',
     );
     await tester.enterText(find.byType(TextField).last, 'test-password');
-    await tester.tap(find.text('Sign in'));
+    final submit = find.byKey(const ValueKey('auth-submit-button'));
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
     await tester.pump();
     expect(find.text('Continue without an account'), findsNothing);
     await tester.tap(find.text('Continue to Home'));
@@ -214,7 +218,7 @@ void main() {
     await tester.pumpAndSettle();
     expect((registration.auth as _Auth).resetEmail, 'student@example.test');
     expect(find.textContaining('password reset link'), findsOneWidget);
-    await tester.tap(find.text('Create an account'));
+    await tester.tap(find.byKey(const ValueKey('auth-mode-signup')));
     await tester.pumpAndSettle();
     expect(find.text('Create a DNSC account'), findsOneWidget);
     expect(find.text('Forgot password?'), findsNothing);
@@ -498,5 +502,47 @@ void main() {
     registration.offline = true;
     await open(tester, registration);
     expect(tester.widget<TextField>(name).controller!.text, 'Saved correction');
+  });
+
+  testWidgets('Profile renders offline access and account states at 200% text', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final registration = _Registration()
+      ..cached = _application('changes_requested')
+      ..offline = true;
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: ProfileSection(
+                active: true,
+                access: const DeviceAccessProfile(
+                  deviceId: 'this-phone',
+                  level: DeviceAccessLevel.responder,
+                  ownerName: 'Test Responder',
+                ),
+                openRegistration: () async => registration,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('This phone’s offline access'), findsOneWidget);
+    expect(find.textContaining('Campus responder'), findsOneWidget);
+    expect(find.textContaining('Last known · Changes requested'), findsOneWidget);
+    expect(find.text('Update application'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

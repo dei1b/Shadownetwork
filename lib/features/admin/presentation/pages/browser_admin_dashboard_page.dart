@@ -1471,15 +1471,18 @@ class _Panel extends StatelessWidget {
         borderRadius: BorderRadius.circular(AdminTheme.radius),
         border: Border.all(color: _mobileField),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: AdminTheme.sectionTitle),
-          const SizedBox(height: 6),
-          Text(subtitle, style: const TextStyle(color: _mobileMuted)),
-          const SizedBox(height: 18),
-          child,
-        ],
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: AdminTheme.sectionTitle),
+            const SizedBox(height: 6),
+            Text(subtitle, style: const TextStyle(color: _mobileMuted)),
+            const SizedBox(height: 18),
+            child,
+          ],
+        ),
       ),
     );
   }

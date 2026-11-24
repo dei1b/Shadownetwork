@@ -228,14 +228,17 @@ class _DashboardState extends ConsumerState<ValidationAnalysisDashboard> {
         border: Border.all(color: AdminTheme.border),
         borderRadius: BorderRadius.circular(AdminTheme.radius),
       ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-        childrenPadding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-        shape: const Border(),
-        collapsedShape: const Border(),
-        title: title,
-        subtitle: subtitle,
-        children: children,
+      child: Material(
+        type: MaterialType.transparency,
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          childrenPadding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          shape: const Border(),
+          collapsedShape: const Border(),
+          title: title,
+          subtitle: subtitle,
+          children: children,
+        ),
       ),
     ),
   );

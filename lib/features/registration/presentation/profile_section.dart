@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/mobile_ui_tokens.dart';
+import '../../../core/widgets/mobile_ui_components.dart';
 import '../../trust/data/services/trust_directory_sync_service.dart';
 import '../../trust/domain/entities/device_access_profile.dart';
 import '../data/pilot_registration.dart';
@@ -177,10 +179,19 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
     final initial = labels.map(
       (key, _) => MapEntry(key, application.fields[key] as String? ?? ''),
     );
-    final saved = await showDialog<bool>(
+    final saved = await showModalBottomSheet<bool>(
       context: context,
-      barrierDismissible: false,
-      builder: (_) => _ProfileEditDialog(
+      isScrollControlled: true,
+      useSafeArea: true,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: MobileUiTokens.canvas,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(MobileUiTokens.sheetRadius),
+        ),
+      ),
+      builder: (_) => _ProfileEditSheet(
         identity: identity,
         labels: labels,
         initial: initial,
@@ -254,6 +265,41 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
     };
   }
 
+  MobileStatusTone _registrationTone(String? status, bool? matchesPhone) {
+    if (_reviewIsStale) return MobileStatusTone.warning;
+    return switch (status) {
+      'published' when matchesPhone == true && widget.access.isApproved =>
+        MobileStatusTone.positive,
+      'published' when matchesPhone == false => MobileStatusTone.error,
+      'rejected' => MobileStatusTone.error,
+      'changes_requested' ||
+      'approved_pending_publication' ||
+      'published' ||
+      'submitted' => MobileStatusTone.warning,
+      _ => _user == null ? MobileStatusTone.info : MobileStatusTone.warning,
+    };
+  }
+
+  MobileStatusTone _messageTone() {
+    if (_message.startsWith('Contact details saved.') ||
+        _message.startsWith('Change sent for review.')) {
+      return MobileStatusTone.positive;
+    }
+    return MobileStatusTone.error;
+  }
+
+  String _initials(String? name) {
+    if (name == null) return '';
+    final parts = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '';
+    if (parts.length == 1) return parts.first.substring(0, 1).toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  }
+
   @override
   Widget build(BuildContext context) {
     final access = widget.access;
@@ -276,167 +322,492 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       if (_user?.email case final String email) 'Email': email,
     };
     final title = fields['displayName'] as String?;
-    final phoneStatus = switch (access.level) {
-      DeviceAccessLevel.revoked => 'Approval removed',
-      DeviceAccessLevel.keyMismatch => 'This phone needs approval again',
-      DeviceAccessLevel.outdatedBundle => 'Phone approval expired',
-      DeviceAccessLevel.unregistered => 'Phone approval needed',
-      _ => '${access.roleLabel} · Active on this phone',
-    };
+    final statusLabel = _registrationStatus(status, matchesPhone);
+    final statusTone = _registrationTone(status, matchesPhone);
+    final detailsPreview = [
+      if (fields['studentNumber'] case final String id when id.isNotEmpty) id,
+      if (fields['courseYear'] case final String course when course.isNotEmpty)
+        course,
+    ].join(' · ');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ListTile(
-          leading: const Icon(Icons.phone_android),
-          title: const Text('This phone’s offline access'),
-          subtitle: Text(
-            access.isApproved
-                ? phoneStatus
-                : '$phoneStatus\nYou can still send an SOS. Contact campus staff if you need phone approval.',
-          ),
-        ),
-        Card(
+        _OfflineAccessHeroCard(access: access),
+        const SizedBox(height: 18),
+        const MobileSectionLabel('DNSC account'),
+        MobileSectionCard(
+          padding: const EdgeInsets.all(16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ListTile(
-                leading: const Icon(Icons.account_circle_outlined, size: 32),
-                title: Text(title ?? 'Your account'),
-                subtitle: Text(
-                  _reviewIsStale
-                      ? 'Last known · ${_registrationStatus(status, matchesPhone)}'
-                      : _registrationStatus(status, matchesPhone),
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _ProfileAvatar(initials: _initials(title)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title != null && title.trim().isNotEmpty
+                              ? title
+                              : 'Your account',
+                          style: MobileUiTokens.sectionHeading,
+                        ),
+                        if (_user?.email case final String email
+                            when email.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(email, style: MobileUiTokens.subtitle),
+                        ],
+                        const SizedBox(height: 8),
+                        MobileStatusBadge(
+                          label: _reviewIsStale
+                              ? 'Last known · $statusLabel'
+                              : statusLabel,
+                          tone: statusTone,
+                          icon: _reviewIsStale
+                              ? Icons.cloud_off_rounded
+                              : statusTone == MobileStatusTone.positive
+                              ? Icons.check_circle_outline_rounded
+                              : statusTone == MobileStatusTone.error
+                              ? Icons.error_outline_rounded
+                              : Icons.schedule_rounded,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              if (status == 'approved_pending_publication')
-                const ListTile(
-                  subtitle: Text(
-                    'Campus staff still need to release phone access. Check again when online.',
-                  ),
-                )
-              else if (status == 'submitted')
-                const ListTile(
-                  subtitle: Text(
-                    'Campus staff are reviewing your application.',
-                  ),
-                )
-              else if (matchesPhone == false || status == 'rejected')
-                ListTile(
-                  subtitle: Text(
-                    matchesPhone == false
+              if (status == 'approved_pending_publication') ...[
+                const SizedBox(height: 12),
+                const MobileStatusBanner(
+                  tone: MobileStatusTone.warning,
+                  message:
+                      'Campus staff still need to release phone access. Check again when online.',
+                ),
+              ] else if (status == 'submitted') ...[
+                const SizedBox(height: 12),
+                const MobileStatusBanner(
+                  tone: MobileStatusTone.info,
+                  message: 'Campus staff are reviewing your application.',
+                ),
+              ] else if (matchesPhone == false || status == 'rejected') ...[
+                const SizedBox(height: 12),
+                MobileStatusBanner(
+                  tone: MobileStatusTone.error,
+                  message: matchesPhone == false
                       ? 'Clearing app data or changing phones can require a new approval. Contact campus staff to approve this installation.'
-                        : 'Contact campus staff about your application.',
-                  ),
+                      : 'Contact campus staff about your application.',
                 ),
+              ],
               if (status == 'changes_requested' &&
-                  _application!.history.isNotEmpty)
-                ListTile(
-                  title: Text(
-                    _application!.history.last['reason'] as String? ?? '',
+                  _application!.history.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                MobileStatusBanner(
+                  tone: MobileStatusTone.warning,
+                  title: 'Reviewer note',
+                  message:
+                      _application!.history.last['reason'] as String? ?? '',
+                ),
+              ],
+              if (_buildAccountAction(
+                    status: status,
+                    matchesPhone: matchesPhone,
+                    access: access,
+                  )
+                  case final action?) ...[
+                const SizedBox(height: 14),
+                action,
+              ],
+              if (_busy) ...[
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: const LinearProgressIndicator(
+                    minHeight: 4,
+                    color: MobileUiTokens.brandRed,
+                    backgroundColor: MobileUiTokens.redTint,
                   ),
                 ),
-              if (_registrationEnabled && _user == null)
-                ListTile(
-                  leading: const Icon(Icons.login),
-                  title: const Text('Sign in or register with DNSC'),
-                  onTap: _busy ? null : _openRegistration,
-                )
-              else if (status == 'published' &&
-                  matchesPhone == true &&
-                  !access.isApproved)
-                ListTile(
-                  leading: const Icon(Icons.sync),
-                  title: const Text('Activate this phone'),
-                  onTap: _busy
-                      ? null
-                      : () => _run(() => _refresh(syncApproval: true)),
-                )
-              else if (status == 'changes_requested')
-                ListTile(
-                  leading: const Icon(Icons.edit_note_outlined),
-                  title: const Text('Update application'),
-                  onTap: _busy ? null : _openRegistration,
-                )
-              else if (_user != null &&
-                  status == null &&
-                  _draft['submitted'] != true)
-                ListTile(
-                  leading: const Icon(Icons.edit_note_outlined),
-                  title: const Text('Finish registration'),
-                  onTap: _busy ? null : _openRegistration,
-                )
-              else if (_user != null &&
-                  matchesPhone != false &&
-                  status != 'rejected')
-                ListTile(
-                  leading: const Icon(Icons.refresh),
-                  title: const Text('Check status'),
-                  onTap: _busy
-                      ? null
-                      : () => _run(() => _refresh(syncApproval: true)),
+              ],
+              if (_message.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                MobileStatusBanner(
+                  liveRegion: true,
+                  tone: _messageTone(),
+                  message: _message,
                 ),
-              if (_busy) const LinearProgressIndicator(),
-              if (_message.isNotEmpty)
-                ListTile(
-                  title: Semantics(liveRegion: true, child: Text(_message)),
-                ),
+              ],
             ],
           ),
         ),
-        if (details.isNotEmpty || canEdit)
-          Card(
-            child: ExpansionTile(
-              title: const Text('Personal details'),
-              leading: const Icon(Icons.badge_outlined),
-              children: [
-                for (final entry in details.entries)
-                  ListTile(title: Text(entry.key), subtitle: Text(entry.value)),
-                if (canEdit) ...[
-                  ListTile(
-                    title: const Text('Edit phone and address'),
-                    onTap: _busy ? null : () => _edit(identity: false),
+        if (details.isNotEmpty || canEdit) ...[
+          const SizedBox(height: 14),
+          MobileSectionCard(
+            padding: EdgeInsets.zero,
+            child: Theme(
+              data: Theme.of(context).copyWith(
+                dividerColor: Colors.transparent,
+                splashColor: MobileUiTokens.redTint.withValues(alpha: 0.4),
+              ),
+              child: ExpansionTile(
+                shape: const Border(),
+                collapsedShape: const Border(),
+                tilePadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                iconColor: MobileUiTokens.brandRed,
+                collapsedIconColor: MobileUiTokens.mutedInk,
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: MobileUiTokens.redTint,
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                  ListTile(
-                    title: const Text('Request an identity change'),
-                    subtitle: Text(
-                      awaitingChange
+                  alignment: Alignment.center,
+                  child: const ExcludeSemantics(
+                    child: Icon(
+                      Icons.badge_outlined,
+                      size: 20,
+                      color: MobileUiTokens.brandRed,
+                    ),
+                  ),
+                ),
+                title: const Text(
+                  'Personal details',
+                  style: MobileUiTokens.bodyStrong,
+                ),
+                subtitle: Text(
+                  detailsPreview.isNotEmpty
+                      ? detailsPreview
+                      : 'View or update your details',
+                  style: MobileUiTokens.subtitle,
+                ),
+                children: [
+                  const MobileTileDivider(),
+                  for (final entry in details.entries) ...[
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.key,
+                              style: MobileUiTokens.subtitle.copyWith(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(entry.value, style: MobileUiTokens.body),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const MobileTileDivider(indent: 16),
+                  ],
+                  if (canEdit) ...[
+                    MobileActionTile(
+                      icon: Icons.contact_phone_outlined,
+                      title: 'Edit phone and address',
+                      subtitle: 'Updates your contact details right away.',
+                      onTap: _busy ? null : () => _edit(identity: false),
+                    ),
+                    const MobileTileDivider(indent: 68),
+                    MobileActionTile(
+                      icon: Icons.edit_note_rounded,
+                      iconColor: awaitingChange
+                          ? MobileUiTokens.warningFg
+                          : MobileUiTokens.brandRed,
+                      iconBackground: awaitingChange
+                          ? MobileUiTokens.warningBg
+                          : MobileUiTokens.redTint,
+                      title: 'Request an identity change',
+                      subtitle: awaitingChange
                           ? 'Your request is awaiting review or publication.'
                           : changeStatus == 'rejected'
                           ? 'Your last request was declined.'
                           : 'Changes to name, student number, or course need admin approval.',
+                      onTap: _busy || awaitingChange
+                          ? null
+                          : () => _edit(identity: true),
                     ),
-                    onTap: _busy || awaitingChange
-                        ? null
-                        : () => _edit(identity: true),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-        if (_user != null)
-          ListTile(
-            leading: const Icon(Icons.manage_accounts_outlined),
-            title: const Text('DNSC account settings'),
-            subtitle: const Text('View registration or sign out.'),
-            onTap: _busy ? null : _openRegistration,
+        ],
+        const SizedBox(height: 18),
+        const MobileSectionLabel('Account & settings'),
+        MobileSectionCard(
+          padding: EdgeInsets.zero,
+          child: Column(
+            children: [
+              if (_user != null) ...[
+                MobileActionTile(
+                  icon: Icons.manage_accounts_outlined,
+                  title: 'DNSC account settings',
+                  subtitle: 'View registration or sign out.',
+                  onTap: _busy ? null : _openRegistration,
+                ),
+                const MobileTileDivider(indent: 68),
+              ],
+              MobileActionTile(
+                icon: Icons.settings_outlined,
+                title: 'Settings',
+                subtitle: 'Backup registration and field test tools',
+                onTap: () async {
+                  await Navigator.of(context).pushNamed('/settings');
+                  if (mounted && _registrationEnabled) {
+                    await _loadAccount();
+                  }
+                },
+              ),
+            ],
           ),
-        ListTile(
-          leading: const Icon(Icons.settings_outlined),
-          title: const Text('Settings'),
-          onTap: () async {
-            await Navigator.of(context).pushNamed('/settings');
-            if (mounted && _registrationEnabled) {
-              await _loadAccount();
-            }
-          },
         ),
       ],
     );
   }
+
+  Widget? _buildAccountAction({
+    required String? status,
+    required bool? matchesPhone,
+    required DeviceAccessProfile access,
+  }) {
+    if (_registrationEnabled && _user == null) {
+      return FilledButton.icon(
+        style: MobileButtonStyles.primaryFilled,
+        onPressed: _busy ? null : _openRegistration,
+        icon: const Icon(Icons.login_rounded, size: 18),
+        label: const Text('Sign in or register with DNSC'),
+      );
+    }
+    if (status == 'published' && matchesPhone == true && !access.isApproved) {
+      return FilledButton.icon(
+        style: MobileButtonStyles.primaryFilled,
+        onPressed: _busy ? null : () => _run(() => _refresh(syncApproval: true)),
+        icon: const Icon(Icons.sync_rounded, size: 18),
+        label: const Text('Activate this phone'),
+      );
+    }
+    if (status == 'changes_requested') {
+      return FilledButton.icon(
+        style: MobileButtonStyles.primaryFilled,
+        onPressed: _busy ? null : _openRegistration,
+        icon: const Icon(Icons.edit_note_rounded, size: 18),
+        label: const Text('Update application'),
+      );
+    }
+    if (_user != null && status == null && _draft['submitted'] != true) {
+      return FilledButton.icon(
+        style: MobileButtonStyles.primaryFilled,
+        onPressed: _busy ? null : _openRegistration,
+        icon: const Icon(Icons.edit_note_rounded, size: 18),
+        label: const Text('Finish registration'),
+      );
+    }
+    if (_user != null && matchesPhone != false && status != 'rejected') {
+      return OutlinedButton.icon(
+        style: MobileButtonStyles.secondaryOutlined,
+        onPressed: _busy ? null : () => _run(() => _refresh(syncApproval: true)),
+        icon: const Icon(Icons.refresh_rounded, size: 18),
+        label: const Text('Check status'),
+      );
+    }
+    return null;
+  }
 }
 
-class _ProfileEditDialog extends StatefulWidget {
-  const _ProfileEditDialog({
+class _OfflineAccessHeroCard extends StatelessWidget {
+  const _OfflineAccessHeroCard({required this.access});
+
+  final DeviceAccessProfile access;
+
+  @override
+  Widget build(BuildContext context) {
+    final (tone, icon, status, detail, pill) = switch (access.level) {
+      DeviceAccessLevel.responder => (
+        MobileStatusTone.positive,
+        Icons.verified_user_rounded,
+        '${access.roleLabel} · Active on this phone',
+        'SOS, offline maps, and responder tools work without internet.',
+        'Offline ready',
+      ),
+      DeviceAccessLevel.revoked => (
+        MobileStatusTone.revoked,
+        Icons.block_rounded,
+        'Approval removed',
+        'You can still send an SOS. Contact campus staff if you need phone approval.',
+        'Revoked',
+      ),
+      DeviceAccessLevel.keyMismatch => (
+        MobileStatusTone.error,
+        Icons.key_off_rounded,
+        'This phone needs approval again',
+        'You can still send an SOS. Contact campus staff if you need phone approval.',
+        'Action needed',
+      ),
+      DeviceAccessLevel.outdatedBundle => (
+        MobileStatusTone.warning,
+        Icons.update_rounded,
+        'Phone approval expired',
+        'You can still send an SOS. Contact campus staff if you need phone approval.',
+        'Expired',
+      ),
+      DeviceAccessLevel.unregistered => (
+        MobileStatusTone.warning,
+        Icons.app_registration_rounded,
+        'Phone approval needed',
+        'You can still send an SOS. Contact campus staff if you need phone approval.',
+        'Not approved',
+      ),
+      _ => (
+        MobileStatusTone.positive,
+        Icons.verified_rounded,
+        '${access.roleLabel} · Active on this phone',
+        'SOS, offline maps, and peer relay work without internet.',
+        'Offline ready',
+      ),
+    };
+    final palette = mobileStatusColors(tone);
+    final isRevoked = tone == MobileStatusTone.revoked;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: palette.background,
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: isRevoked
+                  ? Colors.white.withValues(alpha: 0.16)
+                  : Colors.white.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            alignment: Alignment.center,
+            child: ExcludeSemantics(
+              child: Icon(icon, size: 22, color: palette.foreground),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'This phone’s offline access',
+                      style: MobileUiTokens.eyebrow.copyWith(
+                        letterSpacing: 0.3,
+                        color: palette.foreground.withValues(alpha: 0.85),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isRevoked
+                            ? Colors.white.withValues(alpha: 0.18)
+                            : Colors.white.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        pill,
+                        style: MobileUiTokens.badgeText.copyWith(
+                          fontSize: 11,
+                          color: palette.foreground,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  status,
+                  style: MobileUiTokens.sectionHeading.copyWith(
+                    color: palette.foreground,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  detail,
+                  style: MobileUiTokens.subtitle.copyWith(
+                    color: palette.foreground.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({required this.initials});
+
+  final String initials;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 46,
+      height: 46,
+      decoration: BoxDecoration(
+        color: MobileUiTokens.redTint,
+        shape: BoxShape.circle,
+        border: Border.all(color: MobileUiTokens.redBorder),
+      ),
+      alignment: Alignment.center,
+      child: ExcludeSemantics(
+        child: initials.isNotEmpty
+            ? Text(
+                initials,
+                style: const TextStyle(
+                  fontFamily: MobileUiTokens.fontFamily,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: MobileUiTokens.brandRed,
+                ),
+              )
+            : const Icon(
+                Icons.person_outline_rounded,
+                size: 24,
+                color: MobileUiTokens.brandRed,
+              ),
+      ),
+    );
+  }
+}
+
+class _ProfileEditSheet extends StatefulWidget {
+  const _ProfileEditSheet({
     required this.identity,
     required this.labels,
     required this.initial,
@@ -449,14 +820,26 @@ class _ProfileEditDialog extends StatefulWidget {
   final Future<void> Function(Map<String, String>) onSave;
 
   @override
-  State<_ProfileEditDialog> createState() => _ProfileEditDialogState();
+  State<_ProfileEditSheet> createState() => _ProfileEditSheetState();
 }
 
-class _ProfileEditDialogState extends State<_ProfileEditDialog> {
+class _ProfileEditSheetState extends State<_ProfileEditSheet> {
+  static const _fieldIcons = {
+    'displayName': Icons.person_outline_rounded,
+    'studentNumber': Icons.badge_outlined,
+    'courseYear': Icons.school_outlined,
+    'phone': Icons.phone_outlined,
+    'address': Icons.home_outlined,
+  };
+
   final _form = GlobalKey<FormState>();
   late final _values = Map<String, String>.of(widget.initial);
   bool _saving = false;
   String? _error;
+
+  bool get _hasChanges => _values.entries.any(
+    (entry) => widget.initial[entry.key] != entry.value,
+  );
 
   Future<void> _save() async {
     if (_saving || !_form.currentState!.validate()) return;
@@ -478,59 +861,133 @@ class _ProfileEditDialogState extends State<_ProfileEditDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !_saving,
-    child: AlertDialog(
-      scrollable: true,
-      title: Text(
-        widget.identity ? 'Request an identity change' : 'Edit contact details',
-      ),
-      content: Form(
-        key: _form,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final entry in widget.labels.entries)
-              TextFormField(
-                enabled: !_saving,
-                initialValue: _values[entry.key],
-                maxLength: entry.key == 'address' ? 200 : 100,
-                keyboardType: entry.key == 'phone' ? TextInputType.phone : null,
-                decoration: InputDecoration(labelText: entry.value),
-                onChanged: (value) =>
-                    setState(() => _values[entry.key] = value.trim()),
-                validator: (value) =>
-                    widget.identity && (value ?? '').trim().isEmpty
-                    ? 'Enter ${entry.value.toLowerCase()}.'
-                    : null,
-              ),
-            if (_error case final error?)
-              Semantics(liveRegion: true, child: Text(error)),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _saving ? null : () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed:
-              _saving ||
-                  _values.entries.every(
-                    (entry) => widget.initial[entry.key] == entry.value,
-                  )
-              ? null
-              : _save,
-          child: Text(
-            _saving
-                ? 'Saving…'
-                : widget.identity
-                ? 'Send for review'
-                : 'Save',
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+    return PopScope(
+      canPop: !_saving,
+      child: Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Form(
+            key: _form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: ExcludeSemantics(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: MobileUiTokens.border,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Semantics(
+                        header: true,
+                        child: Text(
+                          widget.identity
+                              ? 'Request an identity change'
+                              : 'Edit contact details',
+                          style: MobileUiTokens.pageTitle.copyWith(fontSize: 20),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      onPressed: _saving ? null : () => Navigator.pop(context),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: MobileUiTokens.mutedInk,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.identity
+                      ? 'Changes to your name, student number, or course require campus admin review.'
+                      : 'Phone number and address update your profile immediately.',
+                  style: MobileUiTokens.subtitle,
+                ),
+                const SizedBox(height: 18),
+                for (final entry in widget.labels.entries) ...[
+                  TextFormField(
+                    enabled: !_saving,
+                    initialValue: _values[entry.key],
+                    maxLength: entry.key == 'address' ? 200 : 100,
+                    keyboardType: entry.key == 'phone'
+                        ? TextInputType.phone
+                        : entry.key == 'address'
+                        ? TextInputType.streetAddress
+                        : TextInputType.name,
+                    decoration: MobileInputStyles.decoration(
+                      labelText: entry.value,
+                      prefixIcon: _fieldIcons[entry.key] == null
+                          ? null
+                          : Icon(
+                              _fieldIcons[entry.key],
+                              size: 20,
+                              color: MobileUiTokens.mutedInk,
+                            ),
+                    ),
+                    onChanged: (value) =>
+                        setState(() => _values[entry.key] = value.trim()),
+                    validator: (value) =>
+                        widget.identity && (value ?? '').trim().isEmpty
+                        ? 'Enter ${entry.value.toLowerCase()}.'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (_error case final error?) ...[
+                  MobileStatusBanner(
+                    liveRegion: true,
+                    tone: MobileStatusTone.error,
+                    message: error,
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        style: MobileButtonStyles.secondaryOutlined,
+                        onPressed: _saving
+                            ? null
+                            : () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        style: MobileButtonStyles.primaryFilled,
+                        onPressed: _saving || !_hasChanges ? null : _save,
+                        child: Text(
+                          _saving
+                              ? 'Saving…'
+                              : widget.identity
+                              ? 'Send for review'
+                              : 'Save',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }

@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/mobile_ui_tokens.dart';
+import '../../../core/widgets/mobile_ui_components.dart';
 import '../../messaging/presentation/providers/local_messaging_providers.dart';
 import '../../security/domain/entities/device_registration_qr.dart';
 import '../data/pilot_registration.dart';
@@ -53,10 +55,20 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     'studentNumber': 'Student number',
     'courseYear': 'Course and year',
   };
-  static const _labels = {
-    ..._requiredDetailLabels,
+  static const _optionalDetailLabels = {
     'phone': 'Phone number (optional)',
     'address': 'Address (optional)',
+  };
+  static const _labels = {
+    ..._requiredDetailLabels,
+    ..._optionalDetailLabels,
+  };
+  static const _fieldIcons = {
+    'displayName': Icons.person_outline_rounded,
+    'studentNumber': Icons.badge_outlined,
+    'courseYear': Icons.school_outlined,
+    'phone': Icons.phone_outlined,
+    'address': Icons.home_outlined,
   };
   final _fields = {
     for (final key in _labels.keys) key: TextEditingController(),
@@ -300,7 +312,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           await ref.read(registrationMatchesPhoneProvider(binding).future);
       if (!_isCurrentUser(user)) return;
       if (!matches) {
-        _message = 'Your account is approved, but this phone needs approval again. '
+        _message =
+            'Your account is approved, but this phone needs approval again. '
             'This can happen after clearing app data or changing phones. '
             'Contact the campus administrator to approve this installation.';
         return;
@@ -367,14 +380,57 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     }
   }
 
-  InputDecoration _requiredDecoration(String key, String label) =>
-      InputDecoration(
-        labelText: '$label (required)',
-        errorText: _missingFields.contains(key)
-            ? 'Enter your ${label.toLowerCase()}.'
-            : null,
-        errorMaxLines: 2,
-      );
+  void _setCreateAccount(bool create) {
+    if (_busy || _createAccount == create) return;
+    setState(() {
+      _createAccount = create;
+      _showPassword = false;
+      _missingFields.clear();
+      _message = '';
+      _password.clear();
+    });
+  }
+
+  InputDecoration _requiredDecoration(
+    String key,
+    String label, {
+    IconData? icon,
+    Widget? suffixIcon,
+  }) => MobileInputStyles.decoration(
+    labelText: '$label (required)',
+    errorText: _missingFields.contains(key)
+        ? 'Enter your ${label.toLowerCase()}.'
+        : null,
+    prefixIcon: icon == null
+        ? null
+        : Icon(icon, size: 20, color: MobileUiTokens.mutedInk),
+    suffixIcon: suffixIcon,
+  );
+
+  MobileStatusTone _messageTone() {
+    if (_reviewIsStale) return MobileStatusTone.warning;
+    if (_message.startsWith('Access active on this phone.')) {
+      return MobileStatusTone.positive;
+    }
+    if (_message.startsWith('Submitted.') ||
+        _message.startsWith('Draft saved') ||
+        _message.startsWith('Saved draft restored') ||
+        _message.startsWith('If an account exists') ||
+        _message.startsWith('Checking') ||
+        _message.startsWith('Submitting') ||
+        _message.startsWith('Access published. Checking')) {
+      return MobileStatusTone.info;
+    }
+    if (_message.startsWith('Approved.') ||
+        _message.startsWith('Changes requested.') ||
+        _message.startsWith('Access was published.') ||
+        _message.startsWith('Submission incomplete.') ||
+        _message.startsWith('Review status unavailable') ||
+        _message.startsWith('No submitted application')) {
+      return MobileStatusTone.warning;
+    }
+    return MobileStatusTone.error;
+  }
 
   Future<void> _submit() async {
     if (_busy) return;
@@ -452,212 +508,676 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       PopScope(canPop: !_navigationLocked, child: _buildPage());
 
   Widget _buildPage() => Scaffold(
-    appBar: AppBar(
-      title: Text(
-        pilotRegistrationIsLive
-            ? 'DNSC registration'
-            : 'DNSC test registration',
-      ),
+    backgroundColor: MobileUiTokens.canvas,
+    appBar: buildMobileAppBar(
+      title: pilotRegistrationIsLive
+          ? 'DNSC registration'
+          : 'DNSC test registration',
     ),
     bottomNavigationBar: widget.onContinue == null
         ? null
-        : SafeArea(
-            minimum: const EdgeInsets.all(16),
-            child: OutlinedButton(
-              onPressed: widget.onContinue,
-              child: Text(
-                _user == null && !_navigationLocked
-                    ? 'Continue without an account'
-                    : 'Continue to Home',
-                textAlign: TextAlign.center,
+        : DecoratedBox(
+            decoration: const BoxDecoration(
+              color: MobileUiTokens.canvas,
+              border: Border(
+                top: BorderSide(color: MobileUiTokens.subtleDivider),
+              ),
+            ),
+            child: SafeArea(
+              top: false,
+              minimum: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: OutlinedButton(
+                style: MobileButtonStyles.secondaryOutlined,
+                onPressed: widget.onContinue,
+                child: Text(
+                  _user == null && !_navigationLocked
+                      ? 'Continue without an account'
+                      : 'Continue to Home',
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
           ),
     body: SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _BrandHeader(
+                showFirstRunGuidance: widget.onContinue != null,
+                isLocalTest: !pilotRegistrationIsLive,
+              ),
+              if (_busy) ...[
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: const LinearProgressIndicator(
+                    minHeight: 4,
+                    color: MobileUiTokens.brandRed,
+                    backgroundColor: MobileUiTokens.redTint,
+                  ),
+                ),
+              ],
+              if (_navigationLocked && widget.onContinue != null) ...[
+                const SizedBox(height: 10),
+                MobileStatusBanner(
+                  tone: MobileStatusTone.info,
+                  icon: Icons.sos_rounded,
+                  message: _user == null
+                      ? 'You can open Home for SOS now. Your account may still sign in when the request finishes.'
+                      : 'You can open Home for SOS while your application finishes sending.',
+                ),
+              ],
+              if (_message.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                MobileStatusBanner(
+                  liveRegion: true,
+                  tone: _messageTone(),
+                  title: _reviewIsStale ? 'Last known status' : null,
+                  message: _reviewIsStale
+                      ? '$_message\nConnect to check for updates.'
+                      : _message,
+                ),
+              ],
+              if (_restoreFailed) ...[
+                const SizedBox(height: 14),
+                FilledButton(
+                  style: MobileButtonStyles.primaryFilled,
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          setState(() {
+                            _busy = true;
+                            _restoreFailed = false;
+                            _message = '';
+                          });
+                          _restore();
+                        },
+                  child: const Text('Retry'),
+                ),
+              ],
+              if (!_restoreFailed && _repository != null && _user == null) ...[
+                const SizedBox(height: 12),
+                _AuthModeSwitch(
+                  creatingAccount: _createAccount,
+                  enabled: !_busy,
+                  onChanged: _setCreateAccount,
+                ),
+                const SizedBox(height: 10),
+                _buildAuthCard(),
+              ],
+              if (!_restoreFailed && _user != null) ...[
+                const SizedBox(height: 16),
+                _buildSignedInHeader(),
+                if (_submitted) ...[
+                  const SizedBox(height: 14),
+                  _buildSubmittedCard(),
+                ] else ...[
+                  if (_locked || _correction != null) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      style: MobileButtonStyles.secondaryOutlined,
+                      onPressed: _busy ? null : _refreshStatus,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Check review status'),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  _buildApplicationCard(),
+                ],
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _buildAuthCard() => MobileSectionCard(
+    padding: const EdgeInsets.all(16),
+    child: AutofillGroup(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.onContinue != null)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 16),
-              child: Text(
-                'Sign in or create an account to request DNSC access. '
-                'You can send an SOS right away, even without an account. '
-                'To register later or check your status, open Profile.',
-              ),
+          Semantics(
+            header: true,
+            child: Text(
+              _createAccount ? 'Create a DNSC account' : 'Sign in to DNSC',
+              style: MobileUiTokens.pageTitle,
             ),
-          if (!pilotRegistrationIsLive)
-            const Text('Use synthetic details for this local test.'),
-          if (_busy) const LinearProgressIndicator(),
-          if (_navigationLocked && widget.onContinue != null)
-            Text(
-              _user == null
-                  ? 'You can open Home for SOS now. Your account may still sign in when the request finishes.'
-                  : 'You can open Home for SOS while your application finishes sending.',
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _createAccount
+                ? 'Create an account first, then submit your campus details for review.'
+                : 'Use your DNSC account email to check or request campus access.',
+            style: MobileUiTokens.subtitle,
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _email,
+            focusNode: _requiredFocusNodes['email'],
+            enabled: !_busy,
+            keyboardType: TextInputType.emailAddress,
+            autofillHints: const [AutofillHints.email],
+            textInputAction: TextInputAction.next,
+            onChanged: (value) => _clearFieldError('email', value.trim()),
+            decoration: _requiredDecoration(
+              'email',
+              'Email',
+              icon: Icons.email_outlined,
             ),
-          if (_message.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Semantics(
-                liveRegion: true,
-                child: Text(
-                  _reviewIsStale
-                      ? 'Last known status\n$_message\nConnect to check for updates.'
-                      : _message,
-                ),
-              ),
-            ),
-          if (_restoreFailed)
-            FilledButton(
-              onPressed: _busy
-                  ? null
-                  : () {
-                      setState(() {
-                        _busy = true;
-                        _restoreFailed = false;
-                        _message = '';
-                      });
-                      _restore();
-                    },
-              child: const Text('Retry'),
-            ),
-          if (!_restoreFailed && _repository != null && _user == null)
-            AutofillGroup(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    _createAccount
-                        ? 'Create a DNSC account'
-                        : 'Sign in to DNSC',
-                    style: Theme.of(context).textTheme.headlineLarge,
-                  ),
-                  TextField(
-                    controller: _email,
-                    focusNode: _requiredFocusNodes['email'],
-                    enabled: !_busy,
-                    keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
-                    textInputAction: TextInputAction.next,
-                    onChanged: (value) =>
-                        _clearFieldError('email', value.trim()),
-                    decoration: _requiredDecoration('email', 'Email'),
-                  ),
-                  TextField(
-                    controller: _password,
-                    focusNode: _requiredFocusNodes['password'],
-                    enabled: !_busy,
-                    obscureText: !_showPassword,
-                    autofillHints: [
-                      _createAccount
-                          ? AutofillHints.newPassword
-                          : AutofillHints.password,
-                    ],
-                    onSubmitted: (_) => _authenticate(create: _createAccount),
-                    onChanged: (value) => _clearFieldError('password', value),
-                    decoration: _requiredDecoration('password', 'Password')
-                        .copyWith(
-                          suffixIcon: IconButton(
-                            tooltip: _showPassword
-                                ? 'Hide password'
-                                : 'Show password',
-                            onPressed: _busy
-                                ? null
-                                : () => setState(
-                                    () => _showPassword = !_showPassword,
-                                  ),
-                            icon: Icon(
-                              _showPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                            ),
-                          ),
-                        ),
-                  ),
-                  if (!_createAccount)
-                    TextButton(
-                      onPressed: _busy ? null : _resetPassword,
-                      child: const Text('Forgot password?'),
-                    ),
-                  FilledButton(
-                    onPressed: _busy
-                        ? null
-                        : () => _authenticate(create: _createAccount),
-                    child: Text(_createAccount ? 'Create account' : 'Sign in'),
-                  ),
-                  TextButton(
-                    onPressed: _busy
-                        ? null
-                        : () => setState(() {
-                            _createAccount = !_createAccount;
-                            _showPassword = false;
-                            _missingFields.clear();
-                            _message = '';
-                            _password.clear();
-                          }),
-                    child: Text(
-                      _createAccount ? 'Back to sign in' : 'Create an account',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (!_restoreFailed && _user != null) ...[
-            if (_submitted || _locked || _correction != null)
-              TextButton(
-                onPressed: _busy ? null : _refreshStatus,
-                child: const Text('Check review status'),
-              ),
-            if (!_submitted) ...[
-              Text(
-                _correction == null
-                    ? 'Request campus access'
-                    : 'Update your application',
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
-              const Text(
-                'The campus administrator reviews your details after you submit.',
-              ),
-              for (final entry in _labels.entries)
-                TextField(
-                  controller: _fields[entry.key],
-                  focusNode: _requiredFocusNodes[entry.key],
-                  enabled: !_busy && !_locked,
-                  maxLength: entry.key == 'address' ? 200 : 100,
-                  onChanged: (value) =>
-                      _clearFieldError(entry.key, value.trim()),
-                  decoration: _requiredDetailLabels.containsKey(entry.key)
-                      ? _requiredDecoration(entry.key, entry.value)
-                      : InputDecoration(labelText: entry.value),
-                ),
-              if (!_locked)
-                TextButton(
-                  onPressed: _busy
-                      ? null
-                      : () => _run(() async {
-                          await _save();
-                          _message = 'Draft saved on this phone.';
-                        }),
-                  child: const Text('Save draft'),
-                ),
-              FilledButton(
-                onPressed: _busy ? null : _submit,
-                child: Text(_locked ? 'Retry submission' : 'Submit for review'),
-              ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _password,
+            focusNode: _requiredFocusNodes['password'],
+            enabled: !_busy,
+            obscureText: !_showPassword,
+            autofillHints: [
+              _createAccount
+                  ? AutofillHints.newPassword
+                  : AutofillHints.password,
             ],
-            TextButton(
-              onPressed: _busy
-                  ? null
-                  : () => _run(() async {
-                      await _repository!.auth.signOut();
-                      await _loadUser();
-                    }),
-              child: const Text('Sign out'),
+            onSubmitted: (_) => _authenticate(create: _createAccount),
+            onChanged: (value) => _clearFieldError('password', value),
+            decoration: _requiredDecoration(
+              'password',
+              'Password',
+              icon: Icons.lock_outline_rounded,
+              suffixIcon: IconButton(
+                tooltip: _showPassword ? 'Hide password' : 'Show password',
+                onPressed: _busy
+                    ? null
+                    : () => setState(() => _showPassword = !_showPassword),
+                icon: Icon(
+                  _showPassword
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                  color: MobileUiTokens.mutedInk,
+                ),
+              ),
             ),
-          ],
+          ),
+          if (!_createAccount)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                style: MobileButtonStyles.redText,
+                onPressed: _busy ? null : _resetPassword,
+                child: const Text('Forgot password?'),
+              ),
+            )
+          else
+            const SizedBox(height: 14),
+          FilledButton(
+            key: const ValueKey('auth-submit-button'),
+            style: MobileButtonStyles.primaryFilled,
+            onPressed: _busy
+                ? null
+                : () => _authenticate(create: _createAccount),
+            child: _busy
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(_createAccount ? 'Create account' : 'Sign in'),
+                    ],
+                  )
+                : Text(_createAccount ? 'Create account' : 'Sign in'),
+          ),
         ],
       ),
     ),
   );
+
+  Widget _buildSignedInHeader() {
+    final email = _user?.email;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: MobileUiTokens.warmSurface,
+        borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
+        border: Border.all(color: MobileUiTokens.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: const BoxDecoration(
+              color: MobileUiTokens.redTint,
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: const ExcludeSemantics(
+              child: Icon(
+                Icons.person_rounded,
+                size: 20,
+                color: MobileUiTokens.brandRed,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Signed in', style: MobileUiTokens.eyebrow),
+                const SizedBox(height: 2),
+                Text(
+                  email != null && email.isNotEmpty ? email : 'DNSC account',
+                  style: MobileUiTokens.bodyStrong.copyWith(fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            style: MobileButtonStyles.redText,
+            onPressed: _busy
+                ? null
+                : () => _run(() async {
+                    await _repository!.auth.signOut();
+                    await _loadUser();
+                  }),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubmittedCard() => MobileSectionCard(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: MobileStatusBadge(
+            label: 'Application status',
+            tone: MobileStatusTone.info,
+            icon: Icons.verified_user_outlined,
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text('Campus access review', style: MobileUiTokens.sectionHeading),
+        const SizedBox(height: 4),
+        const Text(
+          'Refresh when online to check approval updates or sync phone access.',
+          style: MobileUiTokens.subtitle,
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          style: MobileButtonStyles.secondaryOutlined,
+          onPressed: _busy ? null : _refreshStatus,
+          icon: const Icon(Icons.refresh_rounded, size: 18),
+          label: const Text('Check review status'),
+        ),
+      ],
+    ),
+  );
+
+  Widget _buildApplicationCard() => MobileSectionCard(
+    padding: const EdgeInsets.all(20),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: MobileStatusBadge(
+            label: _correction == null
+                ? 'Step 2 of 2 · Campus access'
+                : 'Action needed · Update details',
+            tone: _correction == null
+                ? MobileStatusTone.info
+                : MobileStatusTone.warning,
+            icon: _correction == null
+                ? Icons.assignment_outlined
+                : Icons.edit_note_rounded,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Semantics(
+          header: true,
+          child: Text(
+            _correction == null
+                ? 'Request campus access'
+                : 'Update your application',
+            style: MobileUiTokens.pageTitle,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'The campus administrator reviews your details after you submit.',
+          style: MobileUiTokens.subtitle,
+        ),
+        const SizedBox(height: 18),
+        const MobileSectionLabel('Required details'),
+        for (final entry in _requiredDetailLabels.entries) ...[
+          TextField(
+            controller: _fields[entry.key],
+            focusNode: _requiredFocusNodes[entry.key],
+            enabled: !_busy && !_locked,
+            maxLength: 100,
+            textInputAction: TextInputAction.next,
+            onChanged: (value) => _clearFieldError(entry.key, value.trim()),
+            decoration: _requiredDecoration(
+              entry.key,
+              entry.value,
+              icon: _fieldIcons[entry.key],
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: MobileTileDivider(),
+        ),
+        const MobileSectionLabel('Optional contact details'),
+        for (final entry in _optionalDetailLabels.entries) ...[
+          TextField(
+            controller: _fields[entry.key],
+            enabled: !_busy && !_locked,
+            maxLength: entry.key == 'address' ? 200 : 100,
+            keyboardType: entry.key == 'phone'
+                ? TextInputType.phone
+                : TextInputType.streetAddress,
+            onChanged: (value) => _clearFieldError(entry.key, value.trim()),
+            decoration: MobileInputStyles.decoration(
+              labelText: entry.value,
+              prefixIcon: Icon(
+                _fieldIcons[entry.key],
+                size: 20,
+                color: MobileUiTokens.mutedInk,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
+        const SizedBox(height: 8),
+        FilledButton(
+          style: MobileButtonStyles.primaryFilled,
+          onPressed: _busy ? null : _submit,
+          child: Text(_locked ? 'Retry submission' : 'Submit for review'),
+        ),
+        if (!_locked) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            style: MobileButtonStyles.secondaryOutlined,
+            onPressed: _busy
+                ? null
+                : () => _run(() async {
+                    await _save();
+                    _message = 'Draft saved on this phone.';
+                  }),
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: const Text('Save draft'),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+class _BrandHeader extends StatelessWidget {
+  const _BrandHeader({
+    required this.showFirstRunGuidance,
+    required this.isLocalTest,
+  });
+
+  final bool showFirstRunGuidance;
+  final bool isLocalTest;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MobileUiTokens.warmSurface,
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+        border: Border.all(color: MobileUiTokens.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: MobileUiTokens.border),
+                ),
+                child: ExcludeSemantics(
+                  child: Image.asset(
+                    'assets/auth/shadownetwork_logo.png',
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.hub_rounded,
+                      color: MobileUiTokens.brandRed,
+                      size: 28,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const Text(
+                          'ShadowNetwork',
+                          style: TextStyle(
+                            fontFamily: MobileUiTokens.fontFamily,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            height: 1.2,
+                            color: MobileUiTokens.ink,
+                          ),
+                        ),
+                        if (isLocalTest)
+                          const MobileStatusBadge(
+                            label: 'Local test',
+                            tone: MobileStatusTone.warning,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'DNSC Campus Access',
+                      style: MobileUiTokens.subtitle,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (showFirstRunGuidance) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: MobileTileDivider(),
+            ),
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: EdgeInsets.only(top: 1),
+                  child: ExcludeSemantics(
+                    child: Icon(
+                      Icons.sos_rounded,
+                      size: 18,
+                      color: MobileUiTokens.brandRed,
+                    ),
+                  ),
+                ),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Sign in or create an account to request DNSC access. '
+                    'You can send an SOS right away, even without an account. '
+                    'To register later or check your status, open Profile.',
+                    style: MobileUiTokens.subtitle,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          if (isLocalTest) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Use synthetic details for this local test.',
+              style: MobileUiTokens.subtitle,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthModeSwitch extends StatelessWidget {
+  const _AuthModeSwitch({
+    required this.creatingAccount,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool creatingAccount;
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final animate = !MediaQuery.disableAnimationsOf(context);
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: MobileUiTokens.warmSurface,
+        borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
+        border: Border.all(color: MobileUiTokens.border),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _ModeSegment(
+              key: const ValueKey('auth-mode-signin'),
+              label: 'Sign in',
+              selected: !creatingAccount,
+              enabled: enabled,
+              animate: animate,
+              onTap: () => onChanged(false),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _ModeSegment(
+              key: const ValueKey('auth-mode-signup'),
+              label: 'Create account',
+              selected: creatingAccount,
+              enabled: enabled,
+              animate: animate,
+              onTap: () => onChanged(true),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ModeSegment extends StatelessWidget {
+  const _ModeSegment({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.enabled,
+    required this.animate,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final bool enabled;
+  final bool animate;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final decoration = BoxDecoration(
+      color: selected ? Colors.white : Colors.transparent,
+      borderRadius: BorderRadius.circular(9),
+      boxShadow: selected
+          ? [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 6,
+                offset: const Offset(0, 1),
+              ),
+            ]
+          : null,
+    );
+    final child = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 44),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Center(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: MobileUiTokens.fontFamily,
+              fontSize: 14,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+              color: selected
+                  ? MobileUiTokens.brandRed
+                  : MobileUiTokens.mutedInk,
+            ),
+          ),
+        ),
+      ),
+    );
+    return Semantics(
+      button: true,
+      selected: selected,
+      enabled: enabled,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(9),
+          onTap: enabled ? onTap : null,
+          child: animate
+              ? AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  decoration: decoration,
+                  child: child,
+                )
+              : DecoratedBox(decoration: decoration, child: child),
+        ),
+      ),
+    );
+  }
 }

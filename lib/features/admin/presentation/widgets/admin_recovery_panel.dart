@@ -141,9 +141,12 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
                     border: Border.all(color: AdminTheme.border),
                     borderRadius: BorderRadius.circular(AdminTheme.radius),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: children,
+                  child: Material(
+                    type: MaterialType.transparency,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: children,
+                    ),
                   ),
                 );
                 final identityPanel = panel([

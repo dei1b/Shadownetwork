@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:shadownetwork/core/constants/mobile_ui_tokens.dart';
 import 'package:shadownetwork/core/widgets/action_feedback.dart';
+import 'package:shadownetwork/core/widgets/mobile_ui_components.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -14,11 +16,6 @@ import '../../data/services/trust_bundle_store.dart';
 import '../../domain/entities/device_access_profile.dart';
 import '../../domain/entities/trust_bundle.dart';
 import '../providers/device_access_provider.dart';
-
-const _trustRed = Color(0xFFE83C3D);
-const _trustRedDark = Color(0xFF861A1A);
-const _trustMuted = Color(0xFF666666);
-const _trustField = Color(0xFFE1E1E1);
 
 class TrustBundleImportPage extends ConsumerStatefulWidget {
   const TrustBundleImportPage({super.key});
@@ -204,16 +201,27 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Is this your campus administrator?'),
+          backgroundColor: MobileUiTokens.canvas,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+          ),
+          title: const Text(
+            'Is this your campus administrator?',
+            style: MobileUiTokens.sectionHeading,
+          ),
           content: Text(
             'Only continue if your campus administrator gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${bundle.issuer?.signingKeyId ?? 'unavailable'}',
+            style: MobileUiTokens.body.copyWith(fontSize: 14),
           ),
           actions: [
             TextButton(
+              style: MobileButtonStyles.redText,
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('Cancel'),
             ),
             FilledButton(
+              style: MobileButtonStyles.primaryFilled,
               onPressed: () => Navigator.of(context).pop(true),
               child: const Text('Trust administrator'),
             ),
@@ -308,23 +316,22 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         : ref.watch(deviceAccessProfileProvider);
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text('Backup registration'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0,
-      ),
+      backgroundColor: MobileUiTokens.canvas,
+      appBar: buildMobileAppBar(title: 'Backup registration'),
       body: SafeArea(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator(color: _trustRed))
+            ? const Center(
+                child: CircularProgressIndicator(
+                  color: MobileUiTokens.brandRed,
+                ),
+              )
             : SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _TrustHeader(bundle: _bundle),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
                     _DeviceIdentityCard(
                       localPeer: localPeer,
                       cryptoIdentity: cryptoIdentity,
@@ -332,15 +339,21 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                       onCopyPublicKey: _copyPublicKey,
                       onShowRegistrationQr: _showDeviceRegistrationQr,
                     ),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
                     _TrustPanel(
+                      stepLabel: 'Step 2',
                       title: "2. Scan the admin's approval code",
                       subtitle:
                           'After registration, scan the code the campus administrator gives you. Use this step again when they give you an updated code.',
                       child: Column(
                         children: [
                           if (approval != null) ...[
-                            _buildApprovalOutcome(approval),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                MobileUiTokens.controlRadius,
+                              ),
+                              child: _buildApprovalOutcome(approval),
+                            ),
                             const SizedBox(height: 12),
                           ],
                           _ImportActions(
@@ -351,22 +364,52 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 18),
-                    ExpansionTile(
-                      title: const Text('Other ways to enter a code'),
-                      children: [
-                        _ManualImportCard(
-                          controller: _jsonController,
-                          isImporting: _isImporting,
-                          onImport: _importFromTextField,
+                    const SizedBox(height: 16),
+                    MobileSectionCard(
+                      padding: EdgeInsets.zero,
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                          splashColor: MobileUiTokens.redTint.withValues(
+                            alpha: 0.4,
+                          ),
                         ),
-                      ],
+                        child: ExpansionTile(
+                          shape: const Border(),
+                          collapsedShape: const Border(),
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          iconColor: MobileUiTokens.brandRed,
+                          collapsedIconColor: MobileUiTokens.mutedInk,
+                          title: const Text(
+                            'Other ways to enter a code',
+                            style: MobileUiTokens.bodyStrong,
+                          ),
+                          subtitle: const Text(
+                            'Paste approval text manually',
+                            style: MobileUiTokens.subtitle,
+                          ),
+                          children: [
+                            const MobileTileDivider(),
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: _ManualImportCard(
+                                controller: _jsonController,
+                                isImporting: _isImporting,
+                                onImport: _importFromTextField,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 14),
                       _ErrorCard(message: _error!),
                     ],
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 16),
                     _BundleSummaryCard(
                       bundle: _bundle,
                       onClear: _isImporting ? null : _clearBundle,
@@ -454,10 +497,15 @@ class _TrustHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final saved = bundle;
-    final message = saved == null
-        ? 'The campus administrator registers your phone and gives you an approval code. You can still send an SOS before registering.'
-        : 'An approval update from the campus administrator is saved on this phone.';
-    return Text(message, style: Theme.of(context).textTheme.bodyMedium);
+    return MobileStatusBanner(
+      tone: saved == null ? MobileStatusTone.info : MobileStatusTone.positive,
+      icon: saved == null
+          ? Icons.qr_code_2_rounded
+          : Icons.verified_user_outlined,
+      message: saved == null
+          ? 'The campus administrator registers your phone and gives you an approval code. You can still send an SOS before registering.'
+          : 'An approval update from the campus administrator is saved on this phone.',
+    );
   }
 }
 
@@ -479,6 +527,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return _TrustPanel(
+      stepLabel: 'Step 1',
       title: '1. Show your registration code',
       subtitle: 'Show this code to the campus administrator.',
       child: localPeer.when(
@@ -490,149 +539,179 @@ class _DeviceIdentityCard extends ConsumerWidget {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: () => onShowRegistrationQr(peer, identity),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: _trustRed,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(48),
-                  ),
+                  style: MobileButtonStyles.primaryFilled,
                   icon: const Icon(Icons.qr_code_2_rounded),
                   label: const Text('Show my registration code'),
                 ),
               ),
-              loading: () => const LinearProgressIndicator(),
+              loading: () => const LinearProgressIndicator(
+                color: MobileUiTokens.brandRed,
+                backgroundColor: MobileUiTokens.redTint,
+              ),
               error: (_, _) => const Text(
                 'Unable to prepare your code. Reopen this screen to try again.',
+                style: MobileUiTokens.subtitle,
               ),
             ),
-            ExpansionTile(
-              title: const Text('Technical details'),
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF7F7),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: _trustField),
-                  ),
-                  child: SelectableText(
-                    peer.id,
-                    style: const TextStyle(
-                      color: _trustRedDark,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
+            const SizedBox(height: 6),
+            Theme(
+              data: Theme.of(
+                context,
+              ).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                shape: const Border(),
+                collapsedShape: const Border(),
+                tilePadding: EdgeInsets.zero,
+                iconColor: MobileUiTokens.brandRed,
+                collapsedIconColor: MobileUiTokens.mutedInk,
+                title: const Text(
+                  'Technical details',
+                  style: MobileUiTokens.bodyStrong,
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Name: ${peer.name}',
-                        style: const TextStyle(color: _trustMuted),
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: MobileUiTokens.warmSurface,
+                      borderRadius: BorderRadius.circular(
+                        MobileUiTokens.controlRadius,
+                      ),
+                      border: Border.all(color: MobileUiTokens.border),
+                    ),
+                    child: SelectableText(
+                      peer.id,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        color: MobileUiTokens.deepRed,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
                       ),
                     ),
-                    TextButton.icon(
-                      onPressed: () => onCopyDeviceId(peer.id),
-                      icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Copy'),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                const Text(
-                  'Encryption public key',
-                  style: TextStyle(
-                    color: _trustRedDark,
-                    fontWeight: FontWeight.w800,
                   ),
-                ),
-                const SizedBox(height: 8),
-                cryptoIdentity.when(
-                  data: (identity) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 10),
+                  Row(
                     children: [
-                      SelectableText(
-                        identity.encodedPublicKey,
-                        style: const TextStyle(
-                          color: _trustMuted,
-                          fontFamily: 'monospace',
-                          fontSize: 12,
+                      Expanded(
+                        child: Text(
+                          'Name: ${peer.name}',
+                          style: MobileUiTokens.subtitle,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              'Key ID: ${identity.keyId} (v${identity.keyVersion})',
-                              style: const TextStyle(
-                                color: _trustMuted,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                          TextButton.icon(
-                            onPressed: () =>
-                                onCopyPublicKey(identity.encodedPublicKey),
-                            icon: const Icon(Icons.key_rounded),
-                            label: const Text('Copy key'),
-                          ),
-                        ],
+                      TextButton.icon(
+                        style: MobileButtonStyles.redText,
+                        onPressed: () => onCopyDeviceId(peer.id),
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        label: const Text('Copy'),
                       ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Signing public key',
-                        style: TextStyle(
-                          color: _trustRedDark,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      ref
-                          .watch(deviceSigningIdentityProvider)
-                          .when(
-                            data: (signing) => Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                SelectableText(
-                                  signing.encodedPublicKey,
-                                  style: const TextStyle(
-                                    color: _trustMuted,
-                                    fontFamily: 'monospace',
-                                    fontSize: 12,
-                                  ),
-                                ),
-                                TextButton.icon(
-                                  onPressed: () async {
-                                    await ActionFeedback.copy(
-                                      context,
-                                      signing.encodedPublicKey,
-                                      message: 'Signing public key copied.',
-                                    );
-                                  },
-                                  icon: const Icon(Icons.copy),
-                                  label: const Text('Copy signing key'),
-                                ),
-                              ],
-                            ),
-                            loading: () => const LinearProgressIndicator(),
-                            error: (_, _) => const Text(
-                              'Unable to load signing key. Reopen this screen to retry.',
-                            ),
-                          ),
                     ],
                   ),
-                  loading: () =>
-                      const LinearProgressIndicator(color: _trustRed),
-                  error: (error, _) => Text(
-                    'Unable to load encryption key: $error',
-                    style: const TextStyle(color: Color(0xFF9A5A00)),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 10),
+                    child: MobileTileDivider(),
                   ),
-                ),
-              ],
+                  const Text(
+                    'Encryption public key',
+                    style: TextStyle(
+                      fontFamily: MobileUiTokens.fontFamily,
+                      color: MobileUiTokens.deepRed,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  cryptoIdentity.when(
+                    data: (identity) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SelectableText(
+                          identity.encodedPublicKey,
+                          style: const TextStyle(
+                            color: MobileUiTokens.mutedInk,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Key ID: ${identity.keyId} (v${identity.keyVersion})',
+                                style: MobileUiTokens.subtitle.copyWith(
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            TextButton.icon(
+                              style: MobileButtonStyles.redText,
+                              onPressed: () =>
+                                  onCopyPublicKey(identity.encodedPublicKey),
+                              icon: const Icon(Icons.key_rounded, size: 18),
+                              label: const Text('Copy key'),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Signing public key',
+                          style: TextStyle(
+                            fontFamily: MobileUiTokens.fontFamily,
+                            color: MobileUiTokens.deepRed,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ref
+                            .watch(deviceSigningIdentityProvider)
+                            .when(
+                              data: (signing) => Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  SelectableText(
+                                    signing.encodedPublicKey,
+                                    style: const TextStyle(
+                                      color: MobileUiTokens.mutedInk,
+                                      fontFamily: 'monospace',
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  TextButton.icon(
+                                    style: MobileButtonStyles.redText,
+                                    onPressed: () async {
+                                      await ActionFeedback.copy(
+                                        context,
+                                        signing.encodedPublicKey,
+                                        message: 'Signing public key copied.',
+                                      );
+                                    },
+                                    icon: const Icon(Icons.copy, size: 18),
+                                    label: const Text('Copy signing key'),
+                                  ),
+                                ],
+                              ),
+                              loading: () => const LinearProgressIndicator(
+                                color: MobileUiTokens.brandRed,
+                                backgroundColor: MobileUiTokens.redTint,
+                              ),
+                              error: (_, _) => const Text(
+                                'Unable to load signing key. Reopen this screen to retry.',
+                                style: MobileUiTokens.subtitle,
+                              ),
+                            ),
+                      ],
+                    ),
+                    loading: () => const LinearProgressIndicator(
+                      color: MobileUiTokens.brandRed,
+                      backgroundColor: MobileUiTokens.redTint,
+                    ),
+                    error: (error, _) => Text(
+                      'Unable to load encryption key: $error',
+                      style: const TextStyle(color: MobileUiTokens.warningFg),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -643,18 +722,18 @@ class _DeviceIdentityCard extends ConsumerWidget {
               height: 18,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
-                color: _trustRed,
+                color: MobileUiTokens.brandRed,
               ),
             ),
             SizedBox(width: 10),
-            Text('Loading device ID...'),
+            Text('Loading device ID...', style: MobileUiTokens.subtitle),
           ],
         ),
         error: (error, _) => Text(
           'Unable to load device ID: $error',
           style: const TextStyle(
-            color: Color(0xFF9A5A00),
-            fontWeight: FontWeight.w800,
+            color: MobileUiTokens.warningFg,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -683,10 +762,14 @@ class _DeviceRegistrationQrDialogState
     final registration = widget.registration;
     final payload = registration.toJsonString();
     return AlertDialog(
-      backgroundColor: Colors.white,
+      backgroundColor: MobileUiTokens.canvas,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+      ),
       title: const Text(
         'Your registration code',
-        style: TextStyle(fontWeight: FontWeight.w900),
+        style: MobileUiTokens.sectionHeading,
       ),
       content: SingleChildScrollView(
         child: ConstrainedBox(
@@ -696,7 +779,13 @@ class _DeviceRegistrationQrDialogState
             children: [
               Container(
                 padding: const EdgeInsets.all(14),
-                color: Colors.white,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(
+                    MobileUiTokens.controlRadius,
+                  ),
+                  border: Border.all(color: MobileUiTokens.border),
+                ),
                 child: SizedBox.square(
                   dimension: 232,
                   child: CustomPaint(
@@ -720,15 +809,16 @@ class _DeviceRegistrationQrDialogState
                 registration.deviceId,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color: _trustRedDark,
-                  fontWeight: FontWeight.w900,
+                  fontFamily: 'monospace',
+                  color: MobileUiTokens.deepRed,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const SizedBox(height: 6),
               const Text(
                 'Show this code to the campus administrator.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: _trustMuted, fontSize: 12),
+                style: MobileUiTokens.subtitle,
               ),
               if (_copyMessage != null) ...[
                 const SizedBox(height: 12),
@@ -740,6 +830,7 @@ class _DeviceRegistrationQrDialogState
       ),
       actions: [
         TextButton.icon(
+          style: MobileButtonStyles.redText,
           onPressed: _copying
               ? null
               : () async {
@@ -764,12 +855,12 @@ class _DeviceRegistrationQrDialogState
                     if (mounted) setState(() => _copying = false);
                   }
                 },
-          icon: const Icon(Icons.copy_rounded),
+          icon: const Icon(Icons.copy_rounded, size: 18),
           label: const Text('Copy registration text'),
         ),
         FilledButton(
+          style: MobileButtonStyles.primaryFilled,
           onPressed: () => Navigator.of(context).pop(),
-          style: FilledButton.styleFrom(backgroundColor: _trustRed),
           child: const Text('Close'),
         ),
       ],
@@ -794,20 +885,16 @@ class _ImportActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: _trustRedDark,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(0, 52),
-          ),
+          style: MobileButtonStyles.darkFilled,
           onPressed: isImporting ? null : onScanQr,
           icon: const Icon(Icons.qr_code_scanner_rounded),
           label: Text(isImporting ? 'Checking code...' : 'Scan approval code'),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+          style: MobileButtonStyles.secondaryOutlined,
           onPressed: isImporting ? null : onImportClipboard,
-          icon: const Icon(Icons.paste_rounded),
+          icon: const Icon(Icons.paste_rounded, size: 18),
           label: const Text('Paste copied code'),
         ),
       ],
@@ -828,30 +915,34 @@ class _ManualImportCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _TrustPanel(
-      title: 'Enter approval text',
-      subtitle: 'Use the text supplied by the campus administrator.',
-      child: Column(
-        children: [
-          TextField(
-            controller: controller,
-            minLines: 5,
-            maxLines: 8,
-            decoration: const InputDecoration(
-              hintText: 'Paste approval text here',
-              border: OutlineInputBorder(),
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Enter approval text', style: MobileUiTokens.sectionHeading),
+        const SizedBox(height: 4),
+        const Text(
+          'Use the text supplied by the campus administrator.',
+          style: MobileUiTokens.subtitle,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: controller,
+          minLines: 5,
+          maxLines: 8,
+          decoration: MobileInputStyles.decoration(
+            hintText: 'Paste approval text here',
           ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton(
-              onPressed: isImporting ? null : onImport,
-              child: Text(isImporting ? 'Checking...' : 'Save approval update'),
-            ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton(
+            style: MobileButtonStyles.primaryFilled,
+            onPressed: isImporting ? null : onImport,
+            child: Text(isImporting ? 'Checking...' : 'Save approval update'),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -870,7 +961,7 @@ class _BundleSummaryCard extends StatelessWidget {
       child: bundle == null
           ? const Text(
               'No approval update saved. You can still send an SOS.',
-              style: TextStyle(color: _trustMuted),
+              style: MobileUiTokens.subtitle,
             )
           : Column(
               children: [
@@ -901,6 +992,7 @@ class _BundleSummaryCard extends StatelessWidget {
                 _SummaryRow(
                   label: 'Administrator key',
                   value: bundle!.issuer?.signingKeyId ?? 'Not pinned',
+                  monospace: true,
                 ),
                 _SummaryRow(
                   label: 'Approved devices',
@@ -910,12 +1002,20 @@ class _BundleSummaryCard extends StatelessWidget {
                   label: 'Revoked devices',
                   value: '${bundle!.revokedCount}',
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton.icon(
+                    style: MobileButtonStyles.secondaryOutlined.copyWith(
+                      foregroundColor: const WidgetStatePropertyAll(
+                        MobileUiTokens.errorFg,
+                      ),
+                      side: const WidgetStatePropertyAll(
+                        BorderSide(color: MobileUiTokens.errorBorder),
+                      ),
+                    ),
                     onPressed: onClear,
-                    icon: const Icon(Icons.delete_outline_rounded),
+                    icon: const Icon(Icons.delete_outline_rounded, size: 18),
                     label: const Text('Remove saved approval'),
                   ),
                 ),
@@ -932,59 +1032,54 @@ class _ErrorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF5E6),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFFFD28A)),
-      ),
-      child: Text(
-        message,
-        style: const TextStyle(
-          color: Color(0xFF9A5A00),
-          fontWeight: FontWeight.w800,
-        ),
-      ),
+    return MobileStatusBanner(
+      liveRegion: true,
+      tone: MobileStatusTone.warning,
+      message: message,
     );
   }
 }
 
 class _TrustPanel extends StatelessWidget {
   const _TrustPanel({
+    this.stepLabel,
     required this.title,
     required this.subtitle,
     required this.child,
   });
 
+  final String? stepLabel;
   final String title;
   final String subtitle;
   final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
+    return MobileSectionCard(
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _trustField),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
+          if (stepLabel case final stepLabel?) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: MobileUiTokens.redTint,
+                borderRadius: BorderRadius.circular(MobileUiTokens.pillRadius),
+              ),
+              child: Text(
+                stepLabel.toUpperCase(),
+                style: MobileUiTokens.badgeText.copyWith(
+                  fontSize: 11,
+                  color: MobileUiTokens.brandRed,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+          Text(title, style: MobileUiTokens.sectionHeading),
           const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: _trustMuted)),
+          Text(subtitle, style: MobileUiTokens.subtitle),
           const SizedBox(height: 14),
           child,
         ],
@@ -994,21 +1089,35 @@ class _TrustPanel extends StatelessWidget {
 }
 
 class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.label, required this.value});
+  const _SummaryRow({
+    required this.label,
+    required this.value,
+    this.monospace = false,
+  });
 
   final String label;
   final String value;
+  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Text(label, style: const TextStyle(color: _trustMuted)),
+          Expanded(child: Text(label, style: MobileUiTokens.subtitle)),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: MobileUiTokens.bodyStrong.copyWith(
+                fontSize: 13.5,
+                fontFamily: monospace ? 'monospace' : MobileUiTokens.fontFamily,
+              ),
+            ),
           ),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
         ],
       ),
     );

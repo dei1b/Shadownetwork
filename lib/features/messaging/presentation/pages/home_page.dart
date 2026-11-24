@@ -781,10 +781,27 @@ class _HomePageState extends ConsumerState<HomePage> {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    const _TabHeader(
+                                    _TabHeader(
                                       title: 'Profile',
                                       subtitle:
                                           'Your DNSC account and phone registration',
+                                      badge: _TabHeaderBadge(
+                                        label: switch (widget
+                                            .accessProfile
+                                            .level) {
+                                          DeviceAccessLevel.revoked =>
+                                            'Approval removed',
+                                          DeviceAccessLevel.keyMismatch =>
+                                            'Register again',
+                                          DeviceAccessLevel.outdatedBundle =>
+                                            'Approval expired',
+                                          _ => widget.accessProfile.isApproved
+                                              ? 'Phone approved'
+                                              : 'Registration available',
+                                        },
+                                        positive:
+                                            widget.accessProfile.isApproved,
+                                      ),
                                     ),
                                     const SizedBox(height: 12),
                                     ProfileSection(
