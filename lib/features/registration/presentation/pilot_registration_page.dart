@@ -706,7 +706,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
             Align(
               alignment: Alignment.centerRight,
               child: TextButton(
-                style: MobileButtonStyles.redText,
+                style: MobileButtonStyles.neutralText,
                 onPressed: _busy ? null : _resetPassword,
                 child: const Text('Forgot password?'),
               ),
@@ -757,16 +757,17 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           Container(
             width: 36,
             height: 36,
-            decoration: const BoxDecoration(
-              color: MobileUiTokens.redTint,
+            decoration: BoxDecoration(
+              color: Colors.white,
               shape: BoxShape.circle,
+              border: Border.all(color: MobileUiTokens.border),
             ),
             alignment: Alignment.center,
             child: const ExcludeSemantics(
               child: Icon(
                 Icons.person_rounded,
                 size: 20,
-                color: MobileUiTokens.brandRed,
+                color: MobileUiTokens.neutralIcon,
               ),
             ),
           ),
@@ -786,7 +787,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
             ),
           ),
           TextButton(
-            style: MobileButtonStyles.redText,
+            style: MobileButtonStyles.neutralText,
             onPressed: _busy
                 ? null
                 : () => _run(() async {
@@ -1151,9 +1152,7 @@ class _ModeSegment extends StatelessWidget {
               fontFamily: MobileUiTokens.fontFamily,
               fontSize: 14,
               fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-              color: selected
-                  ? MobileUiTokens.brandRed
-                  : MobileUiTokens.mutedInk,
+              color: selected ? MobileUiTokens.ink : MobileUiTokens.mutedInk,
             ),
           ),
         ),

@@ -20,6 +20,8 @@ abstract final class MobileUiTokens {
   // Surfaces & neutrals
   static const Color canvas = Color(0xFFFFFFFF);
   static const Color warmSurface = Color(0xFFFAF7F3);
+  static const Color neutralBadgeBg = Color(0xFFF3F1EE);
+  static const Color neutralIcon = Color(0xFF3F3B37);
   static const Color cardSurface = Color(0xFFFFFFFF);
   static const Color border = Color(0xFFE4E0DC);
   static const Color subtleDivider = Color(0xFFF0ECE8);

@@ -370,9 +370,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                       child: Theme(
                         data: Theme.of(context).copyWith(
                           dividerColor: Colors.transparent,
-                          splashColor: MobileUiTokens.redTint.withValues(
-                            alpha: 0.4,
-                          ),
+                          splashColor: MobileUiTokens.neutralBadgeBg,
                         ),
                         child: ExpansionTile(
                           shape: const Border(),
@@ -381,7 +379,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
                             horizontal: 16,
                             vertical: 4,
                           ),
-                          iconColor: MobileUiTokens.brandRed,
+                          iconColor: MobileUiTokens.mutedInk,
                           collapsedIconColor: MobileUiTokens.mutedInk,
                           title: const Text(
                             'Other ways to enter a code',
@@ -539,7 +537,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: () => onShowRegistrationQr(peer, identity),
-                  style: MobileButtonStyles.primaryFilled,
+                  style: MobileButtonStyles.darkFilled,
                   icon: const Icon(Icons.qr_code_2_rounded),
                   label: const Text('Show my registration code'),
                 ),
@@ -562,7 +560,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                 shape: const Border(),
                 collapsedShape: const Border(),
                 tilePadding: EdgeInsets.zero,
-                iconColor: MobileUiTokens.brandRed,
+                iconColor: MobileUiTokens.mutedInk,
                 collapsedIconColor: MobileUiTokens.mutedInk,
                 title: const Text(
                   'Technical details',
@@ -583,7 +581,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                       peer.id,
                       style: const TextStyle(
                         fontFamily: 'monospace',
-                        color: MobileUiTokens.deepRed,
+                        color: MobileUiTokens.ink,
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
                         letterSpacing: 0.2,
@@ -600,7 +598,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                         ),
                       ),
                       TextButton.icon(
-                        style: MobileButtonStyles.redText,
+                        style: MobileButtonStyles.neutralText,
                         onPressed: () => onCopyDeviceId(peer.id),
                         icon: const Icon(Icons.copy_rounded, size: 18),
                         label: const Text('Copy'),
@@ -615,7 +613,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                     'Encryption public key',
                     style: TextStyle(
                       fontFamily: MobileUiTokens.fontFamily,
-                      color: MobileUiTokens.deepRed,
+                      color: MobileUiTokens.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -644,7 +642,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                               ),
                             ),
                             TextButton.icon(
-                              style: MobileButtonStyles.redText,
+                              style: MobileButtonStyles.neutralText,
                               onPressed: () =>
                                   onCopyPublicKey(identity.encodedPublicKey),
                               icon: const Icon(Icons.key_rounded, size: 18),
@@ -657,7 +655,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                           'Signing public key',
                           style: TextStyle(
                             fontFamily: MobileUiTokens.fontFamily,
-                            color: MobileUiTokens.deepRed,
+                            color: MobileUiTokens.ink,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -677,7 +675,7 @@ class _DeviceIdentityCard extends ConsumerWidget {
                                     ),
                                   ),
                                   TextButton.icon(
-                                    style: MobileButtonStyles.redText,
+                                    style: MobileButtonStyles.neutralText,
                                     onPressed: () async {
                                       await ActionFeedback.copy(
                                         context,
@@ -810,7 +808,7 @@ class _DeviceRegistrationQrDialogState
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontFamily: 'monospace',
-                  color: MobileUiTokens.deepRed,
+                  color: MobileUiTokens.ink,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -830,7 +828,7 @@ class _DeviceRegistrationQrDialogState
       ),
       actions: [
         TextButton.icon(
-          style: MobileButtonStyles.redText,
+          style: MobileButtonStyles.neutralText,
           onPressed: _copying
               ? null
               : () async {
@@ -885,7 +883,7 @@ class _ImportActions extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FilledButton.icon(
-          style: MobileButtonStyles.darkFilled,
+          style: MobileButtonStyles.primaryFilled,
           onPressed: isImporting ? null : onScanQr,
           icon: const Icon(Icons.qr_code_scanner_rounded),
           label: Text(isImporting ? 'Checking code...' : 'Scan approval code'),
@@ -1064,14 +1062,15 @@ class _TrustPanel extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: MobileUiTokens.redTint,
+                color: MobileUiTokens.warmSurface,
                 borderRadius: BorderRadius.circular(MobileUiTokens.pillRadius),
+                border: Border.all(color: MobileUiTokens.border),
               ),
               child: Text(
                 stepLabel.toUpperCase(),
                 style: MobileUiTokens.badgeText.copyWith(
                   fontSize: 11,
-                  color: MobileUiTokens.brandRed,
+                  color: MobileUiTokens.mutedInk,
                 ),
               ),
             ),

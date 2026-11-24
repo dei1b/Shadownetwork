@@ -27,7 +27,7 @@ class SettingsPage extends ConsumerWidget {
             child: Theme(
               data: Theme.of(context).copyWith(
                 dividerColor: Colors.transparent,
-                splashColor: MobileUiTokens.redTint.withValues(alpha: 0.4),
+                splashColor: MobileUiTokens.neutralBadgeBg,
               ),
               child: ExpansionTile(
                 shape: const Border(),
@@ -36,13 +36,13 @@ class SettingsPage extends ConsumerWidget {
                   horizontal: 16,
                   vertical: 6,
                 ),
-                iconColor: MobileUiTokens.brandRed,
+                iconColor: MobileUiTokens.mutedInk,
                 collapsedIconColor: MobileUiTokens.mutedInk,
                 leading: Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: MobileUiTokens.redTint,
+                    color: MobileUiTokens.neutralBadgeBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
@@ -50,7 +50,7 @@ class SettingsPage extends ConsumerWidget {
                     child: Icon(
                       Icons.tune_rounded,
                       size: 20,
-                      color: MobileUiTokens.brandRed,
+                      color: MobileUiTokens.neutralIcon,
                     ),
                   ),
                 ),

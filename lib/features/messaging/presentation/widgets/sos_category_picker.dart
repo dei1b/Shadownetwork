@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/constants/app_colors.dart';
-import '../../../../core/constants/app_typography.dart';
+import '../../../../core/constants/mobile_ui_tokens.dart';
 import '../../domain/entities/category.dart';
 
 class SosCategoryPicker extends StatelessWidget {
@@ -9,7 +8,7 @@ class SosCategoryPicker extends StatelessWidget {
     super.key,
     required this.selected,
     required this.onChanged,
-    this.accent = AppColors.danger,
+    this.accent = MobileUiTokens.brandRed,
   });
 
   final Category? selected;
@@ -18,19 +17,18 @@ class SosCategoryPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final labelStyle = TextStyle(
-      fontFamily: AppTypography.fontFamily,
+    const labelStyle = TextStyle(
+      fontFamily: MobileUiTokens.fontFamily,
       fontSize: 14,
       height: 1.2,
-      color: colors.onSurface,
+      color: MobileUiTokens.ink,
       fontWeight: FontWeight.w700,
     );
     return LayoutBuilder(
       builder: (context, constraints) {
         const gap = 8.0;
         const padding = 10.0;
-        const iconSize = 24.0;
+        const iconSize = 22.0;
         final labelWidth =
             ((constraints.maxWidth - gap) / 2 - 2 * padding - iconSize - gap)
                 .clamp(0.0, double.infinity);
@@ -72,15 +70,17 @@ class SosCategoryPicker extends StatelessWidget {
               child: Material(
                 color: isSelected
                     ? Color.alphaBlend(
-                        accent.withValues(alpha: 0.08),
-                        colors.surface,
+                        accent.withValues(alpha: 0.09),
+                        Colors.white,
                       )
-                    : const Color(0xFFF1F1F1),
+                    : MobileUiTokens.warmSurface,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(
+                    MobileUiTokens.controlRadius,
+                  ),
                   side: BorderSide(
-                    color: isSelected ? accent : colors.outlineVariant,
-                    width: isSelected ? 2 : 1,
+                    color: isSelected ? accent : MobileUiTokens.border,
+                    width: isSelected ? 1.8 : 1,
                   ),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -101,7 +101,9 @@ class SosCategoryPicker extends StatelessWidget {
                             Category.electricalHazard => Icons.bolt,
                             _ => Icons.more_horiz,
                           },
-                          color: accent,
+                          color: isSelected
+                              ? accent
+                              : MobileUiTokens.neutralIcon,
                           size: iconSize,
                         ),
                         const SizedBox(width: gap),

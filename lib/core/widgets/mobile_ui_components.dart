@@ -222,8 +222,8 @@ class MobileActionTile extends StatelessWidget {
     this.subtitle,
     this.onTap,
     this.trailing,
-    this.iconColor = MobileUiTokens.brandRed,
-    this.iconBackground = MobileUiTokens.redTint,
+    this.iconColor = MobileUiTokens.neutralIcon,
+    this.iconBackground = MobileUiTokens.neutralBadgeBg,
     this.padding = const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
   });
 
@@ -331,7 +331,7 @@ abstract final class MobileButtonStyles {
   );
 
   static ButtonStyle get darkFilled => FilledButton.styleFrom(
-    backgroundColor: MobileUiTokens.deepRed,
+    backgroundColor: MobileUiTokens.ink,
     foregroundColor: Colors.white,
     disabledBackgroundColor: MobileUiTokens.border,
     disabledForegroundColor: MobileUiTokens.mutedInk,
@@ -342,6 +342,19 @@ abstract final class MobileButtonStyles {
       fontFamily: MobileUiTokens.fontFamily,
       fontSize: 15,
       fontWeight: FontWeight.w700,
+    ),
+  );
+
+  static ButtonStyle get neutralText => TextButton.styleFrom(
+    foregroundColor: MobileUiTokens.ink,
+    disabledForegroundColor: MobileUiTokens.mutedInk,
+    minimumSize: const Size(48, 48),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    shape: _shape,
+    textStyle: const TextStyle(
+      fontFamily: MobileUiTokens.fontFamily,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
     ),
   );
 
@@ -403,7 +416,7 @@ abstract final class MobileInputStyles {
       ),
       floatingLabelStyle: const TextStyle(
         fontFamily: MobileUiTokens.fontFamily,
-        color: MobileUiTokens.brandRed,
+        color: MobileUiTokens.ink,
         fontWeight: FontWeight.w600,
       ),
       hintStyle: const TextStyle(
@@ -425,7 +438,7 @@ abstract final class MobileInputStyles {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: radius,
-        borderSide: const BorderSide(color: MobileUiTokens.brandRed, width: 2),
+        borderSide: const BorderSide(color: MobileUiTokens.ink, width: 2),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: radius,

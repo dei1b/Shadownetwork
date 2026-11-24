@@ -10,6 +10,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as ml;
 import 'package:shadownetwork/core/constants/app_typography.dart';
+import 'package:shadownetwork/core/constants/mobile_ui_tokens.dart';
+import 'package:shadownetwork/core/widgets/mobile_ui_components.dart';
 import 'package:shadownetwork/core/widgets/native_activity_scope.dart';
 import 'package:shadownetwork/features/app_update/domain/entities/app_update_check.dart';
 import 'package:shadownetwork/features/app_update/presentation/providers/app_update_provider.dart';
@@ -4109,17 +4111,8 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final recipientId = widget.draft.recipientId;
-    final colors = theme.colorScheme;
     final close = _sending ? null : () => Navigator.of(context).pop();
-    final sectionLabel = AppTypography.caption.copyWith(
-      fontWeight: FontWeight.w700,
-      letterSpacing: 0.6,
-    );
-    final fieldBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-    );
     final previousRecipientUnavailable =
         recipientId != null &&
         !widget.trustedRecipients.any(
@@ -4140,17 +4133,30 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
           bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: Material(
-          color: colors.brightness == Brightness.light
-              ? colors.onPrimary
-              : colors.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          color: MobileUiTokens.canvas,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(MobileUiTokens.sheetRadius),
+          ),
           child: SafeArea(
             top: false,
-            minimum: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            minimum: const EdgeInsets.fromLTRB(16, 10, 16, 12),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Center(
+                  child: ExcludeSemantics(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: MobileUiTokens.border,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Flexible(
                   child: SingleChildScrollView(
                     keyboardDismissBehavior:
@@ -4161,11 +4167,24 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                       children: [
                         Row(
                           children: [
-                            const CircleAvatar(
-                              radius: 24,
-                              backgroundColor: _accent,
-                              foregroundColor: Colors.white,
-                              child: Icon(Icons.notification_important_rounded),
+                            Container(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: MobileUiTokens.redTint,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: MobileUiTokens.redBorder,
+                                ),
+                              ),
+                              alignment: Alignment.center,
+                              child: const ExcludeSemantics(
+                                child: Icon(
+                                  Icons.notification_important_rounded,
+                                  color: MobileUiTokens.brandRed,
+                                  size: 22,
+                                ),
+                              ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -4176,13 +4195,14 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                     header: true,
                                     child: Text(
                                       'Send SOS Message',
-                                      style: AppTypography.headlineLarge
-                                          .copyWith(fontSize: 24),
+                                      style: MobileUiTokens.pageTitle.copyWith(
+                                        fontSize: 20,
+                                      ),
                                     ),
                                   ),
                                   const Text(
                                     'Alert campus responders',
-                                    style: AppTypography.caption,
+                                    style: MobileUiTokens.subtitle,
                                   ),
                                 ],
                               ),
@@ -4190,12 +4210,18 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                             IconButton(
                               onPressed: close,
                               tooltip: 'Close SOS composer',
-                              icon: const Icon(Icons.close),
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                color: MobileUiTokens.mutedInk,
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 20),
-                        Text('WHAT IS THE EMERGENCY?', style: sectionLabel),
+                        const SizedBox(height: 18),
+                        const Text(
+                          'WHAT IS THE EMERGENCY?',
+                          style: MobileUiTokens.eyebrow,
+                        ),
                         const SizedBox(height: 8),
                         SosCategoryPicker(
                           accent: _accent,
@@ -4207,13 +4233,11 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 ),
                         ),
                         const SizedBox(height: 16),
-                        Text(
+                        const Text(
                           'Emergency details',
-                          style: AppTypography.titleMedium.copyWith(
-                            fontSize: 16,
-                          ),
+                          style: MobileUiTokens.sectionHeading,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 10),
                         Semantics(
                           label: 'Emergency details',
                           child: TextField(
@@ -4222,13 +4246,8 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                             maxLength: 250,
                             minLines: 2,
                             maxLines: 3,
-                            style: AppTypography.bodyMedium,
-                            decoration: InputDecoration(
-                              border: fieldBorder,
-                              filled: false,
-                              hintStyle: AppTypography.bodyMedium.copyWith(
-                                color: colors.onSurfaceVariant,
-                              ),
+                            style: MobileUiTokens.body,
+                            decoration: MobileInputStyles.decoration(
                               hintText:
                                   'What happened? Add a nearby landmark if known.',
                             ),
@@ -4237,15 +4256,38 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         ),
                         const SizedBox(height: 8),
                         Container(
-                          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+                          padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF1F1F1),
-                            borderRadius: BorderRadius.circular(12),
+                            color: MobileUiTokens.warmSurface,
+                            borderRadius: BorderRadius.circular(
+                              MobileUiTokens.controlRadius,
+                            ),
+                            border: Border.all(color: MobileUiTokens.border),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.location_on, color: _accent),
-                              const SizedBox(width: 8),
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: MobileUiTokens.border,
+                                  ),
+                                ),
+                                alignment: Alignment.center,
+                                child: ExcludeSemantics(
+                                  child: Icon(
+                                    Icons.location_on_outlined,
+                                    size: 20,
+                                    color: location == null
+                                        ? MobileUiTokens.neutralIcon
+                                        : MobileUiTokens.positiveFg,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
                               Expanded(
                                 flex: 3,
                                 child: Column(
@@ -4255,14 +4297,14 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                       location == null
                                           ? 'No location yet. You can still send.'
                                           : 'Location attached',
-                                      style: AppTypography.bodyMedium.copyWith(
-                                        fontWeight: FontWeight.w700,
+                                      style: MobileUiTokens.bodyStrong.copyWith(
+                                        fontSize: 14,
                                       ),
                                     ),
                                     if (coordinates != null)
                                       Text(
                                         coordinates,
-                                        style: AppTypography.caption,
+                                        style: MobileUiTokens.subtitle,
                                       ),
                                   ],
                                 ),
@@ -4270,18 +4312,14 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                               Flexible(
                                 flex: 2,
                                 child: TextButton.icon(
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: _accent,
-                                    backgroundColor: Colors.transparent,
-                                    minimumSize: const Size(48, 48),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                    ),
-                                  ),
+                                  style: MobileButtonStyles.neutralText,
                                   onPressed: _updatingLocation || _sending
                                       ? null
                                       : _updateLocation,
-                                  icon: const Icon(Icons.refresh, size: 18),
+                                  icon: const Icon(
+                                    Icons.refresh_rounded,
+                                    size: 18,
+                                  ),
                                   label: Text(
                                     _updatingLocation
                                         ? 'Finding location…'
@@ -4292,13 +4330,16 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                             ],
                           ),
                         ),
-                        if (_locationError != null)
-                          ActionStatus(
+                        if (_locationError != null) ...[
+                          const SizedBox(height: 8),
+                          MobileStatusBanner(
+                            liveRegion: true,
+                            tone: MobileStatusTone.warning,
                             message: _locationError!,
-                            kind: FeedbackKind.warning,
                           ),
+                        ],
                         const SizedBox(height: 16),
-                        Text('SEND TO', style: sectionLabel),
+                        const Text('SEND TO', style: MobileUiTokens.eyebrow),
                         const SizedBox(height: 8),
                         Semantics(
                           label: 'Send to',
@@ -4308,13 +4349,11 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                                 : recipientId ?? _broadcast,
                             isExpanded: true,
                             itemHeight: null,
-                            style: AppTypography.bodyMedium.copyWith(
-                              fontWeight: FontWeight.w700,
+                            dropdownColor: MobileUiTokens.canvas,
+                            style: MobileUiTokens.bodyStrong.copyWith(
+                              fontSize: 15,
                             ),
-                            decoration: InputDecoration(
-                              border: fieldBorder,
-                              filled: false,
-                            ),
+                            decoration: MobileInputStyles.decoration(),
                             items: [
                               const DropdownMenuItem(
                                 value: _broadcast,
@@ -4336,57 +4375,61 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         ),
                         const SizedBox(height: 8),
                         if (previousRecipientUnavailable)
-                          const ActionStatus(
+                          const MobileStatusBanner(
+                            tone: MobileStatusTone.warning,
                             message:
                                 'The saved recipient is unavailable. Choose who should receive this SOS.',
-                            kind: FeedbackKind.warning,
                           )
                         else if (widget.approvalUnavailable)
-                          const ActionStatus(
+                          const MobileStatusBanner(
+                            tone: MobileStatusTone.warning,
                             message:
                                 'Couldn’t load approved recipients. You can still broadcast this SOS.',
-                            kind: FeedbackKind.warning,
                           )
                         else
                           Text(
                             recipientId == null
                                 ? 'Nearby phones can relay this SOS to campus responders.'
                                 : 'Nearby phones can relay this SOS. Only the chosen responder can read it.',
-                            style: theme.textTheme.bodySmall,
+                            style: MobileUiTokens.subtitle,
                           ),
                       ],
                     ),
                   ),
                 ),
-                if (_sendError != null)
-                  ActionStatus(message: _sendError!, kind: FeedbackKind.error),
-                Row(
-                  children: [
-                    TextButton(
-                      onPressed: close,
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                        textStyle: AppTypography.labelLarge,
-                        backgroundColor: const Color(0xFFEDEDED),
-                        foregroundColor: colors.onSurface,
-                      ),
-                      child: const Text('Cancel'),
+                if (_sendError != null) ...[
+                  MobileStatusBanner(
+                    liveRegion: true,
+                    tone: MobileStatusTone.error,
+                    message: _sendError!,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                Container(
+                  padding: const EdgeInsets.only(top: 10),
+                  decoration: const BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: MobileUiTokens.subtleDivider),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _sending ? null : _send,
-                        style: FilledButton.styleFrom(
-                          minimumSize: const Size(0, 48),
-                          textStyle: AppTypography.labelLarge,
-                          backgroundColor: _HomePageState._sosActionColor,
-                          foregroundColor: Colors.white,
+                  ),
+                  child: Row(
+                    children: [
+                      OutlinedButton(
+                        onPressed: close,
+                        style: MobileButtonStyles.secondaryOutlined,
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: _sending ? null : _send,
+                          style: MobileButtonStyles.primaryFilled,
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: Text(_sending ? 'Saving SOS…' : 'Send SOS'),
                         ),
-                        icon: const Icon(Icons.send_rounded),
-                        label: Text(_sending ? 'Saving SOS…' : 'Send SOS'),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -4411,16 +4454,17 @@ class _TaskCompletionPopup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 34),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 32),
       backgroundColor: Colors.transparent,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(22),
+          color: MobileUiTokens.canvas,
+          borderRadius: BorderRadius.circular(MobileUiTokens.sheetRadius),
+          border: Border.all(color: MobileUiTokens.border),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.16),
+              color: Colors.black.withValues(alpha: 0.14),
               blurRadius: 24,
               offset: const Offset(0, 10),
             ),
@@ -4432,54 +4476,32 @@ class _TaskCompletionPopup extends StatelessWidget {
             Container(
               width: 58,
               height: 58,
-              decoration: const BoxDecoration(
-                color: Color(0xFFE83C3D),
+              decoration: BoxDecoration(
+                color: MobileUiTokens.positiveBg,
                 shape: BoxShape.circle,
+                border: Border.all(color: MobileUiTokens.positiveBorder),
               ),
-              child: Icon(icon, color: Colors.white, size: 34),
+              child: Icon(icon, color: MobileUiTokens.positiveFg, size: 32),
             ),
             const SizedBox(height: 14),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-                color: Color(0xFF1F1F1F),
-                letterSpacing: 0.2,
-              ),
+              style: MobileUiTokens.sectionHeading.copyWith(fontSize: 18),
             ),
-            const SizedBox(height: 5),
+            const SizedBox(height: 6),
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Color(0xFF717173),
-              ),
+              style: MobileUiTokens.subtitle,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             SizedBox(
               width: double.infinity,
-              child: TextButton(
+              child: FilledButton(
                 onPressed: () => Navigator.of(context).pop(),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: const Color(0xFFE83C3D),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: const Text(
-                  'DONE',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.2,
-                  ),
-                ),
+                style: MobileButtonStyles.darkFilled,
+                child: const Text('DONE'),
               ),
             ),
           ],

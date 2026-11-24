@@ -396,7 +396,12 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
               ] else if (matchesPhone == false || status == 'rejected') ...[
                 const SizedBox(height: 12),
                 MobileStatusBanner(
-                  tone: MobileStatusTone.error,
+                  tone: status == 'rejected'
+                      ? MobileStatusTone.error
+                      : MobileStatusTone.info,
+                  icon: status == 'rejected'
+                      ? Icons.error_outline_rounded
+                      : Icons.info_outline_rounded,
                   message: matchesPhone == false
                       ? 'Clearing app data or changing phones can require a new approval. Contact campus staff to approve this installation.'
                       : 'Contact campus staff about your application.',
@@ -450,7 +455,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
             child: Theme(
               data: Theme.of(context).copyWith(
                 dividerColor: Colors.transparent,
-                splashColor: MobileUiTokens.redTint.withValues(alpha: 0.4),
+                splashColor: MobileUiTokens.neutralBadgeBg,
               ),
               child: ExpansionTile(
                 shape: const Border(),
@@ -459,13 +464,13 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
                   horizontal: 16,
                   vertical: 6,
                 ),
-                iconColor: MobileUiTokens.brandRed,
+                iconColor: MobileUiTokens.mutedInk,
                 collapsedIconColor: MobileUiTokens.mutedInk,
                 leading: Container(
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: MobileUiTokens.redTint,
+                    color: MobileUiTokens.neutralBadgeBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   alignment: Alignment.center,
@@ -473,7 +478,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
                     child: Icon(
                       Icons.badge_outlined,
                       size: 20,
-                      color: MobileUiTokens.brandRed,
+                      color: MobileUiTokens.neutralIcon,
                     ),
                   ),
                 ),
@@ -527,10 +532,10 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
                       icon: Icons.edit_note_rounded,
                       iconColor: awaitingChange
                           ? MobileUiTokens.warningFg
-                          : MobileUiTokens.brandRed,
+                          : MobileUiTokens.neutralIcon,
                       iconBackground: awaitingChange
                           ? MobileUiTokens.warningBg
-                          : MobileUiTokens.redTint,
+                          : MobileUiTokens.neutralBadgeBg,
                       title: 'Request an identity change',
                       subtitle: awaitingChange
                           ? 'Your request is awaiting review or publication.'
@@ -780,9 +785,9 @@ class _ProfileAvatar extends StatelessWidget {
       width: 46,
       height: 46,
       decoration: BoxDecoration(
-        color: MobileUiTokens.redTint,
+        color: MobileUiTokens.neutralBadgeBg,
         shape: BoxShape.circle,
-        border: Border.all(color: MobileUiTokens.redBorder),
+        border: Border.all(color: MobileUiTokens.border),
       ),
       alignment: Alignment.center,
       child: ExcludeSemantics(
@@ -793,13 +798,13 @@ class _ProfileAvatar extends StatelessWidget {
                   fontFamily: MobileUiTokens.fontFamily,
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
-                  color: MobileUiTokens.brandRed,
+                  color: MobileUiTokens.ink,
                 ),
               )
             : const Icon(
                 Icons.person_outline_rounded,
                 size: 24,
-                color: MobileUiTokens.brandRed,
+                color: MobileUiTokens.neutralIcon,
               ),
       ),
     );
