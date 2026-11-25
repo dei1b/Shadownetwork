@@ -573,8 +573,12 @@ void main() {
     expect(find.text('Nearby phones'), findsOneWidget);
     expect(find.text('Starting…'), findsOneWidget);
     expect(
-      tester.getBottomLeft(nearby).dy,
-      lessThan(tester.getTopLeft(find.byType(ml.MapLibreMap)).dy),
+      tester.getBottomLeft(nearby).dy + 14,
+      lessThanOrEqualTo(tester.getTopLeft(find.byType(ml.MapLibreMap)).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('REGISTER THIS PHONE')).dy,
+      greaterThan(tester.getBottomLeft(locate).dy),
     );
     final sosButton = find.byKey(const ValueKey('open-sos-composer'));
     await tester.ensureVisible(sosButton);
@@ -981,4 +985,86 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
   });
+
+  testWidgets(
+    'nearby tab aligns stats columns, keeps filter labels unshrunk, and handles 200% text scale',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final originalFactory = ml.MapLibrePlatform.createInstance;
+      ml.MapLibrePlatform.createInstance = _MapPlatform.new;
+      addTearDown(() => ml.MapLibrePlatform.createInstance = originalFactory);
+      SharedPreferences.setMockInitialValues({});
+      addTearDown(() => SharedPreferences.setMockInitialValues({}));
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nearbyPeersProvider.overrideWith((ref) async => const []),
+            sosMessagesProvider.overrideWith((ref) async => const []),
+            conversationsProvider.overrideWith((ref) async => const []),
+            mapTileCacheStoreProvider.overrideWith(
+              (ref) async => MemCacheStore(),
+            ),
+            relayRuntimeProvider.overrideWith(_NoopRelayRuntime.new),
+            localPeerProvider.overrideWith(
+              (ref) async => const Peer(
+                id: 'test',
+                name: 'Test resident',
+                type: PeerType.civilian,
+                isConnected: false,
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(textScaler: TextScaler.linear(2.0)),
+              child: HomePage(
+                accessProfile: DeviceAccessProfile.unregistered(deviceId: 'test'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.text('Nearby'));
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+
+      final connectedTop = tester.getTopLeft(find.text('Connected').first).dy;
+      final listedTop = tester.getTopLeft(find.text('Listed')).dy;
+      final respondersTop = tester
+          .getTopLeft(find.text('Campus responders').first)
+          .dy;
+      expect(listedTop, connectedTop);
+      expect(respondersTop, connectedTop);
+
+      for (final label in const [
+        'All Peers',
+        'Connected',
+        'Campus responders',
+        'On map',
+      ]) {
+        final textFinder = find.text(label).last;
+        expect(textFinder, findsOneWidget);
+        expect(
+          find.ancestor(of: textFinder, matching: find.byType(FittedBox)),
+          findsNothing,
+        );
+        final textWidget = tester.widget<Text>(textFinder);
+        expect(textWidget.style?.fontSize, 13.5);
+      }
+
+      final helper = tester.widget<Text>(
+        find.text(
+          'Send one location pin to approved nearby phones for 15 minutes.',
+        ),
+      );
+      expect(helper.style?.fontSize, 13);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    },
+  );
 }

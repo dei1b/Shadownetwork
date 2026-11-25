@@ -859,19 +859,18 @@ class _HomePageState extends ConsumerState<HomePage> {
           const SizedBox(height: 14),
         ],
         _buildNearbyPhonesPreview(peers),
-        const SizedBox(height: 8),
+        const SizedBox(height: 14),
         _buildMapCard(peers, messages, tileCacheStore),
         const SizedBox(height: 14),
         if (!_isResponder) ...[
           _buildSosButton(),
+          const SizedBox(height: 12),
+          _buildActionButtons(),
           const SizedBox(height: 14),
           _buildDeviceAccessBanner(),
-          const SizedBox(height: 14),
+        ] else ...[
+          _buildResponderActionButtons(),
         ],
-        if (_isResponder)
-          _buildResponderActionButtons()
-        else
-          _buildActionButtons(),
         const SizedBox(height: 16),
       ],
     );
@@ -1246,8 +1245,11 @@ class _HomePageState extends ConsumerState<HomePage> {
         ),
         const SizedBox(height: 12),
         FilledButton.icon(
+          style: MobileButtonStyles.primaryFilled.copyWith(
+            minimumSize: const WidgetStatePropertyAll(Size(0, 46)),
+          ),
           onPressed: _startNewChat,
-          icon: const Icon(Icons.edit_outlined),
+          icon: const Icon(Icons.edit_outlined, size: 18),
           label: const Text('New message'),
         ),
         const SizedBox(height: 12),
@@ -1257,41 +1259,48 @@ class _HomePageState extends ConsumerState<HomePage> {
             children: List.generate(filters.length, (index) {
               final active = activeType == filters[index].$3;
               return Padding(
-                padding: const EdgeInsets.only(right: 10),
+                padding: EdgeInsets.only(
+                  right: index == filters.length - 1 ? 0 : 8,
+                ),
                 child: Material(
-                  color: active
-                      ? const Color(0xFFE83C3D)
-                      : const Color(0xFFF2F2F2),
+                  color: active ? MobileUiTokens.accentRed : Colors.white,
                   borderRadius: BorderRadius.circular(30),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(30),
                     onTap: () => setState(
                       () => _selectedMessageFilter = filters[index].$3,
                     ),
-                    child: Padding(
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 44),
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(30),
+                        border: active
+                            ? null
+                            : Border.all(color: MobileUiTokens.border),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             filters[index].$2,
-                            size: 20,
+                            size: 18,
                             color: active
                                 ? Colors.white
-                                : const Color(0xFF5A5A5A),
+                                : MobileUiTokens.neutralIcon,
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 7),
                           Text(
                             filters[index].$1,
                             style: TextStyle(
-                              color: active
-                                  ? Colors.white
-                                  : const Color(0xFF3A3A3A),
-                              fontSize: 14,
+                              fontFamily: AppTypography.fontFamily,
+                              color: active ? Colors.white : MobileUiTokens.ink,
+                              fontSize: 13.5,
                               fontWeight: FontWeight.w600,
+                              height: 1.2,
                             ),
                           ),
                         ],
@@ -1424,17 +1433,23 @@ class _HomePageState extends ConsumerState<HomePage> {
           rescuerCount: rescuerCount,
         ),
         const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: _isSharingLocation ? null : _shareCurrentPosition,
-          icon: const Icon(Icons.location_on_outlined),
-          label: Text(
-            _isSharingLocation ? 'Getting location…' : 'Share my location',
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            style: MobileButtonStyles.secondaryOutlined,
+            onPressed: _isSharingLocation ? null : _shareCurrentPosition,
+            icon: const Icon(Icons.location_on_outlined, size: 18),
+            label: Text(
+              _isSharingLocation ? 'Getting location…' : 'Share my location',
+            ),
           ),
         ),
+        const SizedBox(height: 6),
         const Text(
           'Send one location pin to approved nearby phones for 15 minutes.',
+          style: MobileUiTokens.subtitle,
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         _PeerFilterBar(
           filters: filters,
           selectedIndex: _selectedPeerFilter,
@@ -2182,22 +2197,25 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget _buildEmptyState({required IconData icon, required String message}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.8),
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+        border: Border.all(color: MobileUiTokens.border),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: const Color(0xFFE83C3D)),
+          Icon(icon, size: 20, color: MobileUiTokens.brandRed),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
               style: const TextStyle(
-                fontSize: 12,
+                fontFamily: AppTypography.fontFamily,
+                fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF666666),
+                height: 1.35,
+                color: MobileUiTokens.mutedInk,
               ),
             ),
           ),
@@ -3128,74 +3146,178 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget _buildNearbyPhonesPreview(AsyncValue<List<messaging.Peer>> peers) {
     const previewLimit = 2;
     final relay = ref.watch(relayRuntimeProvider);
+    final peerCount = peers.valueOrNull?.length ?? 0;
     const previewText = TextStyle(
       fontFamily: AppTypography.fontFamily,
-      fontSize: 14,
+      fontSize: 13.5,
       height: 1.35,
       letterSpacing: 0,
+      color: MobileUiTokens.ink,
     );
-    return DefaultTextStyle.merge(
+    return Container(
       key: const ValueKey('nearby-phones-section'),
-      style: previewText,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    const Text(
-                      'Nearby phones',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    if (relay.isSyncing || relay.isRunning)
-                      const _ScanningBadge()
-                    else if (relay.lastUpdated == null)
-                      const Text('Starting…')
-                    else
-                      const Text('Paused'),
-                  ],
-                ),
-              ),
-              if ((peers.valueOrNull?.length ?? 0) > previewLimit)
-                TextButton(
-                  onPressed: () => _selectTab(3, peerFilter: 0),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.error,
-                    textStyle: previewText.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                    minimumSize: const Size(48, 48),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  child: const Text('View all'),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          peers.when(
-            skipLoadingOnReload: true,
-            data: (items) => items.isEmpty
-                ? const Text('No nearby phones found yet.')
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+        border: Border.all(color: MobileUiTokens.border),
+        boxShadow: MobileUiTokens.cardShadow,
+      ),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          onTap: () => _selectTab(3, peerFilter: 0),
+          borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: DefaultTextStyle.merge(
+              style: previewText,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      for (final peer in items.take(previewLimit))
-                        Text(
-                          peer.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                      Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: relay.isSyncing || relay.isRunning
+                              ? const Color(0xFFFDECEC)
+                              : MobileUiTokens.neutralBadgeBg,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          Icons.radar_rounded,
+                          size: 18,
+                          color: relay.isSyncing || relay.isRunning
+                              ? MobileUiTokens.brandRed
+                              : MobileUiTokens.neutralIcon,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            const Text(
+                              'Nearby phones',
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                color: MobileUiTokens.ink,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: relay.isSyncing || relay.isRunning
+                                    ? const Color(0xFFFDECEC)
+                                    : MobileUiTokens.neutralBadgeBg,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: DefaultTextStyle.merge(
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: MobileUiTokens.mutedInk,
+                                ),
+                                child: relay.isSyncing || relay.isRunning
+                                    ? const _ScanningBadge()
+                                    : Text(
+                                        relay.lastUpdated == null
+                                            ? 'Starting…'
+                                            : 'Paused',
+                                      ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (peerCount > previewLimit)
+                        TextButton(
+                          onPressed: () => _selectTab(3, peerFilter: 0),
+                          style: TextButton.styleFrom(
+                            foregroundColor: MobileUiTokens.brandRed,
+                            textStyle: previewText.copyWith(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            minimumSize: const Size(48, 48),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                          child: const Text('View all'),
+                        )
+                      else
+                        const Icon(
+                          Icons.chevron_right_rounded,
+                          size: 20,
+                          color: MobileUiTokens.mutedInk,
                         ),
                     ],
                   ),
-            loading: () => const Text('Looking for nearby phones…'),
-            error: (_, _) => const Text('Unable to load nearby phones.'),
+                  const SizedBox(height: 8),
+                  peers.when(
+                    skipLoadingOnReload: true,
+                    data: (items) => items.isEmpty
+                        ? const Text(
+                            'No nearby phones found yet.',
+                            style: MobileUiTokens.subtitle,
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              for (final peer in items.take(previewLimit))
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 3),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        width: 7,
+                                        height: 7,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: peer.isConnected
+                                              ? const Color(0xFF15A832)
+                                              : MobileUiTokens.mutedInk,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          peer.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: MobileUiTokens.ink,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                    loading: () => const Text(
+                      'Looking for nearby phones…',
+                      style: MobileUiTokens.subtitle,
+                    ),
+                    error: (_, _) => const Text(
+                      'Unable to load nearby phones.',
+                      style: MobileUiTokens.subtitle,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -3467,27 +3589,31 @@ class _PeerUpdateButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-      elevation: 4,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: SizedBox(
-          width: 46,
-          height: 46,
+        borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
+            border: Border.all(color: MobileUiTokens.border),
+          ),
+          alignment: Alignment.center,
           child: isLoading
-              ? const Padding(
-                  padding: EdgeInsets.all(13),
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.2,
-                    color: Color(0xFFE83C3D),
+                    color: MobileUiTokens.brandRed,
                   ),
                 )
               : const Icon(
                   Icons.system_update_alt_rounded,
-                  size: 27,
-                  color: Color(0xFFE83C3D),
+                  size: 22,
+                  color: MobileUiTokens.brandRed,
                 ),
         ),
       ),
@@ -3510,50 +3636,48 @@ class _PeerStatsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 18),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(MobileUiTokens.cardRadius),
+        border: Border.all(color: MobileUiTokens.border),
+        boxShadow: MobileUiTokens.cardShadow,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _PeerMetric(
-              icon: Icons.groups_rounded,
-              count: connectedCount,
-              label: 'Connected',
-              subtitle: 'Active peers',
-              color: const Color(0xFFE83C3D),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _PeerMetric(
+                icon: Icons.groups_rounded,
+                count: connectedCount,
+                label: 'Connected',
+                subtitle: 'Active peers',
+                color: MobileUiTokens.accentRed,
+              ),
             ),
-          ),
-          const _VerticalDividerLine(),
-          Expanded(
-            child: _PeerMetric(
-              icon: Icons.wifi_rounded,
-              count: listedCount,
-              label: 'Listed',
-              subtitle: 'Known phones',
-              color: Color(0xFF3478F6),
+            const _VerticalDividerLine(),
+            Expanded(
+              child: _PeerMetric(
+                icon: Icons.wifi_rounded,
+                count: listedCount,
+                label: 'Listed',
+                subtitle: 'Known phones',
+                color: const Color(0xFF3478F6),
+              ),
             ),
-          ),
-          const _VerticalDividerLine(),
-          Expanded(
-            child: _PeerMetric(
-              icon: Icons.health_and_safety_rounded,
-              count: rescuerCount,
-              label: 'Campus responders',
-              subtitle: 'Available',
-              color: Color(0xFF15A832),
+            const _VerticalDividerLine(),
+            Expanded(
+              child: _PeerMetric(
+                icon: Icons.health_and_safety_rounded,
+                count: rescuerCount,
+                label: 'Campus responders',
+                subtitle: 'Available',
+                color: const Color(0xFF15A832),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3576,41 +3700,56 @@ class _PeerMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          child: Icon(icon, color: Colors.white, size: 28),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          '$count',
-          style: TextStyle(
-            fontSize: 25,
-            fontWeight: FontWeight.w900,
-            color: color,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            child: Icon(icon, color: Colors.white, size: 24),
           ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w800,
-            color: Colors.black,
+          const SizedBox(height: 8),
+          Text(
+            '$count',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontFamily: AppTypography.fontFamily,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              height: 1.1,
+              color: color,
+            ),
           ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          subtitle,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF696969),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTypography.fontFamily,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              height: 1.2,
+              color: MobileUiTokens.ink,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: AppTypography.fontFamily,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w500,
+              height: 1.2,
+              color: MobileUiTokens.mutedInk,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3620,7 +3759,11 @@ class _VerticalDividerLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 88, color: const Color(0xFFE4E4E4));
+    return Container(
+      width: 1,
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      color: MobileUiTokens.border,
+    );
   }
 }
 
@@ -3637,59 +3780,53 @@ class _PeerFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.94),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFE8E8E8)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
       child: Row(
         children: List.generate(filters.length, (index) {
           final filter = filters[index];
           final selected = selectedIndex == index;
-          return Expanded(
+          return Padding(
+            padding: EdgeInsets.only(
+              right: index == filters.length - 1 ? 0 : 8,
+            ),
             child: Material(
-              color: selected ? const Color(0xFFE83C3D) : Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
+              color: selected ? MobileUiTokens.accentRed : Colors.white,
+              borderRadius: BorderRadius.circular(30),
               child: InkWell(
                 onTap: () => onSelected(index),
-                borderRadius: BorderRadius.circular(16),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
+                borderRadius: BorderRadius.circular(30),
+                child: Container(
+                  constraints: const BoxConstraints(minHeight: 44),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(30),
+                    border: selected
+                        ? null
+                        : Border.all(color: MobileUiTokens.border),
+                  ),
                   child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
                         filter.icon,
                         size: 18,
                         color: selected
                             ? Colors.white
-                            : const Color(0xFF4A4A4A),
+                            : MobileUiTokens.neutralIcon,
                       ),
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Text(
-                            filter.label,
-                            maxLines: 1,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                              color: selected
-                                  ? Colors.white
-                                  : const Color(0xFF404040),
-                            ),
-                          ),
+                      const SizedBox(width: 7),
+                      Text(
+                        filter.label,
+                        style: TextStyle(
+                          fontFamily: AppTypography.fontFamily,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                          color: selected ? Colors.white : MobileUiTokens.ink,
                         ),
                       ),
                     ],
@@ -3720,39 +3857,38 @@ class _PeerScanningRow extends StatelessWidget {
         : 'Last checked at ${TimeOfDay.fromDateTime(time).format(context)}';
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.82),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(MobileUiTokens.controlRadius),
+        border: Border.all(color: MobileUiTokens.border),
       ),
       child: Row(
         children: [
-          const Icon(Icons.radar_rounded, color: Color(0xFF555555), size: 22),
+          const Icon(
+            Icons.radar_rounded,
+            color: MobileUiTokens.neutralIcon,
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               label,
               style: const TextStyle(
+                fontFamily: AppTypography.fontFamily,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF6B6B6B),
+                color: MobileUiTokens.mutedInk,
               ),
             ),
           ),
           if (checking)
             const SizedBox(
-              width: 22,
-              height: 22,
+              width: 20,
+              height: 20,
               child: CircularProgressIndicator(
-                strokeWidth: 2.4,
-                color: Color(0xFFE83C3D),
+                strokeWidth: 2.2,
+                color: MobileUiTokens.brandRed,
               ),
             ),
         ],
