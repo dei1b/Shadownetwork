@@ -428,15 +428,90 @@ class _UnifiedRegistrationsWorkspaceState
 
     for (final remote in _remoteRegistrations) {
       final regId = (remote.fields['registrationId'] as String? ?? remote.id).trim();
-      if (regId.isEmpty || byRegId.containsKey(regId)) continue;
+      if (regId.isEmpty) continue;
       final accUid = (remote.fields['accountUid'] as String?)?.trim();
-      if (accUid != null && accUid.isNotEmpty && byAccountUid.containsKey(accUid)) {
-        continue;
-      }
       final identity = CampusIdentityFields.fromFirestoreFields(remote.fields);
-      final role = RegisteredDeviceRole.fromCode(remote.fields['role'] as String?);
+      final roleRaw = (remote.fields['role'] as String?)?.trim();
+      final role = RegisteredDeviceRole.fromCode(roleRaw);
       final status = CampusRegistrationStatus.fromCode(remote.fields['status'] as String?);
       final phoneId = (remote.fields['deviceId'] as String? ?? '').trim();
+      final remotePhone = RegistrationPhoneBinding(
+        deviceId: phoneId,
+        publicKey: remote.fields['publicKey'] as String?,
+        signingPublicKey: remote.fields['signingPublicKey'] as String?,
+        keyVersion: (remote.fields['keyVersion'] as int?) ?? 1,
+        deviceRegistrationJson: remote.fields['deviceRegistration'] as String?,
+      );
+      final existingKey = byRegId.containsKey(regId)
+          ? regId
+          : (accUid != null && accUid.isNotEmpty && byAccountUid.containsKey(accUid))
+          ? byAccountUid[accUid]
+          : (phoneId.isNotEmpty ? byDeviceId[phoneId.toLowerCase()] : null);
+      final existingItem = existingKey == null ? null : byRegId[existingKey];
+      if (existingItem != null) {
+        final existing = existingItem.registration;
+        final canOverrideStatus =
+            existing.syncState != CampusSyncState.waitingToSync &&
+            existing.status != CampusRegistrationStatus.conflict;
+        final mergedStatus = !canOverrideStatus
+            ? existing.status
+            : status == CampusRegistrationStatus.revoked
+            ? CampusRegistrationStatus.revoked
+            : (existingItem.onlineApplication != null &&
+                  existing.status == CampusRegistrationStatus.submitted)
+            ? existing.status
+            : status;
+        final mergedRole =
+            (roleRaw != null && roleRaw.isNotEmpty && canOverrideStatus)
+            ? role
+            : existing.role;
+        final existingPhone = existing.activePhone;
+        final mergedPhone = RegistrationPhoneBinding(
+          deviceId: existingPhone.deviceId.isNotEmpty
+              ? existingPhone.deviceId
+              : remotePhone.deviceId,
+          publicKey: (existingPhone.publicKey ?? '').isNotEmpty
+              ? existingPhone.publicKey
+              : remotePhone.publicKey,
+          signingPublicKey: (existingPhone.signingPublicKey ?? '').isNotEmpty
+              ? existingPhone.signingPublicKey
+              : remotePhone.signingPublicKey,
+          keyVersion: existingPhone.deviceId.isNotEmpty
+              ? existingPhone.keyVersion
+              : remotePhone.keyVersion,
+          keyId: existingPhone.keyId,
+          deviceRegistrationJson:
+              (existingPhone.deviceRegistrationJson ?? '').isNotEmpty
+              ? existingPhone.deviceRegistrationJson
+              : remotePhone.deviceRegistrationJson,
+        );
+        final mergedReg = existing.copyWith(
+          registrationId: regId,
+          status: mergedStatus,
+          role: mergedRole,
+          accountUid: (accUid != null && accUid.isNotEmpty)
+              ? accUid
+              : existing.accountUid,
+          identity: existing.identity.displayName.trim().isNotEmpty
+              ? existing.identity
+              : identity,
+          activePhone: mergedPhone,
+          remoteUpdateTime: remote.updateTime.isNotEmpty
+              ? remote.updateTime
+              : existing.remoteUpdateTime,
+        );
+        if (existingKey != regId) {
+          byRegId.remove(existingKey);
+        }
+        byRegId[regId] = existingItem.copyWith(registration: mergedReg);
+        if (mergedReg.accountUid != null && mergedReg.accountUid!.isNotEmpty) {
+          byAccountUid[mergedReg.accountUid!] = regId;
+        }
+        if (mergedPhone.deviceId.isNotEmpty) {
+          byDeviceId[mergedPhone.deviceId.toLowerCase()] = regId;
+        }
+        continue;
+      }
       final reg = CampusRegistration(
         registrationId: regId,
         source: CampusRegistrationSource.fromCode(remote.fields['source'] as String?),
@@ -446,13 +521,7 @@ class _UnifiedRegistrationsWorkspaceState
         identity: identity,
         submittedSnapshot: identity,
         role: role,
-        activePhone: RegistrationPhoneBinding(
-          deviceId: phoneId,
-          publicKey: remote.fields['publicKey'] as String?,
-          signingPublicKey: remote.fields['signingPublicKey'] as String?,
-          keyVersion: (remote.fields['keyVersion'] as int?) ?? 1,
-          deviceRegistrationJson: remote.fields['deviceRegistration'] as String?,
-        ),
+        activePhone: remotePhone,
         createdAt: DateTime.now().toUtc(),
         updatedAt: DateTime.tryParse(remote.fields['updatedAt'] as String? ?? '')?.toUtc() ??
             DateTime.now().toUtc(),
