@@ -566,27 +566,91 @@ class _UnifiedRegistrationsWorkspaceState
       final schoolId = (rec.fields['schoolId'] as String? ?? '')
           .trim()
           .toLowerCase();
-      String? targetId = byAccountUid[rec.id];
-      if (targetId == null && schoolId.isNotEmpty) {
-        for (final entry in byRegId.entries) {
-          if (entry.value.registration.identity.schoolId.toLowerCase() ==
-              schoolId) {
-            targetId = entry.key;
-            break;
-          }
-        }
+      final rawAff = (rec.fields['affiliation'] as String? ?? '')
+          .trim()
+          .toLowerCase();
+      final rawRecQr = rec.fields['deviceRegistration'];
+      final parsedRec = rawRecQr != null
+          ? _parsePendingPhone(rawRecQr)
+          : (phone: null, error: null);
+      final linkedRegId = byAccountUid[rec.id];
+      if (linkedRegId != null && byRegId[linkedRegId] != null) {
+        byRegId[linkedRegId] = byRegId[linkedRegId]!.copyWith(
+          recoveryRequest: rec,
+          pendingNewPhone: parsedRec.phone,
+          pendingPhoneError: parsedRec.error,
+        );
+        continue;
       }
-      if (targetId != null && byRegId[targetId] != null) {
-        final rawRecQr = rec.fields['deviceRegistration'];
-        final parsedRec = rawRecQr != null
-            ? _parsePendingPhone(rawRecQr)
-            : (phone: null, error: null);
+
+      final hasKnownAff = rawAff == 'student' || rawAff == 'staff';
+      final matches = <CampusRegistration>[
+        if (schoolId.isNotEmpty && hasKnownAff)
+          for (final entry in byRegId.values)
+            if (!entry.isUnresolvedRecovery &&
+                entry.registration.identity.affiliation.name.toLowerCase() ==
+                    rawAff &&
+                entry.registration.identity.schoolId.trim().toLowerCase() ==
+                    schoolId)
+              entry.registration,
+      ];
+      if (matches.length == 1) {
+        final targetId = matches.single.registrationId;
         byRegId[targetId] = byRegId[targetId]!.copyWith(
           recoveryRequest: rec,
           pendingNewPhone: parsedRec.phone,
           pendingPhoneError: parsedRec.error,
         );
+        continue;
       }
+
+      final fallbackSchoolMatches = matches.isNotEmpty || hasKnownAff
+          ? matches
+          : <CampusRegistration>[
+              if (schoolId.isNotEmpty)
+                for (final entry in byRegId.values)
+                  if (!entry.isUnresolvedRecovery &&
+                      entry.registration.identity.schoolId
+                              .trim()
+                              .toLowerCase() ==
+                          schoolId)
+                    entry.registration,
+            ];
+      final recAff = rawAff == 'staff'
+          ? CampusAffiliation.staff
+          : CampusAffiliation.student;
+      final recRawSchoolId = (rec.fields['schoolId'] as String? ?? '').trim();
+      final nowRec = DateTime.now().toUtc();
+      final syntheticReg = CampusRegistration(
+        registrationId: 'recovery-unresolved:${rec.id}',
+        source: CampusRegistrationSource.online,
+        status: CampusRegistrationStatus.submitted,
+        syncState: CampusSyncState.synced,
+        accountUid: rec.id,
+        accountEmail: rec.fields['email'] as String?,
+        identity: CampusIdentityFields(
+          affiliation: recAff,
+          displayName: (rec.fields['displayName'] as String? ?? '').trim(),
+          studentNumber: recAff == CampusAffiliation.student
+              ? recRawSchoolId
+              : '',
+          employeeId: recAff == CampusAffiliation.staff ? recRawSchoolId : '',
+        ),
+        role: RegisteredDeviceRole.civilian,
+        activePhone: RegistrationPhoneBinding(
+          deviceId: parsedRec.phone?.deviceId ?? 'unmatched',
+        ),
+        createdAt: nowRec,
+        updatedAt: nowRec,
+      );
+      byRegId[syntheticReg.registrationId] = _UnifiedQueueItem(
+        registration: syntheticReg,
+        recoveryRequest: rec,
+        recoveryCandidates: fallbackSchoolMatches,
+        isUnresolvedRecovery: true,
+        pendingNewPhone: parsedRec.phone,
+        pendingPhoneError: parsedRec.error,
+      );
     }
 
     final query = _search.text.trim().toLowerCase();
@@ -1470,6 +1534,11 @@ class _UnifiedRegistrationsWorkspaceState
           _notify('Phone registration linked to Firebase account.');
           break;
         case _EditorAction.approveReplacementOrRecovery:
+          if (item.recoveryTargetRequired && result.targetRegistration == null) {
+            _notify('Select the existing registration to recover first.');
+            return;
+          }
+          final targetReg = result.targetRegistration ?? registration;
           final rawNewQr = item.pendingNewPhone?.deviceRegistrationJson;
           if (rawNewQr == null || rawNewQr.trim().isEmpty) {
             _notify('Replacement phone registration payload is missing.');
@@ -1490,19 +1559,19 @@ class _UnifiedRegistrationsWorkspaceState
             final decisionDisc =
                 '${item.pendingNewPhone?.deviceId ?? ''}|${item.pendingNewPhone?.publicKey ?? ''}|${result.role.name}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
             final decisionId = _decisionIdFor(
-              registration.registrationId,
+              targetReg.registrationId,
               action: decisionAction,
               discriminator: decisionDisc,
             );
             final accUid = isRecovery
                 ? item.recoveryRequest!.id
-                : (item.onlineApplication?.id ?? registration.accountUid);
+                : (item.onlineApplication?.id ?? targetReg.accountUid);
             final res = await _publisher.publishDecision(
               token: _session!.token,
               payload: {
                 'action': decisionAction,
                 'decisionId': decisionId,
-                'registrationId': registration.registrationId,
+                'registrationId': targetReg.registrationId,
                 'accountUid': ?accUid,
                 'role': result.role.name,
                 'reason': result.reason,
@@ -1516,7 +1585,7 @@ class _UnifiedRegistrationsWorkspaceState
               },
             );
             _clearDecisionId(
-              registration.registrationId,
+              targetReg.registrationId,
               action: decisionAction,
               discriminator: decisionDisc,
             );
@@ -1528,7 +1597,7 @@ class _UnifiedRegistrationsWorkspaceState
                 );
               }
               await registry.saveRegistration(
-                registration.copyWith(
+                targetReg.copyWith(
                   accountUid: accUid,
                   activePhone: item.pendingNewPhone!,
                   status: CampusRegistrationStatus.published,
@@ -1550,7 +1619,7 @@ class _UnifiedRegistrationsWorkspaceState
               ? null
               : await _api.readDirectory(_session!.token);
           final staged = await registry.stagePhoneReplacement(
-            registration: registration,
+            registration: targetReg,
             newPhone: newPhone,
             reviewer: reviewer,
             directoryProject: reviewProject,
@@ -1565,7 +1634,7 @@ class _UnifiedRegistrationsWorkspaceState
             verificationMethod: result.verificationMethod,
             accountUid: item.recoveryRequest?.id ??
                 item.onlineApplication?.id ??
-                registration.accountUid,
+                targetReg.accountUid,
           );
           final remoteBundle = dir == null
               ? null
@@ -1573,7 +1642,7 @@ class _UnifiedRegistrationsWorkspaceState
           final replacementChanges =
               DesktopAdminRegistryRepository.replacementLocalChanges(
                 publishedRegistration: staged.registration,
-                previousRegistration: registration,
+                previousRegistration: targetReg,
                 publishedBundle: remoteBundle,
               );
           if (_session != null && item.recoveryRequest != null) {
@@ -1598,7 +1667,7 @@ class _UnifiedRegistrationsWorkspaceState
             final remoteReg = await _api.getDocument(
               _session!.token,
               'campusRegistrations',
-              registration.registrationId,
+              targetReg.registrationId,
             );
             final existingApp = await _api.get(
               _session!.token,
@@ -1638,7 +1707,7 @@ class _UnifiedRegistrationsWorkspaceState
             final remoteReg = await _api.getDocument(
               _session!.token,
               'campusRegistrations',
-              registration.registrationId,
+              targetReg.registrationId,
             );
             await _api.publishPhoneReplacement(
               _session!.token,
@@ -1671,7 +1740,7 @@ class _UnifiedRegistrationsWorkspaceState
             final remoteReg = await _api.getDocument(
               _session!.token,
               'campusRegistrations',
-              registration.registrationId,
+              targetReg.registrationId,
             );
             await _api.publishCampusRegistration(
               _session!.token,
@@ -2217,6 +2286,8 @@ class _UnifiedQueueItem {
     this.onlineApplication,
     this.linkRequest,
     this.recoveryRequest,
+    this.recoveryCandidates = const [],
+    this.isUnresolvedRecovery = false,
     this.pendingNewPhone,
     this.pendingPhoneError,
   });
@@ -2225,14 +2296,20 @@ class _UnifiedQueueItem {
   final ReviewApplication? onlineApplication;
   final ReviewApplication? linkRequest;
   final ReviewApplication? recoveryRequest;
+  final List<CampusRegistration> recoveryCandidates;
+  final bool isUnresolvedRecovery;
   final RegistrationPhoneBinding? pendingNewPhone;
   final String? pendingPhoneError;
+
+  bool get recoveryTargetRequired => isUnresolvedRecovery;
 
   _UnifiedQueueItem copyWith({
     CampusRegistration? registration,
     ReviewApplication? onlineApplication,
     ReviewApplication? linkRequest,
     ReviewApplication? recoveryRequest,
+    List<CampusRegistration>? recoveryCandidates,
+    bool? isUnresolvedRecovery,
     RegistrationPhoneBinding? pendingNewPhone,
     String? pendingPhoneError,
   }) => _UnifiedQueueItem(
@@ -2240,6 +2317,8 @@ class _UnifiedQueueItem {
     onlineApplication: onlineApplication ?? this.onlineApplication,
     linkRequest: linkRequest ?? this.linkRequest,
     recoveryRequest: recoveryRequest ?? this.recoveryRequest,
+    recoveryCandidates: recoveryCandidates ?? this.recoveryCandidates,
+    isUnresolvedRecovery: isUnresolvedRecovery ?? this.isUnresolvedRecovery,
     pendingNewPhone: pendingNewPhone ?? this.pendingNewPhone,
     pendingPhoneError: pendingPhoneError ?? this.pendingPhoneError,
   );
@@ -2287,7 +2366,15 @@ class _UnifiedQueueCard extends StatelessWidget {
               if (item.linkRequest != null)
                 const Chip(label: Text('Account link request')),
               if (item.recoveryRequest != null)
-                const Chip(label: Text('Lost phone recovery')),
+                Chip(
+                  label: Text(
+                    item.isUnresolvedRecovery
+                        ? (item.recoveryCandidates.length > 1
+                              ? 'Ambiguous recovery (${item.recoveryCandidates.length} matches)'
+                              : 'Unmatched recovery')
+                        : 'Lost phone recovery',
+                  ),
+                ),
               if (hasOnlineReplacement)
                 const Chip(label: Text('Phone replacement')),
               if (item.onlineApplication?.profileChange?['status'] ==
@@ -2300,7 +2387,11 @@ class _UnifiedQueueCard extends StatelessWidget {
             children: [
               if (reg.identity.summarySubtitle.isNotEmpty)
                 Text(reg.identity.summarySubtitle),
-              Text('Phone: ${reg.activePhone.deviceId} · Reg: ${reg.registrationId}'),
+              Text(
+                item.isUnresolvedRecovery
+                    ? 'Requester UID: ${item.recoveryRequest?.id ?? ''} · Select matching registration'
+                    : 'Phone: ${reg.activePhone.deviceId} · Reg: ${reg.registrationId}',
+              ),
               if (reg.conflictReason != null)
                 Text(
                   reg.conflictReason!,
@@ -2335,6 +2426,7 @@ class _EditorOutcome {
     required this.role,
     this.reason = '',
     this.verificationMethod,
+    this.targetRegistration,
   });
 
   final _EditorAction action;
@@ -2342,6 +2434,7 @@ class _EditorOutcome {
   final RegisteredDeviceRole role;
   final String reason;
   final String? verificationMethod;
+  final CampusRegistration? targetRegistration;
 }
 
 class _UnifiedRegistrationEditorDialog extends StatefulWidget {
@@ -2364,6 +2457,7 @@ class _UnifiedRegistrationEditorDialog extends StatefulWidget {
 
 class _UnifiedRegistrationEditorDialogState
     extends State<_UnifiedRegistrationEditorDialog> {
+  CampusRegistration? _selectedRecoveryTarget;
   late CampusAffiliation _affiliation =
       widget.item.registration.identity.affiliation;
   late RegisteredDeviceRole _role = widget.item.registration.role;
@@ -2394,6 +2488,24 @@ class _UnifiedRegistrationEditorDialogState
   late final TextEditingController _address = TextEditingController(
     text: widget.item.registration.identity.address,
   );
+
+  void _selectRecoveryCandidate(CampusRegistration candidate) {
+    setState(() {
+      _selectedRecoveryTarget = candidate;
+      _affiliation = candidate.identity.affiliation;
+      _role = candidate.role;
+      _name.text = candidate.identity.displayName;
+      _studentNo.text = candidate.identity.studentNumber;
+      _course.text = candidate.identity.course;
+      _year.text = candidate.identity.yearLevel;
+      _set.text = candidate.identity.sectionSet;
+      _employeeId.text = candidate.identity.employeeId;
+      _unit.text = candidate.identity.unit;
+      _phone.text = candidate.identity.phone;
+      _address.text = candidate.identity.address;
+      _validationError = null;
+    });
+  }
   final TextEditingController _reason = TextEditingController();
   String _verificationMethod = 'desk_id_check';
   String? _validationError;
@@ -2465,6 +2577,15 @@ class _UnifiedRegistrationEditorDialogState
       setState(() => _validationError = 'Enter a reason for the applicant.');
       return;
     }
+    if (action == _EditorAction.approveReplacementOrRecovery &&
+        widget.item.recoveryTargetRequired &&
+        _selectedRecoveryTarget == null) {
+      setState(
+        () => _validationError =
+            'Select the existing registration that belongs to this requester.',
+      );
+      return;
+    }
     Navigator.of(context).pop(
       _EditorOutcome(
         action: action,
@@ -2472,17 +2593,19 @@ class _UnifiedRegistrationEditorDialogState
         role: _role,
         reason: _reason.text.trim(),
         verificationMethod: _verificationMethod,
+        targetRegistration: _selectedRecoveryTarget,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final reg = widget.item.registration;
+    final reg = _selectedRecoveryTarget ?? widget.item.registration;
+    final recReq = widget.item.recoveryRequest;
     final selfBlocked =
         widget.sessionUid != null &&
-        reg.accountUid != null &&
-        widget.sessionUid == reg.accountUid;
+        ((reg.accountUid != null && widget.sessionUid == reg.accountUid) ||
+            (recReq != null && widget.sessionUid == recReq.id));
     final availableRoles = {
       ...RegisteredDeviceRole.campusRoles,
       reg.role,
@@ -2506,6 +2629,14 @@ class _UnifiedRegistrationEditorDialogState
             ...rawChange,
           })
         : null;
+    final recAffRaw = (recReq?.fields['affiliation'] as String? ?? '').trim();
+    final recAffLabel = recAffRaw.isEmpty
+        ? 'Unspecified'
+        : CampusAffiliation.fromCode(recAffRaw).label;
+    final recSchoolId = (recReq?.fields['schoolId'] as String? ?? '').trim();
+    final recDisplayName =
+        (recReq?.fields['displayName'] as String? ?? '').trim();
+    final recEmail = (recReq?.fields['email'] as String? ?? '').trim();
     return AlertDialog(
       title: Text(
         reg.identity.displayName.isEmpty
@@ -2519,32 +2650,105 @@ class _UnifiedRegistrationEditorDialogState
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Registration ID: ${reg.registrationId}'),
-              Text('Source: ${reg.source.label} · Status: ${reg.status.label}'),
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF5F6F7),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AdminTheme.border),
+              if (!widget.item.isUnresolvedRecovery ||
+                  _selectedRecoveryTarget != null) ...[
+                Text('Registration ID: ${reg.registrationId}'),
+                Text('Source: ${reg.source.label} · Status: ${reg.status.label}'),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F6F7),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminTheme.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Verified phone keys (read-only)',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      SelectableText('Device ID: ${reg.activePhone.deviceId}'),
+                      Text('Key version: v${reg.activePhone.keyVersion}'),
+                      if (reg.activePhone.publicKey != null)
+                        Text('Encryption key: ${reg.activePhone.publicKey}'),
+                      if (reg.activePhone.signingPublicKey != null)
+                        Text('Signing key: ${reg.activePhone.signingPublicKey}'),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Verified phone keys (read-only)',
-                      style: TextStyle(fontWeight: FontWeight.w700),
+              ],
+              if (recReq != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: widget.item.isUnresolvedRecovery
+                        ? const Color(0xFFFFEFEF)
+                        : const Color(0xFFF5F8FF),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: widget.item.isUnresolvedRecovery
+                          ? AdminTheme.action
+                          : AdminTheme.border,
                     ),
-                    SelectableText('Device ID: ${reg.activePhone.deviceId}'),
-                    Text('Key version: v${reg.activePhone.keyVersion}'),
-                    if (reg.activePhone.publicKey != null)
-                      Text('Encryption key: ${reg.activePhone.publicKey}'),
-                    if (reg.activePhone.signingPublicKey != null)
-                      Text('Signing key: ${reg.activePhone.signingPublicKey}'),
-                  ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Requesting recovery account',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      Text('Requester: ${recDisplayName.isEmpty ? recReq.id : recDisplayName} ($recAffLabel)'),
+                      if (recSchoolId.isNotEmpty)
+                        Text('School / Employee ID: $recSchoolId'),
+                      if (recEmail.isNotEmpty) Text('Email: $recEmail'),
+                      Text('Account UID: ${recReq.id}'),
+                      if (widget.item.isUnresolvedRecovery) ...[
+                        const SizedBox(height: 8),
+                        if (widget.item.recoveryCandidates.isEmpty)
+                          Text(
+                            'No matching $recAffLabel registration was found for ID "$recSchoolId". Verify identity before linking or registering.',
+                            style: const TextStyle(color: AdminTheme.action),
+                          )
+                        else ...[
+                          const Text(
+                            'Multiple matching registrations found. Select the exact record to recover:',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AdminTheme.action,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          for (final cand in widget.item.recoveryCandidates)
+                            Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  _selectedRecoveryTarget?.registrationId ==
+                                          cand.registrationId
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_unchecked,
+                                ),
+                                title: Text(
+                                  '${cand.identity.displayName} (${cand.identity.affiliation.label} · ${cand.identity.schoolId})',
+                                ),
+                                subtitle: Text(
+                                  'Reg: ${cand.registrationId} · Phone: ${cand.activePhone.deviceId} · ${cand.status.label}',
+                                ),
+                                onTap: () => _selectRecoveryCandidate(cand),
+                              ),
+                            ),
+                        ],
+                      ],
+                    ],
+                  ),
                 ),
-              ),
+              ],
               if (pendingPhone != null) ...[
                 const SizedBox(height: 10),
                 Container(
@@ -2778,7 +2982,11 @@ class _UnifiedRegistrationEditorDialogState
         if (replacementPending)
           FilledButton(
             onPressed:
-                selfBlocked || pendingPhone == null || pendingPhoneError != null
+                selfBlocked ||
+                        pendingPhone == null ||
+                        pendingPhoneError != null ||
+                        (widget.item.recoveryTargetRequired &&
+                            _selectedRecoveryTarget == null)
                 ? null
                 : () => _submit(_EditorAction.approveReplacementOrRecovery),
             child: const Text('Approve replacement'),
@@ -2805,7 +3013,8 @@ class _UnifiedRegistrationEditorDialogState
                 : () => _submit(_EditorAction.resolveConflict),
             child: const Text('Issue signed correction'),
           ),
-        if ((widget.item.onlineApplication != null ||
+        if (!widget.item.isUnresolvedRecovery &&
+            (widget.item.onlineApplication != null ||
                 reg.source == CampusRegistrationSource.online) &&
             (reg.status == CampusRegistrationStatus.submitted ||
                 reg.status == CampusRegistrationStatus.approvedPendingPublication)) ...[
@@ -2822,22 +3031,23 @@ class _UnifiedRegistrationEditorDialogState
             child: const Text('Reject'),
           ),
         ],
-        if (reg.status == CampusRegistrationStatus.published ||
-            reg.status == CampusRegistrationStatus.approvedLocal)
+        if (!widget.item.isUnresolvedRecovery &&
+            (reg.status == CampusRegistrationStatus.published ||
+                reg.status == CampusRegistrationStatus.approvedLocal))
           TextButton(
             onPressed: selfBlocked
                 ? null
                 : () => _submit(_EditorAction.revoke),
             child: const Text('Revoke'),
           ),
-        if (widget.hasLocalRegistry)
+        if (widget.hasLocalRegistry && !widget.item.isUnresolvedRecovery)
           OutlinedButton(
             onPressed: selfBlocked
                 ? null
                 : () => _submit(_EditorAction.approveOffline),
             child: const Text('Approve offline & show QR'),
           ),
-        if (widget.hasOnlineSession)
+        if (widget.hasOnlineSession && !widget.item.isUnresolvedRecovery)
           FilledButton(
             onPressed: selfBlocked
                 ? null
