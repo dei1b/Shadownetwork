@@ -11,6 +11,29 @@ permissions:
   contents: write
 
 jobs:
+  admin-web-release-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.50.1'
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Build admin web release
+        run: >
+          flutter build web --no-pub --release -t lib/admin_web_main.dart
+          --dart-define=DNSC_FIREBASE_PROJECT=ci-check
+          --dart-define=DNSC_FIREBASE_API_KEY=ci-check
+
   build-release-apk:
     runs-on: ubuntu-latest
 

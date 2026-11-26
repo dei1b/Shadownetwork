@@ -7,6 +7,7 @@ import '../../../admin_validation/presentation/providers/validation_import_provi
 import '../providers/admin_recovery_provider.dart';
 import '../widgets/admin_recovery_panel.dart';
 import '../widgets/unified_registrations_workspace.dart';
+import '../widgets/windows_registration_scanner.dart';
 import '../theme/admin_theme.dart';
 
 class DesktopAdminShell extends ConsumerStatefulWidget {
@@ -48,6 +49,10 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
             onRegistryChanged: () => ref
                 .read(adminRegistryRevisionProvider.notifier)
                 .registryChanged(),
+            onScanPhoneQr: () => showDialog<String>(
+              context: context,
+              builder: (_) => const WindowsRegistrationScanner(),
+            ),
             validationPanel: Card(
               child: Padding(
                 padding: const EdgeInsets.all(20),

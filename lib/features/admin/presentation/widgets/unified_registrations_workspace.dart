@@ -14,13 +14,13 @@ import '../../domain/entities/registered_device.dart';
 import '../theme/admin_theme.dart';
 import 'approval_qr_dialog.dart';
 import 'registration_json_dialog.dart';
-import 'windows_registration_scanner.dart';
 
 class UnifiedRegistrationsWorkspace extends StatefulWidget {
   const UnifiedRegistrationsWorkspace({
     super.key,
     this.registry,
     this.onRegistryChanged,
+    this.onScanPhoneQr,
     this.reviewApi,
     this.publisherClient,
     this.validationPanel,
@@ -29,6 +29,7 @@ class UnifiedRegistrationsWorkspace extends StatefulWidget {
 
   final DesktopAdminRegistryRepository? registry;
   final VoidCallback? onRegistryChanged;
+  final Future<String?> Function()? onScanPhoneQr;
   final RegistrationReviewApi? reviewApi;
   final HostedPublisherClient? publisherClient;
   final Widget? validationPanel;
@@ -296,10 +297,7 @@ class _UnifiedRegistrationsWorkspaceState
         builder: (_) => const RegistrationJsonDialog(),
       );
     } else {
-      source = await showDialog<String>(
-        context: context,
-        builder: (_) => const WindowsRegistrationScanner(),
-      );
+      source = await widget.onScanPhoneQr?.call();
     }
     if (source == null || source.trim().isEmpty || !mounted) return;
     try {
@@ -1367,14 +1365,15 @@ class _UnifiedRegistrationsWorkspaceState
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          FilledButton.icon(
-                            key: const ValueKey('unified-scan-qr-button'),
-                            onPressed: _busy
-                                ? null
-                                : () => _scanOrPastePhoneQr(paste: false),
-                            icon: const Icon(Icons.qr_code_scanner_rounded),
-                            label: const Text('Scan phone QR'),
-                          ),
+                          if (widget.onScanPhoneQr != null)
+                            FilledButton.icon(
+                              key: const ValueKey('unified-scan-qr-button'),
+                              onPressed: _busy
+                                  ? null
+                                  : () => _scanOrPastePhoneQr(paste: false),
+                              icon: const Icon(Icons.qr_code_scanner_rounded),
+                              label: const Text('Scan phone QR'),
+                            ),
                           OutlinedButton.icon(
                             key: const ValueKey('unified-paste-qr-button'),
                             onPressed: _busy
