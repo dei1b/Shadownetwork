@@ -1511,6 +1511,8 @@ class _UnifiedRegistrationsWorkspaceState
   }
 
   Widget _buildReviewerSessionCard(int waitingSyncCount) {
+    final missingFirebaseConfig =
+        widget.reviewApi == null && !RegistrationReviewApi.isConfigured;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1518,6 +1520,16 @@ class _UnifiedRegistrationsWorkspaceState
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (_session == null) ...[
+              if (missingFirebaseConfig) ...[
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: ActionStatus(
+                    message:
+                        'Online review is unavailable because DNSC_FIREBASE_PROJECT or DNSC_FIREBASE_API_KEY was omitted from this build.',
+                    kind: FeedbackKind.error,
+                  ),
+                ),
+              ],
               Wrap(
                 spacing: 12,
                 runSpacing: 10,
@@ -1527,7 +1539,7 @@ class _UnifiedRegistrationsWorkspaceState
                     width: 240,
                     child: TextField(
                       controller: _email,
-                      enabled: !_busy,
+                      enabled: !_busy && !missingFirebaseConfig,
                       decoration: const InputDecoration(
                         labelText: 'Reviewer email',
                       ),
@@ -1537,13 +1549,15 @@ class _UnifiedRegistrationsWorkspaceState
                     width: 200,
                     child: TextField(
                       controller: _password,
-                      enabled: !_busy,
+                      enabled: !_busy && !missingFirebaseConfig,
                       obscureText: true,
                       decoration: const InputDecoration(labelText: 'Password'),
                     ),
                   ),
                   FilledButton(
-                    onPressed: _busy ? null : _signInReviewer,
+                    onPressed: _busy || missingFirebaseConfig
+                        ? null
+                        : _signInReviewer,
                     child: Text(
                       _hasLocalRegistry ? 'Sign in for online sync' : 'Sign in',
                     ),

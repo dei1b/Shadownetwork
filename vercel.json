@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "flutter build web --release -t lib/admin_web_main.dart",
+  "buildCommand": "node tools/vercel/build_web.mjs",
   "outputDirectory": "build/web",
   "rewrites": [
     {

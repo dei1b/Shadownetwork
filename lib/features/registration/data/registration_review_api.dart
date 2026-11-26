@@ -58,6 +58,13 @@ class RegistrationReviewApi {
   final Uri collection;
   static const timeout = Duration(seconds: 20);
 
+  static bool isConfiguredFor({
+    String project = reviewProject,
+    String apiKey = reviewApiKey,
+  }) => project.trim().isNotEmpty && apiKey.trim().isNotEmpty;
+
+  static bool get isConfigured => isConfiguredFor();
+
   factory RegistrationReviewApi.live() => RegistrationReviewApi(
     Uri.https(
       'firestore.googleapis.com',
@@ -67,14 +74,23 @@ class RegistrationReviewApi {
 
   static Future<({String token, String uid})> signIn(
     String email,
-    String password,
-  ) async {
+    String password, {
+    String? project,
+    String? apiKey,
+  }) async {
+    final effectiveProject = project ?? reviewProject;
+    final effectiveApiKey = apiKey ?? reviewApiKey;
+    if (!isConfiguredFor(project: effectiveProject, apiKey: effectiveApiKey)) {
+      throw StateError(
+        'Firebase reviewer configuration (DNSC_FIREBASE_PROJECT / DNSC_FIREBASE_API_KEY) is missing from this build.',
+      );
+    }
     final response = await http
         .post(
           Uri.https(
             'identitytoolkit.googleapis.com',
             '/v1/accounts:signInWithPassword',
-            {'key': reviewApiKey},
+            {'key': effectiveApiKey},
           ),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
