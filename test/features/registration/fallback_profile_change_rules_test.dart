@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shadownetwork/features/registration/data/registration_review_api.dart';
+import 'package:shadownetwork/features/registration/domain/campus_identity_fields.dart';
 
 void main() {
   final baseCollection = Uri.https(
@@ -254,6 +255,91 @@ void main() {
         ),
       );
       expect(rules, contains('reviewer() && request.auth.uid != uid'));
+      expect(rules, contains("'phone', 'address'"));
+      expect(
+        rules,
+        contains("after.get('phone', '') == after.profileChange.get('phone', '')"),
+      );
+      expect(
+        rules,
+        contains(
+          "after.get('address', '') == after.profileChange.get('address', '')",
+        ),
+      );
+    },
+  );
+
+  test(
+    'R13: RegistrationReviewApi.publish persists phone and address edits via reviewedIdentity onto both top-level and profileChange',
+    () async {
+      final bodies = <Map<String, dynamic>>[];
+      final api = RegistrationReviewApi(
+        baseCollection,
+        client: MockClient((request) async {
+          bodies.add(jsonDecode(request.body) as Map<String, dynamic>);
+          return http.Response('{}', 200);
+        }),
+      );
+
+      final app = ReviewApplication.fromCache(
+        id: 'uid-r13-fb',
+        updateTime: '2026-11-26T10:00:00Z',
+        fields: {
+          'affiliation': 'student',
+          'displayName': 'Old Student',
+          'studentNumber': '2026-1350',
+          'course': 'BSIT',
+          'yearLevel': '2',
+          'sectionSet': 'A',
+          'phone': '09170001111',
+          'address': 'Old Address',
+          'status': 'published',
+          'profileChange': {
+            'status': 'submitted',
+            'affiliation': 'student',
+            'displayName': 'Proposed Student',
+            'studentNumber': '2026-1351',
+            'course': 'BSIT',
+            'yearLevel': '3',
+            'sectionSet': 'B',
+          },
+        },
+      );
+
+      await api.publish(
+        'tok-rev-13',
+        app,
+        7,
+        '{"bundle":"signed-r13"}',
+        directoryUpdateTime: '2026-11-26T09:00:00Z',
+        reviewerUid: 'uid-admin-13',
+        reviewedIdentity: const CampusIdentityFields(
+          affiliation: CampusAffiliation.student,
+          displayName: 'Proposed Student',
+          studentNumber: '2026-1351',
+          course: 'BSIT',
+          yearLevel: '3',
+          sectionSet: 'B',
+          phone: '09175556666',
+          address: 'Brgy. Gredu, Panabo City',
+        ),
+      );
+
+      expect(bodies, hasLength(1));
+      final appUpdate = ((bodies.single['writes'] as List).first as Map)['update']
+          as Map<String, dynamic>;
+      final decoded = ReviewApplication({
+        'name': appUpdate['name'],
+        'updateTime': '2026-11-26T10:00:00Z',
+        'fields': appUpdate['fields'],
+      });
+      expect(decoded.fields['displayName'], 'Proposed Student');
+      expect(decoded.fields['phone'], '09175556666');
+      expect(decoded.fields['address'], 'Brgy. Gredu, Panabo City');
+      expect(decoded.profileChange?['status'], 'published');
+      expect(decoded.profileChange?['reviewerUid'], 'uid-admin-13');
+      expect(decoded.profileChange?['phone'], '09175556666');
+      expect(decoded.profileChange?['address'], 'Brgy. Gredu, Panabo City');
     },
   );
 }

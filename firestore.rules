@@ -127,9 +127,15 @@ service cloud.firestore {
         && before.profileChange.status in ['submitted', 'approved_pending_publication']
         && after.diff(before).affectedKeys().hasOnly([
           'displayName', 'affiliation', 'studentNumber', 'course',
-          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit', 'profileChange'
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address', 'profileChange'
         ])
-        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
+        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly([
+          'status', 'reviewerUid',
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address'
+        ])
         && after.profileChange.status == 'published'
         && ((before.profileChange.status == 'submitted'
              && after.profileChange.get('reviewerUid', '') == request.auth.uid)
@@ -137,15 +143,18 @@ service cloud.firestore {
                 && (before.profileChange.get('reviewerUid', '') == ''
                     ? after.profileChange.get('reviewerUid', '') == request.auth.uid
                     : after.profileChange.get('reviewerUid', '') == before.profileChange.get('reviewerUid', ''))))
-        && after.displayName == before.profileChange.displayName
-        && after.get('affiliation', '') == before.profileChange.get('affiliation', '')
-        && after.get('studentNumber', '') == before.profileChange.get('studentNumber', '')
-        && after.get('course', '') == before.profileChange.get('course', '')
-        && after.get('yearLevel', '') == before.profileChange.get('yearLevel', '')
-        && after.get('sectionSet', '') == before.profileChange.get('sectionSet', '')
-        && after.get('courseYear', '') == before.profileChange.get('courseYear', '')
-        && after.get('employeeId', '') == before.profileChange.get('employeeId', '')
-        && after.get('unit', '') == before.profileChange.get('unit', '')
+        && after.displayName is string && after.displayName.size() > 0
+        && after.displayName == after.profileChange.get('displayName', '')
+        && after.get('affiliation', '') == after.profileChange.get('affiliation', '')
+        && after.get('studentNumber', '') == after.profileChange.get('studentNumber', '')
+        && after.get('course', '') == after.profileChange.get('course', '')
+        && after.get('yearLevel', '') == after.profileChange.get('yearLevel', '')
+        && after.get('sectionSet', '') == after.profileChange.get('sectionSet', '')
+        && after.get('courseYear', '') == after.profileChange.get('courseYear', '')
+        && after.get('employeeId', '') == after.profileChange.get('employeeId', '')
+        && after.get('unit', '') == after.profileChange.get('unit', '')
+        && after.get('phone', '') == after.profileChange.get('phone', '')
+        && after.get('address', '') == after.profileChange.get('address', '')
         && snapshot.get('applicationUid', '') == uid && snapshot.publishedAt == request.time;
     }
 

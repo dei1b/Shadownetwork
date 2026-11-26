@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../../admin/domain/entities/campus_registration.dart';
+import '../domain/campus_identity_fields.dart';
 
 const reviewProject = String.fromEnvironment('DNSC_FIREBASE_PROJECT');
 const reviewApiKey = String.fromEnvironment('DNSC_FIREBASE_API_KEY');
@@ -667,6 +668,7 @@ class RegistrationReviewApi {
     String bundle, {
     required String? directoryUpdateTime,
     String? reviewerUid,
+    CampusIdentityFields? reviewedIdentity,
   }) async {
     final change = application.profileChange;
     const identityKeys = [
@@ -679,6 +681,8 @@ class RegistrationReviewApi {
       'courseYear',
       'employeeId',
       'unit',
+      'phone',
+      'address',
     ];
     final existingReviewerUid = change?['reviewerUid'] as String?;
     final effectiveReviewerUid =
@@ -687,17 +691,24 @@ class RegistrationReviewApi {
                 existingReviewerUid.trim().isNotEmpty
             ? existingReviewerUid
             : reviewerUid;
+    final reviewedMap = reviewedIdentity?.toFirestoreFields();
+    final mergedChange = change == null
+        ? null
+        : <String, dynamic>{
+            ...change,
+            if (reviewedMap != null) ...reviewedMap,
+          };
     final changes =
         application.status == 'published' &&
-            change != null &&
-            (change['status'] == 'submitted' ||
-                change['status'] == 'approved_pending_publication')
+            mergedChange != null &&
+            (change?['status'] == 'submitted' ||
+                change?['status'] == 'approved_pending_publication')
         ? <String, dynamic>{
             for (final key in identityKeys)
-              if (change.containsKey(key) && change[key] != null)
-                key: change[key],
+              if (mergedChange.containsKey(key) && mergedChange[key] != null)
+                key: mergedChange[key],
             'profileChange': {
-              ...change,
+              ...mergedChange,
               'status': 'published',
               if (effectiveReviewerUid != null &&
                   effectiveReviewerUid.trim().isNotEmpty)

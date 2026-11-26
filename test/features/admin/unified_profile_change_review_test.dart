@@ -151,8 +151,15 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Proposed profile change'), findsOneWidget);
-      expect(find.textContaining('Updated Officer'), findsOneWidget);
-      expect(find.textContaining('Emergency Dispatch'), findsOneWidget);
+      expect(
+        find.text('Proposed: Updated Officer · EMP-401 · Emergency Dispatch'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Updated Officer'), findsAtLeastNWidgets(1));
+      expect(
+        find.textContaining('Emergency Dispatch'),
+        findsAtLeastNWidgets(1),
+      );
 
       // Decline requires reason; once entered it dispatches decline_profile_change.
       final declineBtn = find.widgetWithText(
@@ -343,6 +350,192 @@ void main() {
       expect(staffSent['displayName'], 'R10 Staff Updated');
       expect(staffSent['employeeId'], 'EMP-501');
       expect(staffSent['unit'], 'DRRM Operations');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'R13: profile editor initializes from proposed identity, persists phone-only / address-only / combined edits, and Close changes nothing',
+    (tester) async {
+      final signer = await TestTrustBundleSigner.create();
+      final secrets = InMemorySecretValueStore();
+      final crypto = await DeviceIdentityStore(
+        secretStore: secrets,
+      ).loadOrCreate();
+      final signing = await DeviceSigningIdentityStore(
+        secretStore: secrets,
+      ).loadOrCreate();
+      final qr = await DeviceRegistrationQr.createSigned(
+        deviceId: 'phone-r13-stu',
+        identity: crypto,
+        signingIdentity: signing,
+      );
+
+      final baseApp = ReviewApplication.fromCache(
+        id: 'uid-r13-1',
+        updateTime: '2026-11-26T10:00:00Z',
+        fields: {
+          'affiliation': 'student',
+          'displayName': 'Old Student Name',
+          'studentNumber': '2026-1300',
+          'course': 'BSIT',
+          'yearLevel': '2',
+          'sectionSet': 'A',
+          'phone': '09170001111',
+          'address': 'Old Barangay 1',
+          'status': 'published',
+          'revision': 1,
+          'registrationId': 'reg-r13-1',
+          'deviceRegistration': jsonEncode(qr.toJson()),
+          'profileChange': {
+            'status': 'submitted',
+            'affiliation': 'student',
+            'displayName': 'Proposed Student Name',
+            'studentNumber': '2026-1301',
+            'course': 'BSCS',
+            'yearLevel': '3',
+            'sectionSet': 'B',
+          },
+        },
+      );
+
+      final api = _FakeProfileChangeApi([baseApp]);
+      final publisher = _CapturingProfileChangePublisher(signer);
+
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.light,
+          home: Scaffold(
+            body: UnifiedRegistrationsWorkspace(
+              reviewApi: api,
+              publisherClient: publisher,
+              initialSessionForTesting: (
+                token: 'tok',
+                uid: 'admin-r13',
+                email: 'admin@dnsc.edu.ph',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 1. Verify form prefills with proposed identity + existing contact, and Close leaves payloads empty.
+      await tester.tap(find.text('Old Student Name'));
+      await tester.pumpAndSettle();
+      final dialogFinder = find.byType(AlertDialog);
+      expect(
+        tester
+            .widget<TextField>(
+              find.descendant(
+                of: dialogFinder,
+                matching: find.widgetWithText(TextField, 'Full name'),
+              ),
+            )
+            .controller
+            ?.text,
+        'Proposed Student Name',
+      );
+      expect(
+        tester
+            .widget<TextField>(
+              find.descendant(
+                of: dialogFinder,
+                matching: find.widgetWithText(TextField, 'Phone number (optional)'),
+              ),
+            )
+            .controller
+            ?.text,
+        '09170001111',
+      );
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(publisher.payloads, isEmpty);
+
+      // 2. Phone-only edit while approving profile change must persist (not be dropped!).
+      await tester.tap(find.text('Old Student Name'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, 'Phone number (optional)'),
+        ),
+        '09179998888',
+      );
+      final approveBtn = find.widgetWithText(
+        FilledButton,
+        'Approve profile change',
+      );
+      await tester.ensureVisible(approveBtn);
+      await tester.tap(approveBtn);
+      await tester.pumpAndSettle();
+
+      expect(publisher.payloads, hasLength(1));
+      final phoneOnlySent =
+          publisher.payloads[0]['reviewedFields'] as Map<String, Object?>;
+      expect(phoneOnlySent['displayName'], 'Proposed Student Name');
+      expect(phoneOnlySent['studentNumber'], '2026-1301');
+      expect(phoneOnlySent['phone'], '09179998888');
+      expect(phoneOnlySent['address'], 'Old Barangay 1');
+
+      // 3. Address-only edit while approving profile change.
+      await tester.tap(find.text('Old Student Name'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, 'Address (optional)'),
+        ),
+        'New Panabo Street 42',
+      );
+      await tester.ensureVisible(approveBtn);
+      await tester.tap(approveBtn);
+      await tester.pumpAndSettle();
+
+      expect(publisher.payloads, hasLength(2));
+      final addrOnlySent =
+          publisher.payloads[1]['reviewedFields'] as Map<String, Object?>;
+      expect(addrOnlySent['address'], 'New Panabo Street 42');
+      expect(addrOnlySent['phone'], '09170001111');
+      expect(addrOnlySent['displayName'], 'Proposed Student Name');
+
+      // 4. Combined identity + phone + address edit while approving.
+      await tester.tap(find.text('Old Student Name'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, 'Full name'),
+        ),
+        'Admin Refined Name',
+      );
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, 'Phone number (optional)'),
+        ),
+        '09171112222',
+      );
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, 'Address (optional)'),
+        ),
+        'Brgy. Salvacion, Panabo',
+      );
+      await tester.ensureVisible(approveBtn);
+      await tester.tap(approveBtn);
+      await tester.pumpAndSettle();
+
+      expect(publisher.payloads, hasLength(3));
+      final combinedSent =
+          publisher.payloads[2]['reviewedFields'] as Map<String, Object?>;
+      expect(combinedSent['displayName'], 'Admin Refined Name');
+      expect(combinedSent['phone'], '09171112222');
+      expect(combinedSent['address'], 'Brgy. Salvacion, Panabo');
+      expect(combinedSent['course'], 'BSCS');
       expect(tester.takeException(), isNull);
     },
   );

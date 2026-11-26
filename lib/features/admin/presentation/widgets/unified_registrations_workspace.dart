@@ -1952,6 +1952,7 @@ class _UnifiedRegistrationsWorkspaceState
               mergedJson,
               directoryUpdateTime: dir?.updateTime,
               reviewerUid: _session!.uid,
+              reviewedIdentity: result.identity,
             );
             await registry.saveLastPublishedRoster(parsed, mergedJson);
             await registry.saveRegistration(
@@ -2613,35 +2614,78 @@ class _UnifiedRegistrationEditorDialog extends StatefulWidget {
 class _UnifiedRegistrationEditorDialogState
     extends State<_UnifiedRegistrationEditorDialog> {
   CampusRegistration? _selectedRecoveryTarget;
-  late CampusAffiliation _affiliation =
-      widget.item.registration.identity.affiliation;
+
+  CampusIdentityFields _computeInitialIdentity() {
+    final regIdentity = widget.item.registration.identity;
+    final rawChange = widget.item.onlineApplication?.profileChange;
+    final changeStatus = rawChange?['status'];
+    if (rawChange == null ||
+        (changeStatus != 'submitted' &&
+            changeStatus != 'approved_pending_publication')) {
+      return regIdentity;
+    }
+    final proposed = CampusIdentityFields.fromFirestoreFields({
+      ...widget.item.onlineApplication!.fields,
+      ...rawChange,
+    });
+    return CampusIdentityFields(
+      affiliation: proposed.affiliation,
+      displayName: proposed.displayName.isNotEmpty
+          ? proposed.displayName
+          : regIdentity.displayName,
+      studentNumber: proposed.studentNumber.isNotEmpty
+          ? proposed.studentNumber
+          : regIdentity.studentNumber,
+      course: proposed.course.isNotEmpty ? proposed.course : regIdentity.course,
+      yearLevel: proposed.yearLevel.isNotEmpty
+          ? proposed.yearLevel
+          : regIdentity.yearLevel,
+      sectionSet: proposed.sectionSet.isNotEmpty
+          ? proposed.sectionSet
+          : regIdentity.sectionSet,
+      employeeId: proposed.employeeId.isNotEmpty
+          ? proposed.employeeId
+          : regIdentity.employeeId,
+      unit: proposed.unit.isNotEmpty ? proposed.unit : regIdentity.unit,
+      legacyCourseYear: proposed.legacyCourseYear.isNotEmpty
+          ? proposed.legacyCourseYear
+          : regIdentity.legacyCourseYear,
+      phone: proposed.phone.isNotEmpty ? proposed.phone : regIdentity.phone,
+      address: proposed.address.isNotEmpty
+          ? proposed.address
+          : regIdentity.address,
+    );
+  }
+
+  late final CampusIdentityFields _startingIdentity = _computeInitialIdentity();
+  late CampusAffiliation _affiliation = _startingIdentity.affiliation;
   late RegisteredDeviceRole _role = widget.item.registration.role;
   late final TextEditingController _name = TextEditingController(
-    text: widget.item.registration.identity.displayName,
+    text: _startingIdentity.displayName,
   );
   late final TextEditingController _studentNo = TextEditingController(
-    text: widget.item.registration.identity.studentNumber,
+    text: _startingIdentity.studentNumber,
   );
   late final TextEditingController _course = TextEditingController(
-    text: widget.item.registration.identity.course,
+    text: _startingIdentity.course,
   );
   late final TextEditingController _year = TextEditingController(
-    text: widget.item.registration.identity.yearLevel,
+    text: _startingIdentity.yearLevel,
   );
   late final TextEditingController _set = TextEditingController(
-    text: widget.item.registration.identity.sectionSet,
+    text: _startingIdentity.sectionSet,
   );
   late final TextEditingController _employeeId = TextEditingController(
-    text: widget.item.registration.identity.employeeId,
+    text: _startingIdentity.employeeId,
   );
   late final TextEditingController _unit = TextEditingController(
-    text: widget.item.registration.identity.unit,
+    text: _startingIdentity.unit,
   );
   late final TextEditingController _phone = TextEditingController(
-    text: widget.item.registration.identity.phone,
+    text: _startingIdentity.phone,
   );
   late final TextEditingController _address = TextEditingController(
-    text: widget.item.registration.identity.address,
+    text: _startingIdentity.address,
   );
 
   void _selectRecoveryCandidate(CampusRegistration candidate) {
@@ -2694,25 +2738,8 @@ class _UnifiedRegistrationEditorDialogState
   );
 
   void _submit(_EditorAction action) {
-    final reg = widget.item.registration;
-    var identity = _collectIdentity();
+    final identity = _collectIdentity();
     if (action == _EditorAction.approveProfileChange) {
-      final rawChange = widget.item.onlineApplication?.profileChange;
-      if (rawChange != null &&
-          (rawChange['status'] == 'submitted' ||
-              rawChange['status'] == 'approved_pending_publication')) {
-        final unchangedInForm =
-            identity.affiliation == reg.identity.affiliation &&
-            identity.displayName == reg.identity.displayName &&
-            identity.schoolId == reg.identity.schoolId &&
-            identity.formattedCourseYear == reg.identity.formattedCourseYear;
-        if (unchangedInForm) {
-          identity = CampusIdentityFields.fromFirestoreFields({
-            ...widget.item.onlineApplication!.fields,
-            ...rawChange,
-          });
-        }
-      }
       final errors = identity.validateRequired();
       if (errors.isNotEmpty) {
         setState(() => _validationError = errors.values.first);
