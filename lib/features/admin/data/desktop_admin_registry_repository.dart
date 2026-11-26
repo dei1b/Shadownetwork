@@ -219,6 +219,71 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     ),
   );
 
+  /// Merges [localChanges] onto the verified latest remote [publishedBundle]
+  /// so fallback desktop publishing preserves remote-only approvals and revocations.
+  Future<String> buildMergedTrustBundleJson({
+    required TrustBundle? publishedBundle,
+    required List<RegisteredDevice> localChanges,
+    String? directoryProject,
+    int minimumPreviousVersion = 0,
+  }) => _serialized(() async {
+    final identity = await _requireIdentity();
+    final mergedById = <String, RegisteredDevice>{};
+    if (publishedBundle != null) {
+      await _verifyPublishedBundleForAdmin(
+        publishedBundle,
+        identity,
+        project: directoryProject,
+      );
+      for (final remote in [
+        ...publishedBundle.approvedDevices,
+        ...publishedBundle.revokedDevices,
+      ]) {
+        final keyLower = remote.deviceId.trim().toLowerCase();
+        mergedById[keyLower] = RegisteredDevice(
+          deviceId: remote.deviceId,
+          ownerName: remote.ownerName,
+          role: RegisteredDeviceRole.fromCode(remote.role),
+          status: remote.status == 'revoked'
+              ? RegisteredDeviceStatus.revoked
+              : RegisteredDeviceStatus.approved,
+          registeredAt: remote.updatedAt,
+          updatedAt: remote.updatedAt,
+          lastSeenLabel: remote.status == 'revoked'
+              ? 'Revoked by admin'
+              : 'Published',
+          publicKey: remote.publicKey,
+          signingPublicKey: remote.signingPublicKey,
+          keyVersion: remote.keyVersion,
+        );
+      }
+    }
+    final localDevices = await _loadDevices();
+    for (final local in localDevices) {
+      final keyLower = local.deviceId.trim().toLowerCase();
+      if (!mergedById.containsKey(keyLower) &&
+          (local.status == RegisteredDeviceStatus.approved ||
+              local.status == RegisteredDeviceStatus.revoked)) {
+        mergedById[keyLower] = local;
+      }
+    }
+    for (final changed in localChanges) {
+      mergedById[changed.deviceId.trim().toLowerCase()] = changed;
+    }
+    final merged = mergedById.values
+        .where(
+          (device) =>
+              device.status == RegisteredDeviceStatus.approved ||
+              device.status == RegisteredDeviceStatus.revoked,
+        )
+        .toList();
+    return _buildTrustBundleJson(
+      merged,
+      directoryProject,
+      max(minimumPreviousVersion, publishedBundle?.bundleVersion ?? 0),
+    );
+  });
+
   Future<void> _verifyPublishedBundleForAdmin(
     TrustBundle published,
     _SigningIdentity identity, {

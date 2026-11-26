@@ -671,6 +671,9 @@ class _UnifiedRegistrationsWorkspaceState
         'campusRegistrations',
       );
       final remoteMap = {for (final r in remoteRegs) r.id: r};
+      var currentBundle = directory == null
+          ? null
+          : TrustBundle.fromJsonString(directory.bundle);
       var currentVersion = directory?.version ?? 0;
       var currentUpdateTime = directory?.updateTime;
 
@@ -681,13 +684,6 @@ class _UnifiedRegistrationsWorkspaceState
         if (reg == null || reg.status == CampusRegistrationStatus.conflict) {
           continue;
         }
-        final devices = await registry.loadDevices();
-        final bundleJson = await registry.buildTrustBundleJson(
-          devices,
-          directoryProject: reviewProject,
-          minimumPreviousVersion: currentVersion,
-        );
-        final parsedBundle = TrustBundle.fromJsonString(bundleJson);
         final publishedReg = reg.copyWith(
           status: reg.status == CampusRegistrationStatus.revoked
               ? CampusRegistrationStatus.revoked
@@ -695,6 +691,13 @@ class _UnifiedRegistrationsWorkspaceState
           syncState: CampusSyncState.synced,
           updatedAt: DateTime.now().toUtc(),
         );
+        final bundleJson = await registry.buildMergedTrustBundleJson(
+          publishedBundle: currentBundle,
+          localChanges: [publishedReg.toRegisteredDevice()],
+          directoryProject: reviewProject,
+          minimumPreviousVersion: currentVersion,
+        );
+        final parsedBundle = TrustBundle.fromJsonString(bundleJson);
         await _api.publishCampusRegistration(
           session.token,
           registration: publishedReg,
@@ -709,6 +712,7 @@ class _UnifiedRegistrationsWorkspaceState
           removePendingForRegistration: true,
         );
         await registry.removePendingSync(op.decisionId);
+        currentBundle = parsedBundle;
         currentVersion = parsedBundle.bundleVersion;
         final refreshed = await _api.readDirectory(session.token);
         currentUpdateTime = refreshed?.updateTime;
@@ -876,22 +880,21 @@ class _UnifiedRegistrationsWorkspaceState
             }
             final refreshedApp = await _api.get(session.token, onlineApp.id);
             final dir = await _api.readDirectory(session.token);
-            final device = registration
-                .copyWith(
-                  identity: result.identity,
-                  role: result.role,
-                  status: CampusRegistrationStatus.published,
-                )
-                .toRegisteredDevice();
-            final source = await registry.stageDirectoryApproval(
-              device,
-              reviewProject,
-              dir?.version ?? 0,
+            final publishedReg = registration.copyWith(
+              identity: result.identity,
+              role: result.role,
+              status: CampusRegistrationStatus.published,
+              syncState: CampusSyncState.synced,
+              updatedAt: DateTime.now().toUtc(),
+            );
+            final device = publishedReg.toRegisteredDevice();
+            final source = await registry.buildMergedTrustBundleJson(
               publishedBundle: dir == null
                   ? null
                   : TrustBundle.fromJsonString(dir.bundle),
-              assignRole: true,
-              updateOwnerName: edited.contains('displayName'),
+              localChanges: [device],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
             );
             final bundle = TrustBundle.fromJsonString(source);
             if (refreshedApp != null) {
@@ -904,6 +907,10 @@ class _UnifiedRegistrationsWorkspaceState
               );
             }
             await registry.saveLastPublishedRoster(bundle, source);
+            await registry.saveRegistration(
+              publishedReg,
+              removePendingForRegistration: true,
+            );
           } else {
             final reviewer = ReviewerProfile(
               uid: session.uid,
@@ -927,16 +934,24 @@ class _UnifiedRegistrationsWorkspaceState
               status: CampusRegistrationStatus.published,
               syncState: CampusSyncState.synced,
             );
-            final bundle = TrustBundle.fromJsonString(approved.bundleJson);
+            final bundleJson = await registry.buildMergedTrustBundleJson(
+              publishedBundle: dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle),
+              localChanges: [publishedReg.toRegisteredDevice()],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
+            );
+            final bundle = TrustBundle.fromJsonString(bundleJson);
             await _api.publishCampusRegistration(
               session.token,
               registration: publishedReg,
               version: bundle.bundleVersion,
-              bundle: approved.bundleJson,
+              bundle: bundleJson,
               directoryUpdateTime: dir?.updateTime,
               remoteRegistrationUpdateTime: remoteReg?.updateTime,
             );
-            await registry.saveLastPublishedRoster(bundle, approved.bundleJson);
+            await registry.saveLastPublishedRoster(bundle, bundleJson);
             await registry.saveRegistration(
               publishedReg,
               removePendingForRegistration: true,
@@ -1130,19 +1145,21 @@ class _UnifiedRegistrationsWorkspaceState
           );
           final existingApp = await _api.get(session.token, link.id);
           final dir = await _api.readDirectory(session.token);
-          final devices = await registry.loadDevices();
-          final bundleJson = await registry.buildTrustBundleJson(
-            devices,
-            directoryProject: reviewProject,
-            minimumPreviousVersion: dir?.version ?? 0,
-          );
-          final parsed = TrustBundle.fromJsonString(bundleJson);
           final linkedReg = registration.copyWith(
             accountUid: link.id,
             status: CampusRegistrationStatus.published,
             syncState: CampusSyncState.synced,
             updatedAt: DateTime.now().toUtc(),
           );
+          final bundleJson = await registry.buildMergedTrustBundleJson(
+            publishedBundle: dir == null
+                ? null
+                : TrustBundle.fromJsonString(dir.bundle),
+            localChanges: [linkedReg.toRegisteredDevice()],
+            directoryProject: reviewProject,
+            minimumPreviousVersion: dir?.version ?? 0,
+          );
+          final parsed = TrustBundle.fromJsonString(bundleJson);
           final remoteReg = await _api.getDocument(
             session.token,
             'campusRegistrations',
