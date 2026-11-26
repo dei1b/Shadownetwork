@@ -367,6 +367,13 @@ class RegistrationReviewApi {
     if (reg.activePhone.deviceRegistrationJson != null)
       'deviceRegistration': reg.activePhone.deviceRegistrationJson!,
     'deviceId': reg.activePhone.deviceId,
+    if (reg.activePhone.publicKey != null &&
+        reg.activePhone.publicKey!.isNotEmpty)
+      'publicKey': reg.activePhone.publicKey!,
+    if (reg.activePhone.signingPublicKey != null &&
+        reg.activePhone.signingPublicKey!.isNotEmpty)
+      'signingPublicKey': reg.activePhone.signingPublicKey!,
+    'keyVersion': reg.activePhone.keyVersion,
     'reviewHistory': reg.reviewHistory
         .map(
           (entry) => {

@@ -412,6 +412,53 @@ function normalizeDevicesFromBundle(existingBundle) {
   return { approved, revoked };
 }
 
+function resolveRegistrationPhone(registration) {
+  if (!registration) {
+    throw new PublisherError(404, 'Registration record not found.', 'not_found');
+  }
+  let verifiedQr = null;
+  if (registration.deviceRegistration) {
+    verifiedQr = verifyDeviceRegistrationQr(registration.deviceRegistration);
+  }
+  const deviceId = String(registration.deviceId ?? verifiedQr?.deviceId ?? '').trim();
+  const publicKey = String(registration.publicKey ?? verifiedQr?.publicKey ?? '').trim();
+  const signingPublicKey = String(
+    registration.signingPublicKey ?? verifiedQr?.signingPublicKey ?? '',
+  ).trim();
+  const keyVersion = Number(
+    registration.keyVersion ?? verifiedQr?.keyVersion ?? 1,
+  );
+  if (
+    !deviceId ||
+    !publicKey ||
+    !signingPublicKey ||
+    !Number.isInteger(keyVersion) ||
+    keyVersion <= 0
+  ) {
+    throw new PublisherError(
+      400,
+      'Registration phone keys are missing and no valid device registration payload is stored.',
+      'missing_phone_keys',
+    );
+  }
+  if (verifiedQr) {
+    const strip = (v) => String(v).trim().replace(/=+$/, '');
+    if (
+      verifiedQr.deviceId.toLowerCase() !== deviceId.toLowerCase() ||
+      strip(verifiedQr.publicKey) !== strip(publicKey) ||
+      strip(verifiedQr.signingPublicKey) !== strip(signingPublicKey) ||
+      verifiedQr.keyVersion !== keyVersion
+    ) {
+      throw new PublisherError(
+        409,
+        'Stored registration phone fields do not match its signed device registration.',
+        'phone_binding_mismatch',
+      );
+    }
+  }
+  return { deviceId, publicKey, signingPublicKey, keyVersion };
+}
+
 function hasDecisionId(doc, decisionId) {
   if (!doc) return false;
   const processed = Array.isArray(doc.processedDecisionIds) ? doc.processedDecisionIds : [];
@@ -824,28 +871,40 @@ export function applyDecisionAndBuildCommit({
     if (!linkRequest || !registration) {
       throw new PublisherError(404, 'Link request or registration not found.', 'not_found');
     }
+    const phone = resolveRegistrationPhone(registration);
+    const keyLower = phone.deviceId.toLowerCase();
+    if (registration.status === 'revoked' || revoked.has(keyLower)) {
+      throw new PublisherError(
+        409,
+        'Revoked phones cannot be linked without an explicit re-approval.',
+        'revoked_registration',
+      );
+    }
+    if (
+      registration.accountUid &&
+      registration.accountUid !== linkRequest.accountUid
+    ) {
+      throw new PublisherError(
+        409,
+        'This phone registration is already linked to another account.',
+        'already_linked',
+      );
+    }
     verifyAccountLinkProof(linkRequest, {
       expectedRegistrationId: registration.registrationId,
       expectedAccountUid: linkRequest.accountUid,
-      expectedPhone: {
-        deviceId: registration.deviceId,
-        publicKey: registration.publicKey,
-        signingPublicKey: registration.signingPublicKey,
-        keyVersion: registration.keyVersion ?? 1,
-      },
+      expectedPhone: phone,
       expectedProject: directoryProject,
     });
     const reviewed = buildIdentityFieldsPayload(payload.reviewedFields ?? registration);
-    const keyLower = String(registration.deviceId).toLowerCase();
-    revoked.delete(keyLower);
     approved.set(keyLower, {
-      device_id: registration.deviceId,
+      device_id: phone.deviceId,
       owner_name: reviewed.displayName,
       role,
       status: 'approved',
-      public_key: registration.publicKey,
-      signing_public_key: registration.signingPublicKey,
-      key_version: Number(registration.keyVersion ?? 1),
+      public_key: phone.publicKey,
+      signing_public_key: phone.signingPublicKey,
+      key_version: phone.keyVersion,
       updated_at: nowIso,
     });
     directoryOwnerFields = { applicationUid: linkRequest.accountUid, registrationId };
@@ -868,6 +927,10 @@ export function applyDecisionAndBuildCommit({
       fields: {
         ...registration,
         ...reviewed,
+        deviceId: phone.deviceId,
+        publicKey: phone.publicKey,
+        signingPublicKey: phone.signingPublicKey,
+        keyVersion: phone.keyVersion,
         accountUid: linkRequest.accountUid,
         status: 'published',
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],

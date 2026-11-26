@@ -625,3 +625,136 @@ test('renewing expired publisher delegation continues directory chain, blocks al
     (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'root_authority_mismatch',
   );
 });
+
+test('approve_link rejects revoked or already-claimed phones and supports legacy desk records with only deviceRegistration', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qr = makeSignedQr('phone-legacy-link');
+
+  function makeLinkProof({ registrationId, accountUid, nonce = 'nonce-1' }) {
+    const canonical = {
+      registration_id: registrationId,
+      account_uid: accountUid,
+      directory_project: 'dnsc-pilot',
+      nonce,
+      device_id: 'phone-legacy-link',
+      public_key: qr.publicKey,
+      signing_public_key: qr.signingPublicKey,
+      key_version: 1,
+      issued_at: now.toISOString(),
+    };
+    const proofSignature = ed25519Sign(
+      `shadow-network-account-link-v1\n${canonicalJsonEncode(canonical)}`,
+      qr.signingPrivateKey,
+    );
+    return {
+      registrationId,
+      accountUid,
+      directoryProject: 'dnsc-pilot',
+      nonce,
+      deviceId: 'phone-legacy-link',
+      publicKey: qr.publicKey,
+      signingPublicKey: qr.signingPublicKey,
+      keyVersion: 1,
+      issuedAt: now.toISOString(),
+      proofSignature,
+    };
+  }
+
+  // Legacy Windows campusRegistrations document with ONLY deviceRegistration JSON (no explicit key fields).
+  const legacyRegistration = {
+    registrationId: 'reg-legacy-1',
+    source: 'qr',
+    status: 'published',
+    role: 'civilian',
+    affiliation: 'student',
+    displayName: 'Legacy Desk Student',
+    studentNumber: '2026-8801',
+    course: 'BSIT',
+    yearLevel: '3',
+    sectionSet: 'A',
+    deviceId: 'phone-legacy-link',
+    deviceRegistration: qr.rawJson,
+  };
+
+  const linked = applyDecisionAndBuildCommit({
+    action: 'approve_link',
+    decisionId: 'dec-link-ok',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    registration: legacyRegistration,
+    linkRequest: makeLinkProof({
+      registrationId: 'reg-legacy-1',
+      accountUid: 'uid-alice',
+    }),
+    payload: { registrationId: 'reg-legacy-1', role: 'civilian' },
+    now,
+  });
+  assert.equal(linked.status, 'published');
+  const writtenReg = linked.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  assert.equal(writtenReg.publicKey, qr.publicKey);
+  assert.equal(writtenReg.signingPublicKey, qr.signingPublicKey);
+  assert.equal(writtenReg.accountUid, 'uid-alice');
+
+  // Linking against a revoked directory entry fails with 409 and never un-revokes.
+  const revokedBundle = JSON.parse(linked.bundle);
+  const { sign: _s, ...bundleNoSig } = revokedBundle;
+  const revokeCommit = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-revoke-first',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: linked.bundle },
+    registration: { ...writtenReg, status: 'revoked' },
+    payload: { registrationId: 'reg-legacy-1', role: 'civilian', targetStatus: 'revoked' },
+    now,
+  });
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'approve_link',
+        decisionId: 'dec-link-revoked',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        existingDirectory: { version: 2, bundle: revokeCommit.bundle },
+        registration: { ...writtenReg, status: 'revoked', accountUid: undefined },
+        linkRequest: makeLinkProof({
+          registrationId: 'reg-legacy-1',
+          accountUid: 'uid-attacker',
+        }),
+        payload: { registrationId: 'reg-legacy-1', role: 'civilian' },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'revoked_registration',
+  );
+
+  // Linking an already-claimed registration to a different accountUid fails with 409.
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'approve_link',
+        decisionId: 'dec-link-claimed',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        existingDirectory: { version: 1, bundle: linked.bundle },
+        registration: writtenReg,
+        linkRequest: makeLinkProof({
+          registrationId: 'reg-legacy-1',
+          accountUid: 'uid-bob',
+        }),
+        payload: { registrationId: 'reg-legacy-1', role: 'civilian' },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'already_linked',
+  );
+});
