@@ -28,6 +28,49 @@ class _ReadyRecovery extends AdminRecoveryController {
 }
 
 void main() {
+  for (final disposable in [false, true]) {
+    testWidgets('publisher generation requires confirmation ($disposable)', (
+      tester,
+    ) async {
+      final controller = _TrackingRecovery();
+      await tester.binding.setSurfaceSize(const Size(1100, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [adminRecoveryProvider.overrideWith(() => controller)],
+          child: MaterialApp(
+            home: Scaffold(
+              body: AdminRecoveryPanel(
+                onSaveBackup: (_) async => false,
+                onReadBackup: () async => null,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final trigger = find.text(
+        disposable
+            ? 'Generate disposable test key'
+            : 'Authorize online publisher key',
+      );
+      await tester.ensureVisible(trigger);
+      await tester.tap(trigger);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(controller.calls, 0);
+      expect(find.textContaining('does not revoke'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(controller.calls, 0);
+      await tester.tap(trigger);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.text('Generate new key pair'));
+      await tester.pumpAndSettle();
+      expect(controller.calls, 1);
+      expect(controller.disposable, disposable);
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final scale in [1.0, 2.0]) {
     testWidgets(
       'backup fields stay separated and mismatch is attached at scale $scale',
@@ -135,4 +178,18 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+}
+
+class _TrackingRecovery extends _ReadyRecovery {
+  int calls = 0;
+  bool? disposable;
+  @override
+  Future<Never> createPublisherDelegation({
+    required String directoryProject,
+    bool disposable = false,
+  }) async {
+    calls++;
+    this.disposable = disposable;
+    throw StateError('Generation requested');
+  }
 }

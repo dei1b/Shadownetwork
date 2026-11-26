@@ -113,65 +113,93 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
     return 'Administrator backup restored. Review your devices before publishing a new trust bundle.';
   });
 
-  Future<void> _authorizePublisher({required bool disposable}) =>
-      _perform(() async {
-        final result = await ref
-            .read(adminRecoveryProvider.notifier)
-            .createPublisherDelegation(
-              directoryProject: reviewProject,
-              disposable: disposable,
-            );
-        if (!mounted) return null;
-        await showDialog<void>(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Text(
-              disposable
-                  ? 'Disposable test publisher key'
-                  : 'Authorized online publisher key',
-            ),
-            content: SizedBox(
-              width: 560,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      disposable
-                          ? 'Use these temporary credentials only with disposable test phones before release.'
-                          : 'Copy these values into Vercel environment variables for the hosted publisher. The campus root private key remains on this PC.',
-                    ),
-                    const SizedBox(height: 12),
-                    SelectableText(result.vercelEnvJson),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-              FilledButton.icon(
-                onPressed: () async {
-                  await Clipboard.setData(
-                    ClipboardData(text: result.vercelEnvJson),
-                  );
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                  }
-                },
-                icon: const Icon(Icons.content_copy_rounded),
-                label: const Text('Copy Vercel env JSON'),
-              ),
-            ],
+  Future<void> _authorizePublisher({
+    required bool disposable,
+  }) => _perform(() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          disposable
+              ? 'Generate a test publisher key?'
+              : 'Generate a new publisher key?',
+        ),
+        content: Text(
+          'Each authorization generates a new publisher key and matching delegation. '
+          'This does not revoke existing keys or change Vercel automatically. '
+          '${disposable ? 'This disposable pair is for test phones only. Do not use it for the live campus website.' : 'If Vercel already works, cancel unless you intend to create another publisher pair. To use the new pair, update BOTH PUBLISHER_PRIVATE_KEY_SEED and PUBLISHER_DELEGATION_JSON in Vercel, then redeploy. Mixing values from different pairs will prevent publishing approvals.'}',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
           ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Generate new key pair'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return null;
+    final result = await ref
+        .read(adminRecoveryProvider.notifier)
+        .createPublisherDelegation(
+          directoryProject: reviewProject,
+          disposable: disposable,
         );
-        return disposable
-            ? 'Disposable online test publisher credentials generated.'
-            : 'Online publisher delegation authorized by campus root identity.';
-      });
+    if (!mounted) return null;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          disposable
+              ? 'Disposable test publisher key'
+              : 'Authorized online publisher key',
+        ),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  disposable
+                      ? 'Use these temporary credentials only with disposable test phones before release.'
+                      : 'Copy these values into Vercel environment variables for the hosted publisher. The campus root private key remains on this PC.',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(result.vercelEnvJson),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+          FilledButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: result.vercelEnvJson),
+              );
+              if (context.mounted) {
+                Navigator.pop(context);
+              }
+            },
+            icon: const Icon(Icons.content_copy_rounded),
+            label: const Text('Copy Vercel env JSON'),
+          ),
+        ],
+      ),
+    );
+    return disposable
+        ? 'Disposable online test publisher credentials generated.'
+        : 'Online publisher delegation authorized by campus root identity.';
+  });
 
   @override
   Widget build(BuildContext context) {
