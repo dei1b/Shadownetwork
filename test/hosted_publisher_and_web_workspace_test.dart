@@ -13,6 +13,8 @@ import 'package:shadownetwork/features/security/data/services/device_identity_st
 import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
 import 'package:shadownetwork/features/security/domain/entities/device_registration_qr.dart';
 
+import 'support/signed_trust_bundle_fixture.dart';
+
 class _FakeReviewApi extends RegistrationReviewApi {
   _FakeReviewApi()
     : super(
@@ -68,6 +70,11 @@ class _FakeHostedPublisher extends HostedPublisherClient {
 
 void main() {
   test('HostedPublisherClient posts decisionId and parses response or error', () async {
+    final signer = await TestTrustBundleSigner.create();
+    final signedBundleV7 = await signer.sign(
+      bundleVersion: 7,
+      issuedAt: DateTime.utc(2026, 11, 26, 12),
+    );
     var count = 0;
     final client = HostedPublisherClient(
       endpoint: Uri.parse('https://example.test/api/publish-approval'),
@@ -87,7 +94,7 @@ void main() {
             'ok': true,
             'status': 'published',
             'version': 7,
-            'bundle': '{"bundle_version":7}',
+            'bundle': signedBundleV7,
             'registrationId': 'reg-1',
             'decisionId': 'dec-fixed-1',
             'idempotent': count > 1,
