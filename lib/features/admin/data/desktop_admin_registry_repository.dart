@@ -1103,6 +1103,18 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         if (op.kind == PendingSyncKind.publishRevocationCorrection)
           op.registrationId,
     };
+    final pendingReplacementByRegId = <String, Map<String, dynamic>>{};
+    for (final op in pendingOps) {
+      if (op.kind == PendingSyncKind.publishReplacement ||
+          op.kind == PendingSyncKind.publishRecovery) {
+        try {
+          final decoded = jsonDecode(op.payloadJson);
+          if (decoded is Map<String, dynamic>) {
+            pendingReplacementByRegId[op.registrationId] = decoded;
+          }
+        } catch (_) {}
+      }
+    }
     final registrations = await _loadRegistrations();
     final updated = <CampusRegistration>[];
     final schoolIdOwners = <String, String>{};
@@ -1166,6 +1178,15 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
           (remoteApproved.publicKey != reg.activePhone.publicKey ||
               remoteApproved.signingPublicKey !=
                   reg.activePhone.signingPublicKey)) {
+        if (_matchesPendingSameIdReplacement(
+          pendingOp: pendingReplacementByRegId[reg.registrationId],
+          registration: reg,
+          remoteApproved: remoteApproved,
+          publishedBundleVersion: published.bundleVersion,
+        )) {
+          updated.add(reg);
+          continue;
+        }
         updated.add(
           reg.copyWith(
             status: CampusRegistrationStatus.conflict,
@@ -1185,14 +1206,60 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         if (reg.status == CampusRegistrationStatus.conflict) {
           await transaction.delete(
             'admin_pending_sync',
-            where: 'registration_id = ?',
-            whereArgs: [reg.registrationId],
+            where: 'registration_id = ? AND kind NOT IN (?, ?)',
+            whereArgs: [
+              reg.registrationId,
+              PendingSyncKind.publishReplacement.name,
+              PendingSyncKind.publishRecovery.name,
+            ],
           );
         }
       }
     });
     return updated;
   });
+
+  static bool _matchesPendingSameIdReplacement({
+    required Map<String, dynamic>? pendingOp,
+    required CampusRegistration registration,
+    required TrustedDevice remoteApproved,
+    required int publishedBundleVersion,
+  }) {
+    if (pendingOp == null ||
+        registration.status != CampusRegistrationStatus.approvedLocal ||
+        registration.syncState != CampusSyncState.waitingToSync) {
+      return false;
+    }
+    final devKey = remoteApproved.deviceId.trim().toLowerCase();
+    final oldDeviceId = (pendingOp['old_device_id'] as String?)
+        ?.trim()
+        .toLowerCase();
+    final newDeviceId = (pendingOp['new_device_id'] as String?)
+        ?.trim()
+        .toLowerCase();
+    if (oldDeviceId == null || oldDeviceId != devKey) {
+      return false;
+    }
+    if (newDeviceId != null && newDeviceId.isNotEmpty && newDeviceId != devKey) {
+      return false;
+    }
+    final oldPublicKey = pendingOp['old_public_key'] as String?;
+    final oldSigningKey = pendingOp['old_signing_public_key'] as String?;
+    if ((oldPublicKey != null && oldPublicKey.isNotEmpty) ||
+        (oldSigningKey != null && oldSigningKey.isNotEmpty)) {
+      final pubMatches =
+          oldPublicKey == null ||
+          oldPublicKey.isEmpty ||
+          remoteApproved.publicKey == oldPublicKey;
+      final signMatches =
+          oldSigningKey == null ||
+          oldSigningKey.isEmpty ||
+          remoteApproved.signingPublicKey == oldSigningKey;
+      return pubMatches && signMatches;
+    }
+    final expectedVersion = pendingOp['expected_bundle_version'] as int?;
+    return expectedVersion != null && expectedVersion >= publishedBundleVersion;
+  }
 
   Future<({String bundleJson, CampusRegistration registration})>
   issueSignedCorrection({
