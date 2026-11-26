@@ -924,6 +924,12 @@ export function applyDecisionAndBuildCommit({
     };
   }
 
+  const existingRegistrationId =
+    payload.registrationId ??
+    registration?.registrationId ??
+    application?.registrationId ??
+    null;
+
   if (action === 'decline_profile_change') {
     if (!application) {
       throw new PublisherError(404, 'Online application not found.', 'not_found');
@@ -961,7 +967,7 @@ export function applyDecisionAndBuildCommit({
         requestFingerprint,
         status: 'rejected',
         version: Number(existingDirectory?.version ?? 0),
-        registrationId: application.registrationId ?? registrationId ?? null,
+        registrationId: existingRegistrationId,
         revision: nextRevision,
       }),
     };
@@ -970,7 +976,7 @@ export function applyDecisionAndBuildCommit({
       idempotent: false,
       version: Number(existingDirectory?.version ?? 0),
       bundle: existingDirectory?.bundle ?? null,
-      registrationId: nextFields.registrationId ?? null,
+      registrationId: existingRegistrationId,
       decisionId,
       writes: [
         {
@@ -987,7 +993,7 @@ export function applyDecisionAndBuildCommit({
   const nextVersion = Number(existingDirectory?.version ?? 0) + 1;
   const nowIso = now.toISOString();
   const writes = [];
-  let registrationId = payload.registrationId ?? registration?.registrationId ?? application?.registrationId ?? `reg-${crypto.randomUUID()}`;
+  let registrationId = existingRegistrationId ?? `reg-${crypto.randomUUID()}`;
   let directoryOwnerFields = {};
 
   if (action === 'approve_online') {

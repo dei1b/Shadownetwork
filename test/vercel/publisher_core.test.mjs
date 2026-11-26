@@ -1572,3 +1572,152 @@ test('R6: reusing a decisionId across different actions or canonical payloads th
     (err) => err instanceof PublisherError && err.code === 'decision_id_conflict',
   );
 });
+
+test('R9: decline_profile_change handles legacy published applications lacking registrationId without ReferenceError via HTTP handler', async () => {
+  const { default: handler } = await import('../../api/publish-approval.mjs');
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const qr = makeSignedQr('phone-r9-legacy');
+
+  // Legacy published pilotApplication intentionally has NO registrationId property.
+  let appDoc = {
+    name: 'projects/dnsc-pilot/databases/(default)/documents/pilotApplications/uid-r9-legacy',
+    updateTime: '2026-11-26T10:00:00Z',
+    fields: {
+      uid: { stringValue: 'uid-r9-legacy' },
+      affiliation: { stringValue: 'student' },
+      displayName: { stringValue: 'Legacy Active Student' },
+      studentNumber: { stringValue: '2026-9001' },
+      course: { stringValue: 'BSIT' },
+      yearLevel: { stringValue: '3' },
+      sectionSet: { stringValue: 'A' },
+      status: { stringValue: 'published' },
+      revision: { integerValue: '1' },
+      deviceRegistration: { stringValue: qr.rawJson },
+      profileChange: {
+        mapValue: {
+          fields: {
+            status: { stringValue: 'submitted' },
+            affiliation: { stringValue: 'student' },
+            displayName: { stringValue: 'Proposed Renamed Student' },
+            studentNumber: { stringValue: '2026-9002' },
+          },
+        },
+      },
+    },
+  };
+
+  let commitCount = 0;
+  const prevEnv = {
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID,
+    PUBLISHER_PRIVATE_KEY_SEED: process.env.PUBLISHER_PRIVATE_KEY_SEED,
+    PUBLISHER_DELEGATION_JSON: process.env.PUBLISHER_DELEGATION_JSON,
+    FIREBASE_AUTH_EMULATOR_HOST: process.env.FIREBASE_AUTH_EMULATOR_HOST,
+    FIRESTORE_EMULATOR_HOST: process.env.FIRESTORE_EMULATOR_HOST,
+  };
+  const prevFetch = globalThis.fetch;
+
+  process.env.FIREBASE_PROJECT_ID = 'dnsc-pilot';
+  process.env.PUBLISHER_PRIVATE_KEY_SEED = publisher.seed;
+  process.env.PUBLISHER_DELEGATION_JSON = JSON.stringify(delegation);
+  process.env.FIREBASE_AUTH_EMULATOR_HOST = '127.0.0.1:9099';
+  process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
+
+  const b64u = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const token = `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({
+    sub: 'admin-r9',
+    admin: true,
+    aud: 'dnsc-pilot',
+    iss: 'https://securetoken.google.com/dnsc-pilot',
+    exp: Math.floor(Date.now() / 1000) + 3600,
+  })}.`;
+
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (u.endsWith('/documents/pilotApplications/uid-r9-legacy')) {
+      return new Response(JSON.stringify(appDoc), { status: 200 });
+    }
+    if (u.includes('/documents/trustDirectory/current') || u.includes('/documents/campusRegistrations/')) {
+      return new Response(JSON.stringify({ error: { status: 'NOT_FOUND' } }), { status: 404 });
+    }
+    if (u.endsWith('/documents:commit')) {
+      commitCount++;
+      const parsedBody = JSON.parse(init.body);
+      assert.equal(parsedBody.writes.length, 1);
+      appDoc = {
+        name: appDoc.name,
+        updateTime: '2026-11-26T10:05:00Z',
+        fields: parsedBody.writes[0].update.fields,
+      };
+      return new Response(JSON.stringify({ writeResults: [{}] }), { status: 200 });
+    }
+    throw new Error(`Unexpected fetch URL: ${u}`);
+  };
+
+  async function invokeDecline() {
+    const result = { statusCode: 200, headers: {}, body: null };
+    const req = {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}` },
+      body: {
+        action: 'decline_profile_change',
+        decisionId: 'dec-r9-decline',
+        accountUid: 'uid-r9-legacy',
+        expectedRevision: 1,
+        reason: 'Missing registrar endorsement',
+      },
+    };
+    const res = {
+      setHeader(k, v) {
+        result.headers[k] = v;
+      },
+      status(code) {
+        result.statusCode = code;
+        return this;
+      },
+      json(obj) {
+        result.body = obj;
+        return this;
+      },
+      end() {
+        return this;
+      },
+    };
+    await handler(req, res);
+    return result;
+  }
+
+  try {
+    const first = await invokeDecline();
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.body.ok, true);
+    assert.equal(first.body.status, 'rejected');
+    assert.equal(first.body.idempotent, false);
+    assert.equal(first.body.registrationId, null);
+    assert.equal(commitCount, 1);
+    assert.equal(appDoc.fields.displayName.stringValue, 'Legacy Active Student');
+    assert.equal(
+      appDoc.fields.profileChange.mapValue.fields.status.stringValue,
+      'rejected',
+    );
+    assert.equal(
+      appDoc.fields.profileChange.mapValue.fields.reason.stringValue,
+      'Missing registrar endorsement',
+    );
+
+    const retry = await invokeDecline();
+    assert.equal(retry.statusCode, 200);
+    assert.equal(retry.body.ok, true);
+    assert.equal(retry.body.status, 'rejected');
+    assert.equal(retry.body.idempotent, true);
+    assert.equal(retry.body.registrationId, null);
+    assert.equal(commitCount, 1);
+  } finally {
+    globalThis.fetch = prevFetch;
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
