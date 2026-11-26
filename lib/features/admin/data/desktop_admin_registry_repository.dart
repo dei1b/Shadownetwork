@@ -1218,6 +1218,9 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     required int previousVersion,
     TrustBundle? publishedBundle,
     String reason = 'Approved phone replacement',
+    PendingSyncKind syncKind = PendingSyncKind.publishReplacement,
+    String? verificationMethod,
+    String? accountUid,
   }) => _serialized(() async {
     if (registration.accountUid != null &&
         registration.accountUid == reviewer.uid) {
@@ -1320,6 +1323,25 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       directoryProject,
       previousVersion,
     );
+    final syncAccountUid = accountUid ?? registration.accountUid;
+    final syncOp = PendingSyncOperation(
+      decisionId: decisionId,
+      registrationId: updatedRegistration.registrationId,
+      kind: syncKind,
+      payloadJson: jsonEncode({
+        'decision_id': decisionId,
+        'old_device_id': oldPhone.deviceId,
+        'new_device_id': resolvedPhone.deviceId,
+        if (resolvedPhone.deviceRegistrationJson != null)
+          'new_device_registration': resolvedPhone.deviceRegistrationJson,
+        'reason': reason,
+        if (verificationMethod != null)
+          'verification_method': verificationMethod,
+        if (syncAccountUid != null) 'account_uid': syncAccountUid,
+        'expected_revision': registration.revision,
+      }),
+      createdAt: now,
+    );
     await database.transaction((transaction) async {
       await _replaceDevices(transaction, nextDevices);
       await transaction.insert('admin_registrations', {
@@ -1329,6 +1351,18 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         'status': updatedRegistration.status.code,
         'sync_state': updatedRegistration.syncState.code,
         'record_json': jsonEncode(updatedRegistration.toJson()),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await transaction.delete(
+        'admin_pending_sync',
+        where: 'registration_id = ?',
+        whereArgs: [updatedRegistration.registrationId],
+      );
+      await transaction.insert('admin_pending_sync', {
+        'decision_id': syncOp.decisionId,
+        'registration_id': syncOp.registrationId,
+        'kind': syncOp.kind.name,
+        'payload_json': syncOp.payloadJson,
+        'created_at': syncOp.createdAt.toUtc().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
     return (bundleJson: bundleJson, registration: updatedRegistration);

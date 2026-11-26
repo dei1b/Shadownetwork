@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shadownetwork/core/widgets/action_feedback.dart';
@@ -621,6 +623,7 @@ class _UnifiedRegistrationsWorkspaceState
         if (reg == null || reg.status == CampusRegistrationStatus.conflict) {
           continue;
         }
+        final opPayload = _decodePendingPayload(op.payloadJson);
         final publishedReg = reg.copyWith(
           status: reg.status == CampusRegistrationStatus.revoked
               ? CampusRegistrationStatus.revoked
@@ -629,28 +632,57 @@ class _UnifiedRegistrationsWorkspaceState
           resolvedConflictVersion: null,
           updatedAt: DateTime.now().toUtc(),
         );
+        final effectiveAccountUid =
+            (opPayload['account_uid'] as String?) ?? publishedReg.accountUid;
+        final isReplacementOrRecovery =
+            op.kind == PendingSyncKind.publishReplacement ||
+            op.kind == PendingSyncKind.publishRecovery;
         final res = await _publisher.publishDecision(
           token: session.token,
-          payload: {
-            'action': 'sync_offline_decision',
-            'decisionId': op.decisionId,
-            'registrationId': publishedReg.registrationId,
-            if (publishedReg.accountUid != null)
-              'accountUid': publishedReg.accountUid,
-            'role': publishedReg.role.name,
-            'targetStatus': publishedReg.status.code,
-            'overrideConflict': op.kind == PendingSyncKind.publishRevocationCorrection,
-            'reviewedFields': publishedReg.identity.toFirestoreFields(),
-            'registration': {
-              'registrationId': publishedReg.registrationId,
-              'source': publishedReg.source.name,
-              'status': reg.status.code,
-              if (publishedReg.accountUid != null)
-                'accountUid': publishedReg.accountUid,
-              'deviceRegistration': publishedReg.activePhone.deviceRegistrationJson,
-              ...publishedReg.identity.toFirestoreFields(),
-            },
-          },
+          payload: isReplacementOrRecovery
+              ? {
+                  'action': op.kind == PendingSyncKind.publishRecovery
+                      ? 'approve_recovery'
+                      : 'approve_replacement',
+                  'decisionId': op.decisionId,
+                  'registrationId': publishedReg.registrationId,
+                  if (effectiveAccountUid != null)
+                    'accountUid': effectiveAccountUid,
+                  'role': publishedReg.role.name,
+                  'reason':
+                      (opPayload['reason'] as String?) ??
+                      'Approved phone replacement',
+                  if (op.kind == PendingSyncKind.publishRecovery)
+                    'verificationMethod':
+                        (opPayload['verification_method'] as String?) ??
+                        'desk_id_check',
+                  'deviceRegistration':
+                      (opPayload['new_device_registration'] as String?) ??
+                      publishedReg.activePhone.deviceRegistrationJson,
+                  'reviewedFields': publishedReg.identity.toFirestoreFields(),
+                }
+              : {
+                  'action': 'sync_offline_decision',
+                  'decisionId': op.decisionId,
+                  'registrationId': publishedReg.registrationId,
+                  if (effectiveAccountUid != null)
+                    'accountUid': effectiveAccountUid,
+                  'role': publishedReg.role.name,
+                  'targetStatus': publishedReg.status.code,
+                  'overrideConflict':
+                      op.kind == PendingSyncKind.publishRevocationCorrection,
+                  'reviewedFields': publishedReg.identity.toFirestoreFields(),
+                  'registration': {
+                    'registrationId': publishedReg.registrationId,
+                    'source': publishedReg.source.name,
+                    'status': reg.status.code,
+                    if (effectiveAccountUid != null)
+                      'accountUid': effectiveAccountUid,
+                    'deviceRegistration':
+                        publishedReg.activePhone.deviceRegistrationJson,
+                    ...publishedReg.identity.toFirestoreFields(),
+                  },
+                },
         );
         if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
           await registry.saveLastPublishedRoster(
@@ -685,7 +717,11 @@ class _UnifiedRegistrationsWorkspaceState
         if (reg == null || reg.status == CampusRegistrationStatus.conflict) {
           continue;
         }
+        final opPayload = _decodePendingPayload(op.payloadJson);
+        final effectiveAccountUid =
+            (opPayload['account_uid'] as String?) ?? reg.accountUid;
         final publishedReg = reg.copyWith(
+          accountUid: effectiveAccountUid,
           status: reg.status == CampusRegistrationStatus.revoked
               ? CampusRegistrationStatus.revoked
               : CampusRegistrationStatus.published,
@@ -700,14 +736,58 @@ class _UnifiedRegistrationsWorkspaceState
           minimumPreviousVersion: currentVersion,
         );
         final parsedBundle = TrustBundle.fromJsonString(bundleJson);
-        await _api.publishCampusRegistration(
-          session.token,
-          registration: publishedReg,
-          version: parsedBundle.bundleVersion,
-          bundle: bundleJson,
-          directoryUpdateTime: currentUpdateTime,
-          remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
-        );
+        final newQr =
+            (opPayload['new_device_registration'] as String?) ??
+            publishedReg.activePhone.deviceRegistrationJson ??
+            '';
+        final matchingApp = effectiveAccountUid == null
+            ? null
+            : _onlineApplications
+                  .where((a) => a.id == effectiveAccountUid)
+                  .firstOrNull;
+        final matchingRecovery = effectiveAccountUid == null
+            ? null
+            : _recoveryRequests
+                  .where((r) => r.id == effectiveAccountUid)
+                  .firstOrNull;
+        if (op.kind == PendingSyncKind.publishRecovery &&
+            matchingRecovery != null) {
+          await _api.approveRecoveryAndPublish(
+            session.token,
+            reviewerUid: session.uid,
+            verificationMethod:
+                (opPayload['verification_method'] as String?) ?? 'desk_id_check',
+            registration: publishedReg,
+            recoveryRequest: matchingRecovery,
+            existingApplication: matchingApp,
+            newDeviceRegistrationJson: newQr,
+            version: parsedBundle.bundleVersion,
+            bundle: bundleJson,
+            directoryUpdateTime: currentUpdateTime,
+            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+          );
+        } else if (op.kind == PendingSyncKind.publishReplacement &&
+            matchingApp != null) {
+          await _api.publishPhoneReplacement(
+            session.token,
+            application: matchingApp,
+            registration: publishedReg,
+            newDeviceRegistrationJson: newQr,
+            version: parsedBundle.bundleVersion,
+            bundle: bundleJson,
+            directoryUpdateTime: currentUpdateTime,
+            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+          );
+        } else {
+          await _api.publishCampusRegistration(
+            session.token,
+            registration: publishedReg,
+            version: parsedBundle.bundleVersion,
+            bundle: bundleJson,
+            directoryUpdateTime: currentUpdateTime,
+            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+          );
+        }
         await registry.saveLastPublishedRoster(parsedBundle, bundleJson);
         await registry.saveRegistration(
           publishedReg,
@@ -1252,9 +1332,29 @@ class _UnifiedRegistrationsWorkspaceState
                 ? null
                 : TrustBundle.fromJsonString(dir.bundle),
             reason: result.reason,
+            syncKind: item.recoveryRequest != null
+                ? PendingSyncKind.publishRecovery
+                : PendingSyncKind.publishReplacement,
+            verificationMethod: result.verificationMethod,
+            accountUid: item.recoveryRequest?.id ??
+                item.onlineApplication?.id ??
+                registration.accountUid,
           );
           if (_session != null && item.recoveryRequest != null) {
-            final parsed = TrustBundle.fromJsonString(staged.bundleJson);
+            final publishedReg = staged.registration.copyWith(
+              accountUid: item.recoveryRequest!.id,
+              status: CampusRegistrationStatus.published,
+              syncState: CampusSyncState.synced,
+            );
+            final mergedJson = await registry.buildMergedTrustBundleJson(
+              publishedBundle: dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle),
+              localChanges: [publishedReg.toRegisteredDevice()],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
+            );
+            final parsed = TrustBundle.fromJsonString(mergedJson);
             final remoteReg = await _api.getDocument(
               _session!.token,
               'campusRegistrations',
@@ -1268,23 +1368,35 @@ class _UnifiedRegistrationsWorkspaceState
               _session!.token,
               reviewerUid: _session!.uid,
               verificationMethod: result.verificationMethod ?? 'desk_id_check',
-              registration: staged.registration.copyWith(
-                accountUid: item.recoveryRequest!.id,
-                status: CampusRegistrationStatus.published,
-                syncState: CampusSyncState.synced,
-              ),
+              registration: publishedReg,
               recoveryRequest: item.recoveryRequest!,
               existingApplication: existingApp,
               newDeviceRegistrationJson:
                   newPhone.deviceRegistrationJson ?? '',
               version: parsed.bundleVersion,
-              bundle: staged.bundleJson,
+              bundle: mergedJson,
               directoryUpdateTime: dir?.updateTime,
               remoteRegistrationUpdateTime: remoteReg?.updateTime,
             );
-            await registry.saveLastPublishedRoster(parsed, staged.bundleJson);
+            await registry.saveLastPublishedRoster(parsed, mergedJson);
+            await registry.saveRegistration(
+              publishedReg,
+              removePendingForRegistration: true,
+            );
           } else if (_session != null && item.onlineApplication != null) {
-            final parsed = TrustBundle.fromJsonString(staged.bundleJson);
+            final publishedReg = staged.registration.copyWith(
+              status: CampusRegistrationStatus.published,
+              syncState: CampusSyncState.synced,
+            );
+            final mergedJson = await registry.buildMergedTrustBundleJson(
+              publishedBundle: dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle),
+              localChanges: [publishedReg.toRegisteredDevice()],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
+            );
+            final parsed = TrustBundle.fromJsonString(mergedJson);
             final remoteReg = await _api.getDocument(
               _session!.token,
               'campusRegistrations',
@@ -1293,18 +1405,51 @@ class _UnifiedRegistrationsWorkspaceState
             await _api.publishPhoneReplacement(
               _session!.token,
               application: item.onlineApplication!,
-              registration: staged.registration.copyWith(
-                status: CampusRegistrationStatus.published,
-                syncState: CampusSyncState.synced,
-              ),
+              registration: publishedReg,
               newDeviceRegistrationJson:
                   newPhone.deviceRegistrationJson ?? '',
               version: parsed.bundleVersion,
-              bundle: staged.bundleJson,
+              bundle: mergedJson,
               directoryUpdateTime: dir?.updateTime,
               remoteRegistrationUpdateTime: remoteReg?.updateTime,
             );
-            await registry.saveLastPublishedRoster(parsed, staged.bundleJson);
+            await registry.saveLastPublishedRoster(parsed, mergedJson);
+            await registry.saveRegistration(
+              publishedReg,
+              removePendingForRegistration: true,
+            );
+          } else if (_session != null) {
+            final publishedReg = staged.registration.copyWith(
+              status: CampusRegistrationStatus.published,
+              syncState: CampusSyncState.synced,
+            );
+            final mergedJson = await registry.buildMergedTrustBundleJson(
+              publishedBundle: dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle),
+              localChanges: [publishedReg.toRegisteredDevice()],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
+            );
+            final parsed = TrustBundle.fromJsonString(mergedJson);
+            final remoteReg = await _api.getDocument(
+              _session!.token,
+              'campusRegistrations',
+              registration.registrationId,
+            );
+            await _api.publishCampusRegistration(
+              _session!.token,
+              registration: publishedReg,
+              version: parsed.bundleVersion,
+              bundle: mergedJson,
+              directoryUpdateTime: dir?.updateTime,
+              remoteRegistrationUpdateTime: remoteReg?.updateTime,
+            );
+            await registry.saveLastPublishedRoster(parsed, mergedJson);
+            await registry.saveRegistration(
+              publishedReg,
+              removePendingForRegistration: true,
+            );
           }
           await _loadLocalState();
           if (_session != null) await _refreshOnline();
@@ -1321,6 +1466,15 @@ class _UnifiedRegistrationsWorkspaceState
         copyJson: approvalQr!.packageJson,
       );
     }
+  }
+
+  static Map<String, dynamic> _decodePendingPayload(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {}
+    return const {};
   }
 
   @override
