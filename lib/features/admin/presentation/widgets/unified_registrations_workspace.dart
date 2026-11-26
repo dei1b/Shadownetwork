@@ -666,7 +666,9 @@ class _UnifiedRegistrationsWorkspaceState
               (item.onlineApplication?.fields['replacementRequest']
                       as Map?)?['status'] ==
                   'submitted' ||
-              item.onlineApplication?.profileChange?['status'] == 'submitted',
+              item.onlineApplication?.profileChange?['status'] == 'submitted' ||
+              item.onlineApplication?.profileChange?['status'] ==
+                  'approved_pending_publication',
         'waiting_sync' => r.syncState == CampusSyncState.waitingToSync,
         'published' => r.status == CampusRegistrationStatus.published,
         'changes_requested' =>
@@ -2380,6 +2382,9 @@ class _UnifiedQueueCard extends StatelessWidget {
               if (item.onlineApplication?.profileChange?['status'] ==
                   'submitted')
                 const Chip(label: Text('Profile change')),
+              if (item.onlineApplication?.profileChange?['status'] ==
+                  'approved_pending_publication')
+                const Chip(label: Text('Profile change · ready to publish')),
             ],
           ),
           subtitle: Column(
@@ -2543,7 +2548,9 @@ class _UnifiedRegistrationEditorDialogState
     var identity = _collectIdentity();
     if (action == _EditorAction.approveProfileChange) {
       final rawChange = widget.item.onlineApplication?.profileChange;
-      if (rawChange != null && rawChange['status'] == 'submitted') {
+      if (rawChange != null &&
+          (rawChange['status'] == 'submitted' ||
+              rawChange['status'] == 'approved_pending_publication')) {
         final unchangedInForm =
             identity.affiliation == reg.identity.affiliation &&
             identity.displayName == reg.identity.displayName &&
@@ -2621,8 +2628,13 @@ class _UnifiedRegistrationEditorDialogState
         widget.item.recoveryRequest != null ||
         repStatus == 'submitted';
     final rawChange = widget.item.onlineApplication?.profileChange;
+    final profileChangeStatus = rawChange?['status'];
+    final profileChangeReadyToPublish =
+        rawChange != null &&
+        profileChangeStatus == 'approved_pending_publication';
     final profileChangePending =
-        rawChange != null && rawChange['status'] == 'submitted';
+        rawChange != null &&
+        (profileChangeStatus == 'submitted' || profileChangeReadyToPublish);
     final proposedIdentity = profileChangePending
         ? CampusIdentityFields.fromFirestoreFields({
             ...widget.item.onlineApplication!.fields,
@@ -2992,17 +3004,22 @@ class _UnifiedRegistrationEditorDialogState
             child: const Text('Approve replacement'),
           ),
         if (profileChangePending && widget.hasOnlineSession) ...[
-          OutlinedButton(
-            onPressed: selfBlocked
-                ? null
-                : () => _submit(_EditorAction.declineProfileChange),
-            child: const Text('Decline profile change'),
-          ),
+          if (!profileChangeReadyToPublish)
+            OutlinedButton(
+              onPressed: selfBlocked
+                  ? null
+                  : () => _submit(_EditorAction.declineProfileChange),
+              child: const Text('Decline profile change'),
+            ),
           FilledButton(
             onPressed: selfBlocked
                 ? null
                 : () => _submit(_EditorAction.approveProfileChange),
-            child: const Text('Approve profile change'),
+            child: Text(
+              profileChangeReadyToPublish
+                  ? 'Publish profile change'
+                  : 'Approve profile change',
+            ),
           ),
         ],
         if (reg.status == CampusRegistrationStatus.conflict &&

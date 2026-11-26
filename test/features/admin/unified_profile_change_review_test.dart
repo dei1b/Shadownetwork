@@ -22,7 +22,7 @@ class _FakeProfileChangeApi extends RegistrationReviewApi {
         ),
       );
 
-  final List<ReviewApplication> apps;
+  List<ReviewApplication> apps;
 
   @override
   Future<List<ReviewApplication>> list(String token) async => apps;
@@ -197,6 +197,153 @@ void main() {
       expect(sentFields['displayName'], 'Updated Officer');
       expect(sentFields['employeeId'], 'EMP-401');
       expect(sentFields['unit'], 'Emergency Dispatch');
+    },
+  );
+
+  testWidgets(
+    'R10: approved_pending_publication student and staff profile changes resume cleanly as Publish profile change',
+    (tester) async {
+      final signer = await TestTrustBundleSigner.create();
+      Future<DeviceRegistrationQr> makeQr(String id) async {
+        final secrets = InMemorySecretValueStore();
+        final crypto = await DeviceIdentityStore(
+          secretStore: secrets,
+        ).loadOrCreate();
+        final signing = await DeviceSigningIdentityStore(
+          secretStore: secrets,
+        ).loadOrCreate();
+        return DeviceRegistrationQr.createSigned(
+          deviceId: id,
+          identity: crypto,
+          signingIdentity: signing,
+        );
+      }
+
+      final stuQr = await makeQr('phone-r10-stu');
+      final staffQr = await makeQr('phone-r10-staff');
+      final api = _FakeProfileChangeApi([
+        ReviewApplication.fromCache(
+          id: 'uid-r10-stu',
+          updateTime: '2026-11-26T09:00:00Z',
+          fields: {
+            'affiliation': 'student',
+            'displayName': 'R10 Student Old',
+            'studentNumber': '2026-8801',
+            'course': 'BSIT',
+            'yearLevel': '3',
+            'sectionSet': 'A',
+            'status': 'published',
+            'revision': 3,
+            'registrationId': 'reg-r10-stu',
+            'deviceRegistration': jsonEncode(stuQr.toJson()),
+            'profileChange': {
+              'status': 'approved_pending_publication',
+              'reviewerUid': 'earlier-admin',
+              'affiliation': 'student',
+              'displayName': 'R10 Student Updated',
+              'studentNumber': '2026-8802',
+              'course': 'BSIT',
+              'yearLevel': '4',
+              'sectionSet': 'B',
+            },
+          },
+        ),
+        ReviewApplication.fromCache(
+          id: 'uid-r10-staff',
+          updateTime: '2026-11-26T09:05:00Z',
+          fields: {
+            'affiliation': 'staff',
+            'displayName': 'R10 Staff Old',
+            'employeeId': 'EMP-500',
+            'unit': 'Ops',
+            'status': 'published',
+            'revision': 2,
+            'registrationId': 'reg-r10-staff',
+            'deviceRegistration': jsonEncode(staffQr.toJson()),
+            'profileChange': {
+              'status': 'approved_pending_publication',
+              'reviewerUid': 'earlier-admin',
+              'affiliation': 'staff',
+              'displayName': 'R10 Staff Updated',
+              'employeeId': 'EMP-501',
+              'unit': 'DRRM Operations',
+            },
+          },
+        ),
+      ]);
+      final publisher = _CapturingProfileChangePublisher(signer);
+
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.light,
+          home: Scaffold(
+            body: UnifiedRegistrationsWorkspace(
+              reviewApi: api,
+              publisherClient: publisher,
+              initialSessionForTesting: (
+                token: 'tok',
+                uid: 'admin-resume',
+                email: 'admin@dnsc.edu.ph',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Profile change · ready to publish'),
+        findsNWidgets(2),
+      );
+
+      // Publish Student change.
+      await tester.tap(find.text('R10 Student Old'));
+      await tester.pumpAndSettle();
+      expect(find.text('Proposed profile change'), findsOneWidget);
+      expect(find.text('Decline profile change'), findsNothing);
+      final publishBtn = find.widgetWithText(
+        FilledButton,
+        'Publish profile change',
+      );
+      expect(publishBtn, findsOneWidget);
+      await tester.ensureVisible(publishBtn);
+      await tester.tap(publishBtn);
+      await tester.pumpAndSettle();
+
+      expect(publisher.payloads, hasLength(1));
+      expect(publisher.payloads[0]['action'], 'approve_profile_change');
+      expect(publisher.payloads[0]['accountUid'], 'uid-r10-stu');
+      expect(publisher.payloads[0]['expectedRevision'], 3);
+      final stuSent =
+          publisher.payloads[0]['reviewedFields'] as Map<String, Object?>;
+      expect(stuSent['displayName'], 'R10 Student Updated');
+      expect(stuSent['studentNumber'], '2026-8802');
+
+      // Publish Staff change.
+      await tester.ensureVisible(find.text('R10 Staff Old'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('R10 Staff Old'));
+      await tester.pumpAndSettle();
+      final publishStaffBtn = find.widgetWithText(
+        FilledButton,
+        'Publish profile change',
+      );
+      await tester.ensureVisible(publishStaffBtn);
+      await tester.tap(publishStaffBtn);
+      await tester.pumpAndSettle();
+
+      expect(publisher.payloads, hasLength(2));
+      expect(publisher.payloads[1]['action'], 'approve_profile_change');
+      expect(publisher.payloads[1]['accountUid'], 'uid-r10-staff');
+      expect(publisher.payloads[1]['expectedRevision'], 2);
+      final staffSent =
+          publisher.payloads[1]['reviewedFields'] as Map<String, Object?>;
+      expect(staffSent['displayName'], 'R10 Staff Updated');
+      expect(staffSent['employeeId'], 'EMP-501');
+      expect(staffSent['unit'], 'DRRM Operations');
+      expect(tester.takeException(), isNull);
     },
   );
 }
