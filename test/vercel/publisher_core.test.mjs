@@ -153,6 +153,64 @@ function phoneRequestSnapshot(input) {
   return input.action === 'approve_recovery' ? input.recoveryRequest : input.application;
 }
 
+function revokedOnlineReview() {
+  const { input, oldQr } = pendingPhoneReview('approve_replacement');
+  const revoked = applyDecisionAndBuildCommit({
+    ...input, action: 'sync_offline_decision', decisionId: 'revoke-before-restore',
+    payload: { registrationId: 'reg-s1', accountUid: 'uid-s1', targetStatus: 'revoked' },
+  });
+  return {
+    ...input, action: 'approve_online', decisionId: 'restore-reviewed-phone',
+    existingDirectory: { version: revoked.version, bundle: revoked.bundle, updateTime: 'directory-v2' },
+    registration: {
+      fields: revoked.writes.find(w => w.collection === 'campusRegistrations').fields,
+      updateTime: 'registration-revoked-v2',
+    },
+    payload: {
+      accountUid: 'uid-s1', registrationId: 'reg-s1', expectedRevision: 1,
+      restoreRevoked: true, expectedRegistrationUpdateTime: 'registration-revoked-v2',
+      expectedOldPhone: reviewedPhonePayload(oldQr, oldQr).expectedOldPhone,
+    },
+  };
+}
+
+test('explicit reapproval restores the reviewed revoked phone with published application', () => {
+  const input = revokedOnlineReview();
+  input.registration.fields.retiredKeys = [{ deviceId: 'retired-phone' }];
+  const restored = applyDecisionAndBuildCommit(input);
+  const bundle = verifyTrustBundle(JSON.parse(restored.bundle), { expectedProject: 'dnsc-pilot', now: input.now });
+  assert.deepEqual(bundle.approved_devices.map(d => d.device_id), ['phone-s1-a']);
+  assert.equal(bundle.revoked_devices.length, 0);
+  const reg = restored.writes.find(w => w.collection === 'campusRegistrations').fields;
+  assert.equal(reg.status, 'published');
+  assert.deepEqual(reg.retiredKeys, [{ deviceId: 'retired-phone' }]);
+  assert.ok(reg.reviewHistory.some(h => h.decisionId === 'revoke-before-restore'));
+  assert.ok(reg.reviewHistory.some(h => h.decisionId === input.decisionId));
+  const application = restored.writes.find(w => w.collection === 'pilotApplications').fields;
+  assert.equal(application.status, 'published');
+  assert.equal(reg.revision, application.revision);
+  const retry = applyDecisionAndBuildCommit({
+    ...input, existingDirectory: { version: restored.version, bundle: restored.bundle },
+    registration: { fields: reg, updateTime: 'registration-v3' },
+    application: { fields: application, updateTime: 'application-v3' },
+  });
+  assert.equal(retry.idempotent, true);
+  assert.deepEqual(retry.writes, []);
+});
+
+test('reapproval rejects stale registration, changed phone keys and missing explicit intent', () => {
+  for (const mutate of [
+    i => { i.payload.expectedRegistrationUpdateTime = 'older-review'; },
+    i => { i.payload.expectedOldPhone.signingPublicKey = makeEd25519().publicKeyBase64Url; },
+    i => { delete i.payload.restoreRevoked; },
+    i => { i.registration.fields.accountUid = 'different-account'; },
+  ]) {
+    const input = revokedOnlineReview();
+    mutate(input);
+    assert.throws(() => applyDecisionAndBuildCommit(input), e => e instanceof PublisherError && e.statusCode === 409);
+  }
+});
+
 function phoneRequestFields(input) {
   return input.action === 'approve_recovery'
     ? input.recoveryRequest.fields

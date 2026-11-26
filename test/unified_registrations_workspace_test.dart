@@ -153,10 +153,7 @@ class _InMemoryWorkspaceRegistry implements DesktopAdminRegistryRepository {
       expiresAt: now.add(const Duration(days: 30)),
       directoryProject: directoryProject,
     );
-    final package = ApprovalQrPackage(
-      bundleJson: bundleJson,
-      receipt: receipt,
-    );
+    final package = ApprovalQrPackage(bundleJson: bundleJson, receipt: receipt);
     return (
       bundleJson: bundleJson,
       packageJson: package.toJsonString(),
@@ -239,6 +236,42 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
+  testWidgets('pending revocation is labeled revoked instead of approved', (
+    tester,
+  ) async {
+    final registry = _InMemoryWorkspaceRegistry(
+      registrations: [
+        CampusRegistration(
+          registrationId: 'revoked-queued',
+          source: CampusRegistrationSource.online,
+          status: CampusRegistrationStatus.revoked,
+          syncState: CampusSyncState.waitingToSync,
+          identity: const CampusIdentityFields(displayName: 'Revoked Student'),
+          role: RegisteredDeviceRole.civilian,
+          activePhone: const RegistrationPhoneBinding(
+            deviceId: 'phone-revoked',
+          ),
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+        ),
+      ],
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AdminTheme.light,
+        home: Scaffold(
+          body: UnifiedRegistrationsWorkspace(
+            registry: registry,
+            reviewApi: testReviewApi,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Revoked on this PC · waiting to sync'), findsOneWidget);
+    expect(find.text('Approved on this PC · waiting to sync'), findsNothing);
+  });
+
   testWidgets('filters unified registrations by search, role, and sync state', (
     tester,
   ) async {
@@ -310,7 +343,7 @@ void main() {
     expect(find.text('Mark Villanueva'), findsOneWidget);
     expect(find.text('Approved on this PC · waiting to sync'), findsWidgets);
 
-    await tester.tap(find.text('Approved · waiting to sync').first);
+    await tester.tap(find.text('Waiting to sync').first);
     await tester.pumpAndSettle();
     expect(find.text('Ana Reyes'), findsOneWidget);
     expect(find.text('Mark Villanueva'), findsNothing);
@@ -326,68 +359,69 @@ void main() {
     expect(find.text('Mark Villanueva'), findsOneWidget);
   });
 
-  testWidgets('pasting phone QR lets admin edit staff fields and approve offline with QR dialog', (
-    tester,
-  ) async {
-    final registry = _InMemoryWorkspaceRegistry(
-      reviewerProfile: const ReviewerProfile(
-        uid: 'admin-1',
-        email: 'admin@dnsc.edu.ph',
-      ),
-    );
-    await registry.initSigner();
-    final qrJson = await makeSignedPhoneQr(
-      deviceId: 'phone-staff-qr',
-      fullName: 'Dr. Liza Cruz',
-    );
+  testWidgets(
+    'pasting phone QR lets admin edit staff fields and approve offline with QR dialog',
+    (tester) async {
+      final registry = _InMemoryWorkspaceRegistry(
+        reviewerProfile: const ReviewerProfile(
+          uid: 'admin-1',
+          email: 'admin@dnsc.edu.ph',
+        ),
+      );
+      await registry.initSigner();
+      final qrJson = await makeSignedPhoneQr(
+        deviceId: 'phone-staff-qr',
+        fullName: 'Dr. Liza Cruz',
+      );
 
-    await tester.binding.setSurfaceSize(const Size(1280, 900));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AdminTheme.light,
-        home: Scaffold(
-          body: UnifiedRegistrationsWorkspace(
-            registry: registry,
-            onRegistryChanged: () {},
-            reviewApi: testReviewApi,
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AdminTheme.light,
+          home: Scaffold(
+            body: UnifiedRegistrationsWorkspace(
+              registry: registry,
+              onRegistryChanged: () {},
+              reviewApi: testReviewApi,
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('unified-paste-qr-button')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.byKey(const ValueKey('desktop-registration-json')),
-      qrJson,
-    );
-    await tester.tap(find.text('Read registration'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('unified-paste-qr-button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('desktop-registration-json')),
+        qrJson,
+      );
+      await tester.tap(find.text('Read registration'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Review Dr. Liza Cruz'), findsOneWidget);
-    await tester.tap(find.text('Staff').first);
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Employee ID'),
-      'EMP-2026-88',
-    );
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Unit / Office'),
-      'DRRMO Office',
-    );
-    await tester.ensureVisible(find.text('Approve offline & show QR'));
-    await tester.tap(find.text('Approve offline & show QR'));
-    await tester.pumpAndSettle();
+      expect(find.text('Review Dr. Liza Cruz'), findsOneWidget);
+      await tester.tap(find.text('Staff').first);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Employee ID'),
+        'EMP-2026-88',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Unit / Office'),
+        'DRRMO Office',
+      );
+      await tester.ensureVisible(find.text('Approve offline & show QR'));
+      await tester.tap(find.text('Approve offline & show QR'));
+      await tester.pumpAndSettle();
 
-    expect(find.byType(QrImageView), findsOneWidget);
-    expect(find.text('Copy JSON'), findsOneWidget);
-    await tester.tap(find.text('Close'));
-    await tester.pumpAndSettle();
+      expect(find.byType(QrImageView), findsOneWidget);
+      expect(find.text('Copy JSON'), findsOneWidget);
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Dr. Liza Cruz'), findsOneWidget);
-    expect(find.text('Approved on this PC · waiting to sync'), findsWidgets);
-    expect(registry.pendingSync, hasLength(1));
-  });
+      expect(find.text('Dr. Liza Cruz'), findsOneWidget);
+      expect(find.text('Approved on this PC · waiting to sync'), findsWidgets);
+      expect(registry.pendingSync, hasLength(1));
+    },
+  );
 }

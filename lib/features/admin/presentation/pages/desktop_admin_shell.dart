@@ -46,6 +46,7 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
               '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
             ),
             registry: repository,
+            onlineRefreshEnabled: _selected == 0,
             onScanPhoneQr: () => showDialog<String>(
               context: context,
               builder: (_) => const WindowsRegistrationScanner(),

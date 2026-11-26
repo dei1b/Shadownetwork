@@ -152,6 +152,35 @@ Future<void> _mount(
 }
 
 void main() {
+  testWidgets(
+    'revoked online registration sends explicit reviewed reapproval',
+    (tester) async {
+      final qr = await _qr();
+      final publisher = _Publisher();
+      await _mount(
+        tester,
+        _Api(_app(qr), _registration(qr, status: 'revoked')),
+        publisher,
+      );
+      await tester.tap(find.text('Verified Student'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Restore & publish'));
+      await tester.tap(find.text('Restore & publish'));
+      await tester.pumpAndSettle();
+      expect(publisher.payloads.single['action'], 'approve_online');
+      expect(publisher.payloads.single['restoreRevoked'], true);
+      expect(
+        publisher.payloads.single['expectedRegistrationUpdateTime'],
+        '2026-11-26T10:00:00Z',
+      );
+      expect(
+        (publisher.payloads.single['expectedOldPhone']
+            as Map)['signingPublicKey'],
+        qr.signingPublicKey,
+      );
+    },
+  );
+
   testWidgets('deleted Firebase registration stays hidden after reopening', (
     tester,
   ) async {

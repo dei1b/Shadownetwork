@@ -158,6 +158,10 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       await action();
     } on StateError catch (error) {
       _message = error.message;
+    } on FormatException catch (error) {
+      _message =
+          'Phone approval could not be verified. ${error.message} '
+          'Contact campus staff if this continues.';
     } catch (_) {
       _message = 'Could not reach DNSC. Check your connection and try again.';
     } finally {
