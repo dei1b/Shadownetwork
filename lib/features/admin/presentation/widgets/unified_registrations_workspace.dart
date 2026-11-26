@@ -410,9 +410,15 @@ class _UnifiedRegistrationsWorkspaceState
         existing: existingKey == null ? null : byRegId[existingKey]?.registration,
         generatedId: existingKey ?? regIdFromApp,
       );
+      final repReq = app.fields['replacementRequest'];
+      final parsedRep = repReq is Map && repReq['status'] == 'submitted'
+          ? _parsePendingPhone(repReq['deviceRegistration'])
+          : (phone: null, error: null);
       byRegId[reg.registrationId] = _UnifiedQueueItem(
         registration: reg,
         onlineApplication: app,
+        pendingNewPhone: parsedRep.phone,
+        pendingPhoneError: parsedRep.error,
       );
       byAccountUid[app.id] = reg.registrationId;
       if (reg.activePhone.deviceId.isNotEmpty) {
@@ -486,7 +492,15 @@ class _UnifiedRegistrationsWorkspaceState
         }
       }
       if (targetId != null && byRegId[targetId] != null) {
-        byRegId[targetId] = byRegId[targetId]!.copyWith(recoveryRequest: rec);
+        final rawRecQr = rec.fields['deviceRegistration'];
+        final parsedRec = rawRecQr != null
+            ? _parsePendingPhone(rawRecQr)
+            : (phone: null, error: null);
+        byRegId[targetId] = byRegId[targetId]!.copyWith(
+          recoveryRequest: rec,
+          pendingNewPhone: parsedRec.phone,
+          pendingPhoneError: parsedRec.error,
+        );
       }
     }
 
@@ -521,6 +535,44 @@ class _UnifiedRegistrationsWorkspaceState
           .toLowerCase()
           .contains(query);
     }).toList();
+  }
+
+  static ({RegistrationPhoneBinding? phone, String? error}) _parsePendingPhone(
+    Object? raw,
+  ) {
+    if (raw is! String || raw.trim().isEmpty) {
+      return (
+        phone: null,
+        error: 'Replacement registration payload is missing.',
+      );
+    }
+    try {
+      final qr = DeviceRegistrationQr.fromJsonString(raw);
+      if (qr.deviceId.trim().isEmpty ||
+          qr.publicKey.trim().isEmpty ||
+          (qr.signingPublicKey ?? '').trim().isEmpty) {
+        return (
+          phone: null,
+          error: 'Replacement registration payload is unreadable.',
+        );
+      }
+      return (
+        phone: RegistrationPhoneBinding(
+          deviceId: qr.deviceId,
+          publicKey: qr.publicKey,
+          signingPublicKey: qr.signingPublicKey,
+          keyId: qr.keyId,
+          keyVersion: qr.keyVersion,
+          deviceRegistrationJson: raw,
+        ),
+        error: null,
+      );
+    } catch (_) {
+      return (
+        phone: null,
+        error: 'Replacement registration payload is unreadable.',
+      );
+    }
   }
 
   static String? _extractDeviceId(Object? raw) {
@@ -1268,6 +1320,19 @@ class _UnifiedRegistrationsWorkspaceState
           _notify('Phone registration linked to Firebase account.');
           break;
         case _EditorAction.approveReplacementOrRecovery:
+          final rawNewQr = item.pendingNewPhone?.deviceRegistrationJson;
+          if (rawNewQr == null || rawNewQr.trim().isEmpty) {
+            _notify('Replacement phone registration payload is missing.');
+            return;
+          }
+          try {
+            await DeviceRegistrationQr.fromJsonString(
+              rawNewQr,
+            ).verifySignature();
+          } catch (_) {
+            _notify('Replacement phone QR signature is invalid.');
+            return;
+          }
           if (_publisher.isConfigured && _session != null) {
             final decisionId = _decisionIdFor(registration.registrationId);
             final isRecovery = item.recoveryRequest != null;
@@ -1800,6 +1865,7 @@ class _UnifiedQueueItem {
     this.linkRequest,
     this.recoveryRequest,
     this.pendingNewPhone,
+    this.pendingPhoneError,
   });
 
   final CampusRegistration registration;
@@ -1807,6 +1873,7 @@ class _UnifiedQueueItem {
   final ReviewApplication? linkRequest;
   final ReviewApplication? recoveryRequest;
   final RegistrationPhoneBinding? pendingNewPhone;
+  final String? pendingPhoneError;
 
   _UnifiedQueueItem copyWith({
     CampusRegistration? registration,
@@ -1814,12 +1881,14 @@ class _UnifiedQueueItem {
     ReviewApplication? linkRequest,
     ReviewApplication? recoveryRequest,
     RegistrationPhoneBinding? pendingNewPhone,
+    String? pendingPhoneError,
   }) => _UnifiedQueueItem(
     registration: registration ?? this.registration,
     onlineApplication: onlineApplication ?? this.onlineApplication,
     linkRequest: linkRequest ?? this.linkRequest,
     recoveryRequest: recoveryRequest ?? this.recoveryRequest,
     pendingNewPhone: pendingNewPhone ?? this.pendingNewPhone,
+    pendingPhoneError: pendingPhoneError ?? this.pendingPhoneError,
   );
 }
 
@@ -1838,6 +1907,10 @@ class _UnifiedQueueCard extends StatelessWidget {
     final sourceText = reg.isLinked && reg.source == CampusRegistrationSource.qr
         ? 'Linked'
         : reg.source.label;
+    final hasOnlineReplacement =
+        (item.onlineApplication?.fields['replacementRequest']
+            as Map?)?['status'] ==
+        'submitted';
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -1862,6 +1935,8 @@ class _UnifiedQueueCard extends StatelessWidget {
                 const Chip(label: Text('Account link request')),
               if (item.recoveryRequest != null)
                 const Chip(label: Text('Lost phone recovery')),
+              if (hasOnlineReplacement)
+                const Chip(label: Text('Phone replacement')),
             ],
           ),
           subtitle: Column(
@@ -2031,9 +2106,16 @@ class _UnifiedRegistrationEditorDialogState
       ...RegisteredDeviceRole.campusRoles,
       reg.role,
     }.toList();
+    final repStatus =
+        (widget.item.onlineApplication?.fields['replacementRequest']
+            as Map?)?['status'];
+    final pendingPhone = widget.item.pendingNewPhone;
+    final pendingPhoneError = widget.item.pendingPhoneError;
     final replacementPending =
-        widget.item.pendingNewPhone != null ||
-        widget.item.recoveryRequest != null;
+        pendingPhone != null ||
+        pendingPhoneError != null ||
+        widget.item.recoveryRequest != null ||
+        repStatus == 'submitted';
     return AlertDialog(
       title: Text(
         reg.identity.displayName.isEmpty
@@ -2073,6 +2155,47 @@ class _UnifiedRegistrationEditorDialogState
                   ],
                 ),
               ),
+              if (pendingPhone != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminTheme.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Proposed replacement phone keys',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      SelectableText('Device ID: ${pendingPhone.deviceId}'),
+                      Text('Key version: v${pendingPhone.keyVersion}'),
+                      if (pendingPhone.publicKey != null)
+                        Text('Encryption key: ${pendingPhone.publicKey}'),
+                      if (pendingPhone.signingPublicKey != null)
+                        Text('Signing key: ${pendingPhone.signingPublicKey}'),
+                    ],
+                  ),
+                ),
+              ],
+              if (pendingPhoneError != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEFEF),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminTheme.action),
+                  ),
+                  child: Text(
+                    pendingPhoneError,
+                    style: const TextStyle(color: AdminTheme.action),
+                  ),
+                ),
+              ],
               const SizedBox(height: 12),
               SegmentedButton<CampusAffiliation>(
                 segments: const [
@@ -2237,7 +2360,8 @@ class _UnifiedRegistrationEditorDialogState
           ),
         if (replacementPending)
           FilledButton(
-            onPressed: selfBlocked
+            onPressed:
+                selfBlocked || pendingPhone == null || pendingPhoneError != null
                 ? null
                 : () => _submit(_EditorAction.approveReplacementOrRecovery),
             child: const Text('Approve replacement'),
