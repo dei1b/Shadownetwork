@@ -957,7 +957,7 @@ class _UnifiedRegistrationsWorkspaceState
     await _refreshOnline(reconcile: true);
     final pending = await registry.loadPendingSync();
     if (pending.isEmpty) {
-      _notify('No pending offline approvals to sync.');
+      _notify('No pending offline decisions to sync.');
       return;
     }
 
@@ -1474,12 +1474,25 @@ class _UnifiedRegistrationsWorkspaceState
           }
           final snapshot =
               registration.submittedSnapshot ?? registration.identity;
+          final restoring =
+              onlineApp != null &&
+              registration.status == CampusRegistrationStatus.revoked;
+          final reviewedRemote = restoring
+              ? _remoteRegistrations
+                    .where((r) => r.id == registration.registrationId)
+                    .firstOrNull
+              : null;
+          if (restoring && reviewedRemote == null) {
+            throw StateError(
+              'Refresh and review the revoked registration before restoring access.',
+            );
+          }
           final edited = result.identity.diffKeysFrom(snapshot);
           final decisionAction = onlineApp != null
               ? 'approve_online'
               : 'sync_offline_decision';
           final decisionDisc =
-              'approve|${onlineApp?.fields['revision'] ?? registration.revision}|${result.role.name}|${registration.activePhone.deviceId}|${canonicalJsonEncode(result.identity.toFirestoreFields())}|${result.reason.trim()}';
+              'approve|${onlineApp?.fields['revision'] ?? registration.revision}|${result.role.name}|${registration.activePhone.deviceId}|${canonicalJsonEncode(result.identity.toFirestoreFields())}|${result.reason.trim()}${restoring ? '|restore:${reviewedRemote!.updateTime}' : ''}';
           final decisionId = _decisionIdFor(
             registration.registrationId,
             action: decisionAction,
@@ -1495,6 +1508,17 @@ class _UnifiedRegistrationsWorkspaceState
                 if (onlineApp != null) 'accountUid': onlineApp.id,
                 if (onlineApp != null)
                   'expectedRevision': onlineApp.fields['revision'] as int? ?? 0,
+                if (restoring) ...{
+                  'restoreRevoked': true,
+                  'expectedRegistrationUpdateTime': reviewedRemote!.updateTime,
+                  'expectedOldPhone': {
+                    'deviceId': registration.activePhone.deviceId,
+                    'publicKey': registration.activePhone.publicKey,
+                    'signingPublicKey':
+                        registration.activePhone.signingPublicKey,
+                    'keyVersion': registration.activePhone.keyVersion,
+                  },
+                },
                 'role': result.role.name,
                 'reason': result.reason,
                 'reviewedFields': result.identity.toFirestoreFields(),
@@ -1537,7 +1561,11 @@ class _UnifiedRegistrationsWorkspaceState
             }
             await _refreshOnline();
             widget.onRegistryChanged?.call();
-            _notify('Approval published');
+            _notify(
+              restoring
+                  ? 'Phone access restored. The phone will update when it syncs.'
+                  : 'Approval published',
+            );
             break;
           }
           if (registry == null) {
@@ -1570,6 +1598,29 @@ class _UnifiedRegistrationsWorkspaceState
               updatedAt: DateTime.now().toUtc(),
             );
             final device = publishedReg.toRegisteredDevice();
+            if (restoring) {
+              final current = dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle);
+              final revokedPhone = current?.revokedDevices
+                  .where(
+                    (d) =>
+                        d.deviceId.toLowerCase() ==
+                        registration.activePhone.deviceId.toLowerCase(),
+                  )
+                  .firstOrNull;
+              if (revokedPhone == null ||
+                  revokedPhone.publicKey !=
+                      registration.activePhone.publicKey ||
+                  revokedPhone.signingPublicKey !=
+                      registration.activePhone.signingPublicKey ||
+                  revokedPhone.keyVersion !=
+                      registration.activePhone.keyVersion) {
+                throw StateError(
+                  'The published revocation changed. Refresh and review it again.',
+                );
+              }
+            }
             final source = await registry.buildMergedTrustBundleJson(
               publishedBundle: dir == null
                   ? null
@@ -1579,7 +1630,23 @@ class _UnifiedRegistrationsWorkspaceState
               minimumPreviousVersion: dir?.version ?? 0,
             );
             final bundle = TrustBundle.fromJsonString(source);
-            if (refreshedApp != null) {
+            if (restoring) {
+              _assertReviewedOldBinding(
+                registration.activePhone,
+                reviewedRemote!,
+              );
+              await _api.restoreCampusRegistration(
+                session.token,
+                registration: publishedReg,
+                reviewedRemote: reviewedRemote,
+                reviewerUid: session.uid,
+                decisionId: decisionId,
+                reason: result.reason,
+                version: bundle.bundleVersion,
+                bundle: source,
+                directoryUpdateTime: dir?.updateTime,
+              );
+            } else if (refreshedApp != null) {
               await _api.publish(
                 session.token,
                 refreshedApp,
@@ -1646,7 +1713,11 @@ class _UnifiedRegistrationsWorkspaceState
           );
           await _refreshOnline();
           widget.onRegistryChanged?.call();
-          _notify('Approval published');
+          _notify(
+            restoring
+                ? 'Phone access restored. The phone will update when it syncs.'
+                : 'Approval published',
+          );
           break;
         case _EditorAction.requestChanges:
         case _EditorAction.reject:
@@ -2628,7 +2699,7 @@ class _UnifiedRegistrationsWorkspaceState
                         for (final entry in const [
                           ('all', 'All'),
                           ('needs_review', 'Needs review'),
-                          ('waiting_sync', 'Approved · waiting to sync'),
+                          ('waiting_sync', 'Waiting to sync'),
                           ('published', 'Published'),
                           ('changes_requested', 'Changes requested'),
                           ('rejected', 'Rejected'),
@@ -2736,7 +2807,7 @@ class _UnifiedRegistrationsWorkspaceState
               if (waitingSyncCount > 0) ...[
                 const SizedBox(height: 10),
                 Text(
-                  '$waitingSyncCount offline approval(s) saved locally · waiting to sync when signed in online.',
+                  '$waitingSyncCount offline decision(s) saved locally · waiting to sync when signed in online.',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ],
@@ -2856,7 +2927,9 @@ class _UnifiedQueueCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final reg = item.registration;
     final syncLabel = reg.syncState == CampusSyncState.waitingToSync
-        ? 'Approved on this PC · waiting to sync'
+        ? reg.status == CampusRegistrationStatus.revoked
+              ? 'Revoked on this PC · waiting to sync'
+              : '${reg.status.label} · waiting to sync'
         : reg.status.label;
     final sourceText = reg.isLinked && reg.source == CampusRegistrationSource.qr
         ? 'Linked'
@@ -3646,7 +3719,12 @@ class _UnifiedRegistrationEditorDialogState
             onPressed: selfBlocked
                 ? null
                 : () => _submit(_EditorAction.approveAndPublishOnline),
-            child: const Text('Approve & publish'),
+            child: Text(
+              reg.status == CampusRegistrationStatus.revoked &&
+                      widget.item.onlineApplication != null
+                  ? 'Restore & publish'
+                  : 'Approve & publish',
+            ),
           ),
       ],
     );

@@ -463,7 +463,96 @@ class RegistrationReviewApi {
       },
       directoryWrite(
         registrationId: registration.registrationId,
-        applicationUid: registration.accountUid,
+        // This commit changes the campus record, not the account application.
+        // Supplying applicationUid selects the account-approval rule path,
+        // which rejects an unchanged, already-published account.
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
+
+  /// Restores the reviewed phone without rewriting the already-approved account
+  /// or dropping its pending profile/replacement requests and revocation audit.
+  Future<void> restoreCampusRegistration(
+    String token, {
+    required CampusRegistration registration,
+    required ReviewApplication reviewedRemote,
+    required String reviewerUid,
+    required String decisionId,
+    required String reason,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+  }) async {
+    final fields = reviewedRemote.fields;
+    final phone = registration.activePhone;
+    if (reviewedRemote.id != registration.registrationId ||
+        reviewedRemote.status != 'revoked' ||
+        reviewedRemote.updateTime.isEmpty ||
+        fields['accountUid'] != registration.accountUid ||
+        reviewerUid.isEmpty ||
+        reviewerUid == registration.accountUid ||
+        decisionId.isEmpty ||
+        phone.deviceId.trim().isEmpty ||
+        (phone.publicKey ?? '').trim().isEmpty ||
+        (phone.signingPublicKey ?? '').trim().isEmpty ||
+        registration.status != CampusRegistrationStatus.published ||
+        fields['deviceId'] != phone.deviceId ||
+        fields['publicKey'] != phone.publicKey ||
+        fields['signingPublicKey'] != phone.signingPublicKey ||
+        (fields['keyVersion'] as int? ?? 1) != phone.keyVersion) {
+      throw StateError(
+        'The revoked registration changed. Refresh and review it again.',
+      );
+    }
+    final revision = reviewedRemote.nextRevision > registration.revision
+        ? reviewedRemote.nextRevision
+        : registration.revision + 1;
+    final changes = {
+      ...registration.identity.toFirestoreFields(),
+      'status': 'published',
+      'role': registration.role.name,
+      'revision': revision,
+      'reviewHistory': [
+        ...reviewedRemote.history,
+        {
+          'decisionId': decisionId,
+          'reviewerUid': reviewerUid,
+          'status': 'published',
+          'reason': reason,
+          'revision': revision,
+          'role': registration.role.name,
+        },
+      ],
+      'processedDecisionIds': [
+        ...fields['processedDecisionIds'] as List? ?? [],
+        decisionId,
+      ],
+      'decisionOutcomes': {
+        ...fields['decisionOutcomes'] as Map? ?? {},
+        decisionId: {
+          'action': 'approve_online',
+          'status': 'published',
+          'version': version,
+          'registrationId': registration.registrationId,
+          'revision': revision,
+        },
+      },
+    };
+    await commitWrites(token, [
+      {
+        'update': {
+          'name':
+              '$documentPrefix/campusRegistrations/${registration.registrationId}',
+          'fields': changes.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'updateMask': {'fieldPaths': changes.keys.toList()},
+        'currentDocument': {'updateTime': reviewedRemote.updateTime},
+      },
+      directoryWrite(
+        registrationId: registration.registrationId,
         version: version,
         bundle: bundle,
         directoryUpdateTime: directoryUpdateTime,

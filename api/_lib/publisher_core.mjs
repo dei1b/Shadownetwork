@@ -541,6 +541,12 @@ function computeDecisionFingerprint({
       ? [...payload.editedFields].map(String).sort()
       : null,
     registration: normalizedEmbeddedReg,
+    ...(action === 'approve_online' && payload.restoreRevoked === true ? {
+      restoreRevoked: true,
+      expectedRegistrationUpdateTime: payload.expectedRegistrationUpdateTime ?? null,
+      expectedOldPhone: payload.expectedOldPhone ?? null,
+      expectedRevision: payload.expectedRevision ?? null,
+    } : {}),
     ...(action === 'delete_registration'
       ? { expectedRevision: payload.expectedRevision ?? null }
       : {}),
@@ -950,7 +956,7 @@ export function applyDecisionAndBuildCommit({
 
   const role = payload.role === 'responder' ? 'responder' : 'civilian';
   const reason = String(payload.reason ?? '').trim();
-  const nextRevision = action === 'delete_registration'
+  const nextRevision = action === 'delete_registration' || (action === 'approve_online' && payload.restoreRevoked === true)
     ? Math.max(Number(application?.revision ?? 0), Number(registration?.revision ?? 0),
         !application && !registration ? payload.expectedRevision : 0) + 1
     : Number(application?.revision ?? registration?.revision ?? 0) + 1;
@@ -1192,10 +1198,20 @@ export function applyDecisionAndBuildCommit({
     if (!application) {
       throw new PublisherError(404, 'Application not found.', 'not_found');
     }
-    if (
+    const restoring = payload.restoreRevoked === true;
+    if (restoring && (
+      application.status !== 'published' || registration?.status !== 'revoked' ||
+      registration.registrationId !== registrationId || application.registrationId !== registrationId ||
+      registration.accountUid !== application.uid ||
+      !Number.isInteger(payload.expectedRevision) || payload.expectedRevision < 0 ||
+      !regSnap.updateTime || payload.expectedRegistrationUpdateTime !== regSnap.updateTime
+    )) {
+      throw new PublisherError(409, 'The revoked registration changed. Refresh and review it again.', 'stale_restoration');
+    }
+    if (!restoring && (
       application.status !== 'submitted' &&
       application.status !== 'approved_pending_publication'
-    ) {
+    )) {
       throw new PublisherError(
         409,
         `Cannot publish online approval from application state ${application.status}.`,
@@ -1206,7 +1222,19 @@ export function applyDecisionAndBuildCommit({
     const reviewed = buildIdentityFieldsPayload(payload.reviewedFields ?? application);
     const verifiedPhone = verifyDeviceRegistrationQr(application.deviceRegistration);
     const keyLower = verifiedPhone.deviceId.toLowerCase();
-    if (revoked.has(keyLower)) {
+    if (restoring) {
+      const storedPhone = resolveRegistrationPhone(registration);
+      assertReviewedOldPhone(payload.expectedOldPhone, storedPhone);
+      assertReviewedOldPhone(verifiedPhone, storedPhone);
+      const entry = revoked.get(keyLower);
+      if (!entry) {
+        throw new PublisherError(409, 'The reviewed phone is no longer revoked. Refresh before restoring access.', 'stale_restoration');
+      }
+      assertReviewedOldPhone(payload.expectedOldPhone, {
+        deviceId: entry.device_id, publicKey: entry.public_key,
+        signingPublicKey: entry.signing_public_key, keyVersion: entry.key_version,
+      });
+    } else if (revoked.has(keyLower)) {
       throw new PublisherError(409, 'This phone is revoked in the current published directory.', 'revocation_conflict');
     }
     revoked.delete(keyLower);
@@ -1249,6 +1277,7 @@ export function applyDecisionAndBuildCommit({
       collection: 'campusRegistrations',
       docId: registrationId,
       fields: {
+        ...(restoring ? registration : {}),
         registrationId,
         source: 'online',
         status: 'published',
@@ -1260,6 +1289,10 @@ export function applyDecisionAndBuildCommit({
         publicKey: verifiedPhone.publicKey,
         signingPublicKey: verifiedPhone.signingPublicKey,
         keyVersion: verifiedPhone.keyVersion,
+        ...(restoring ? {
+          revision: nextRevision,
+          reviewHistory: [...(registration.reviewHistory ?? []), historyEntry],
+        } : {}),
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         decisionOutcomes: recordOutcome(registration, decisionId, publishedOutcome),
         updatedAt: nowIso,
