@@ -917,6 +917,7 @@ class _UnifiedRegistrationsWorkspaceState
       var currentBundle = directory == null
           ? null
           : TrustBundle.fromJsonString(directory.bundle);
+      var currentRawBundle = directory?.bundle;
       var currentVersion = directory?.version ?? 0;
       var currentUpdateTime = directory?.updateTime;
 
@@ -939,9 +940,45 @@ class _UnifiedRegistrationsWorkspaceState
           resolvedConflictVersion: null,
           updatedAt: DateTime.now().toUtc(),
         );
+        final matchingApp = effectiveAccountUid == null
+            ? null
+            : _onlineApplications
+                  .where((a) => a.id == effectiveAccountUid)
+                  .firstOrNull;
+        final matchingRecovery = effectiveAccountUid == null
+            ? null
+            : _recoveryRequests
+                  .where((r) => r.id == effectiveAccountUid)
+                  .firstOrNull;
+        final remoteReg = remoteMap[reg.registrationId];
         final isReplacementOrRecovery =
             op.kind == PendingSyncKind.publishReplacement ||
             op.kind == PendingSyncKind.publishRecovery;
+        if (isReplacementOrRecovery &&
+            currentBundle != null &&
+            currentRawBundle != null &&
+            _isFallbackReplacementCommitted(
+              op: op,
+              publishedReg: publishedReg,
+              opPayload: opPayload,
+              currentBundle: currentBundle,
+              remoteReg: remoteReg,
+              matchingApp: matchingApp,
+              matchingRecovery: matchingRecovery,
+              effectiveAccountUid: effectiveAccountUid,
+            )) {
+          await registry.saveLastPublishedRoster(
+            currentBundle,
+            currentRawBundle,
+          );
+          await registry.saveRegistration(
+            publishedReg,
+            removePendingForRegistration: true,
+          );
+          await registry.removePendingSync(op.decisionId);
+          synced++;
+          continue;
+        }
         final localChanges = isReplacementOrRecovery
             ? DesktopAdminRegistryRepository.replacementLocalChanges(
                 publishedRegistration: publishedReg,
@@ -960,16 +997,6 @@ class _UnifiedRegistrationsWorkspaceState
             (opPayload['new_device_registration'] as String?) ??
             publishedReg.activePhone.deviceRegistrationJson ??
             '';
-        final matchingApp = effectiveAccountUid == null
-            ? null
-            : _onlineApplications
-                  .where((a) => a.id == effectiveAccountUid)
-                  .firstOrNull;
-        final matchingRecovery = effectiveAccountUid == null
-            ? null
-            : _recoveryRequests
-                  .where((r) => r.id == effectiveAccountUid)
-                  .firstOrNull;
         if (op.kind == PendingSyncKind.publishRecovery &&
             matchingRecovery != null) {
           await _api.approveRecoveryAndPublish(
@@ -984,7 +1011,7 @@ class _UnifiedRegistrationsWorkspaceState
             version: parsedBundle.bundleVersion,
             bundle: bundleJson,
             directoryUpdateTime: currentUpdateTime,
-            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+            remoteRegistrationUpdateTime: remoteReg?.updateTime,
           );
         } else if (op.kind == PendingSyncKind.publishReplacement &&
             matchingApp != null) {
@@ -996,7 +1023,7 @@ class _UnifiedRegistrationsWorkspaceState
             version: parsedBundle.bundleVersion,
             bundle: bundleJson,
             directoryUpdateTime: currentUpdateTime,
-            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+            remoteRegistrationUpdateTime: remoteReg?.updateTime,
           );
         } else {
           await _api.publishCampusRegistration(
@@ -1005,7 +1032,7 @@ class _UnifiedRegistrationsWorkspaceState
             version: parsedBundle.bundleVersion,
             bundle: bundleJson,
             directoryUpdateTime: currentUpdateTime,
-            remoteRegistrationUpdateTime: remoteMap[reg.registrationId]?.updateTime,
+            remoteRegistrationUpdateTime: remoteReg?.updateTime,
           );
         }
         await registry.saveLastPublishedRoster(parsedBundle, bundleJson);
@@ -1015,6 +1042,7 @@ class _UnifiedRegistrationsWorkspaceState
         );
         await registry.removePendingSync(op.decisionId);
         currentBundle = parsedBundle;
+        currentRawBundle = bundleJson;
         currentVersion = parsedBundle.bundleVersion;
         final refreshed = await _api.readDirectory(session.token);
         currentUpdateTime = refreshed?.updateTime;
@@ -1964,6 +1992,86 @@ class _UnifiedRegistrationsWorkspaceState
       }
     }
     return bundle;
+  }
+
+  static bool _isFallbackReplacementCommitted({
+    required PendingSyncOperation op,
+    required CampusRegistration publishedReg,
+    required Map<String, dynamic> opPayload,
+    required TrustBundle currentBundle,
+    required ReviewApplication? remoteReg,
+    required ReviewApplication? matchingApp,
+    required ReviewApplication? matchingRecovery,
+    required String? effectiveAccountUid,
+  }) {
+    final newPhone = publishedReg.activePhone;
+    final newIdLower = newPhone.deviceId.trim().toLowerCase();
+    if (newIdLower.isEmpty) return false;
+    final newApproved = currentBundle.approvedDevices.any(
+      (d) =>
+          d.deviceId.trim().toLowerCase() == newIdLower &&
+          (newPhone.publicKey == null || d.publicKey == newPhone.publicKey) &&
+          (newPhone.signingPublicKey == null ||
+              d.signingPublicKey == newPhone.signingPublicKey) &&
+          d.keyVersion == newPhone.keyVersion,
+    );
+    final newNotRevoked = !currentBundle.revokedDevices.any(
+      (d) => d.deviceId.trim().toLowerCase() == newIdLower,
+    );
+    if (!newApproved || !newNotRevoked) return false;
+
+    final oldIdLower = (opPayload['old_device_id'] as String?)
+        ?.trim()
+        .toLowerCase();
+    if (oldIdLower != null &&
+        oldIdLower.isNotEmpty &&
+        oldIdLower != newIdLower) {
+      final oldRevoked = currentBundle.revokedDevices.any(
+        (d) => d.deviceId.trim().toLowerCase() == oldIdLower,
+      );
+      final oldStillApproved = currentBundle.approvedDevices.any(
+        (d) => d.deviceId.trim().toLowerCase() == oldIdLower,
+      );
+      if (!oldRevoked || oldStillApproved) return false;
+    }
+
+    final remotePhoneMatch =
+        remoteReg != null &&
+        (remoteReg.fields['deviceId'] as String? ?? '')
+                .trim()
+                .toLowerCase() ==
+            newIdLower &&
+        remoteReg.fields['publicKey'] == newPhone.publicKey &&
+        remoteReg.fields['signingPublicKey'] == newPhone.signingPublicKey &&
+        ((remoteReg.fields['keyVersion'] as int?) ?? 1) ==
+            newPhone.keyVersion &&
+        remoteReg.fields['status'] == 'published';
+    final decisionRecorded =
+        (remoteReg?.fields['processedDecisionIds'] as List?)?.contains(
+              op.decisionId,
+            ) ==
+            true ||
+        (matchingApp?.fields['processedDecisionIds'] as List?)?.contains(
+              op.decisionId,
+            ) ==
+            true;
+
+    if (op.kind == PendingSyncKind.publishRecovery) {
+      final recPublished =
+          matchingRecovery?.fields['status'] == 'published' ||
+          (matchingRecovery == null &&
+              remotePhoneMatch &&
+              (effectiveAccountUid == null ||
+                  remoteReg.fields['accountUid'] == effectiveAccountUid));
+      return recPublished || (decisionRecorded && remotePhoneMatch);
+    }
+
+    final repStatus =
+        (matchingApp?.fields['replacementRequest'] as Map?)?['status'];
+    final repPublished =
+        repStatus == 'published' ||
+        (matchingApp == null && remotePhoneMatch);
+    return repPublished || (decisionRecorded && remotePhoneMatch);
   }
 
   @override
