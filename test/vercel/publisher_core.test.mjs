@@ -14,6 +14,7 @@ import {
   verifyDeviceRegistrationQr,
   verifyTrustBundle,
 } from '../../api/_lib/publisher_core.mjs';
+import { executeDecisionWithRetry } from '../../api/publish-approval.mjs';
 
 function makeEd25519() {
   const seed = crypto.randomBytes(32);
@@ -83,6 +84,244 @@ function makeDelegation(
     root.privateKey,
   );
   return { ...unsigned, signature };
+}
+
+const phoneRequestUpdateTime = '2026-11-26T11:59:00.123456789Z';
+
+function reviewedPhonePayload(oldQr, newQr, updateTime = phoneRequestUpdateTime) {
+  const old = JSON.parse(oldQr.rawJson);
+  return {
+    deviceRegistration: newQr.rawJson,
+    expectedRequestUpdateTime: updateTime,
+    expectedOldPhone: {
+      deviceId: old.device_id,
+      publicKey: old.public_key,
+      signingPublicKey: old.signing_public_key,
+      keyVersion: old.key_version,
+    },
+  };
+}
+
+function pendingPhoneReview(action) {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const oldQr = makeSignedQr('phone-s1-a');
+  const newQr = makeSignedQr('phone-s1-b');
+  const common = {
+    reviewerUid: 'admin-s1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed.toString('base64url'),
+    publisherDelegation: makeDelegation(root, publisher),
+    now: new Date('2026-11-26T12:00:00.000Z'),
+  };
+  const initial = applyDecisionAndBuildCommit({
+    ...common,
+    action: 'approve_online',
+    decisionId: 'dec-s1-initial',
+    application: {
+      uid: 'uid-s1', status: 'submitted', revision: 0,
+      affiliation: 'student', displayName: 'Reviewed Student',
+      studentNumber: '2026-1111', course: 'BSIT', yearLevel: '3', sectionSet: 'A',
+      deviceRegistration: oldQr.rawJson,
+    },
+    payload: { registrationId: 'reg-s1' },
+  });
+  const fieldsFor = (collection) => initial.writes.find((w) => w.collection === collection).fields;
+  const request = { status: 'submitted', deviceRegistration: newQr.rawJson };
+  const input = {
+    ...common,
+    action,
+    decisionId: `dec-s1-${action}`,
+    existingDirectory: { version: initial.version, bundle: initial.bundle, updateTime: 'directory-v1' },
+    application: {
+      fields: { ...fieldsFor('pilotApplications'), ...(action === 'approve_replacement' ? { replacementRequest: request } : {}) },
+      updateTime: phoneRequestUpdateTime,
+    },
+    registration: { fields: fieldsFor('campusRegistrations'), updateTime: 'registration-v1' },
+    recoveryRequest: action === 'approve_recovery'
+      ? { fields: { ...request, accountUid: 'uid-s1' }, updateTime: phoneRequestUpdateTime }
+      : null,
+    payload: {
+      accountUid: 'uid-s1', registrationId: 'reg-s1', role: 'civilian',
+      ...reviewedPhonePayload(oldQr, newQr),
+    },
+  };
+  return { input, oldQr, newQr };
+}
+
+function phoneRequestSnapshot(input) {
+  return input.action === 'approve_recovery' ? input.recoveryRequest : input.application;
+}
+
+function phoneRequestFields(input) {
+  return input.action === 'approve_recovery'
+    ? input.recoveryRequest.fields
+    : input.application.fields.replacementRequest;
+}
+
+function assertReviewConflict(input, code = 'stale_request') {
+  const before = JSON.stringify(input);
+  assert.throws(
+    () => applyDecisionAndBuildCommit(input),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === code,
+  );
+  assert.equal(JSON.stringify(input), before, 'conflict must leave request and directory unchanged');
+}
+
+for (const action of ['approve_replacement', 'approve_recovery']) {
+  test(`S1 ${action}: preserves an identical recorded decision from before review tokens existed`, () => {
+    const legacyFingerprint = action === 'approve_replacement'
+      ? 'a6c1a007578b12a0e5cd45ca81df4011280cdd62c34664d42eecc24abd48bc2e'
+      : '47de4770daa68b02fd1acf689350dbe4858fb22c3de8f7ac0b654461cc1f5b67';
+    const result = applyDecisionAndBuildCommit({
+      action, decisionId: 'legacy-decision', reviewerUid: 'admin-s1', directoryProject: 'dnsc-pilot',
+      application: {
+        uid: 'uid-legacy-s1', status: 'published',
+        decisionOutcomes: {
+          'legacy-decision': { action, requestFingerprint: legacyFingerprint, status: 'published', version: 2, registrationId: 'reg-legacy-s1' },
+        },
+      },
+      payload: { accountUid: 'uid-legacy-s1', registrationId: 'reg-legacy-s1', deviceRegistration: 'legacy-reviewed-qr' },
+    });
+    assert.equal(result.idempotent, true);
+    assert.deepEqual(result.writes, []);
+  });
+
+  test(`S1 ${action}: accepts only the reviewed pending QR and retains atomic snapshot preconditions`, () => {
+    for (const status of ['submitted', 'approved_pending_publication']) {
+      const { input } = pendingPhoneReview(action);
+      phoneRequestFields(input).status = status;
+      // A fallback profile publication already aligned both records at revision 2.
+      input.application.fields.revision = 2;
+      input.registration.fields.revision = 2;
+      // JSON formatting does not change the exact signed QR that was reviewed.
+      input.payload.deviceRegistration = JSON.stringify(JSON.parse(input.payload.deviceRegistration), null, 2);
+      const result = applyDecisionAndBuildCommit(input);
+      assert.equal(result.version, 2);
+      assert.equal(result.idempotent, false);
+      const bundle = verifyTrustBundle(JSON.parse(result.bundle), { expectedProject: 'dnsc-pilot', now: input.now });
+      assert.deepEqual(bundle.approved_devices.map((d) => d.device_id), ['phone-s1-b']);
+      assert.deepEqual(bundle.revoked_devices.map((d) => d.device_id), ['phone-s1-a']);
+      assert.equal(result.writes.find((w) => w.collection === 'pilotApplications').updateTime, phoneRequestUpdateTime);
+      assert.equal(result.writes.find((w) => w.collection === 'campusRegistrations').updateTime, 'registration-v1');
+      const appWrite = result.writes.find((w) => w.collection === 'pilotApplications');
+      const campusWrite = result.writes.find((w) => w.collection === 'campusRegistrations');
+      assert.equal(appWrite.fields.revision, 3);
+      assert.equal(campusWrite.fields.revision, appWrite.fields.revision);
+      if (action === 'approve_recovery') {
+        const recoveryWrite = result.writes.find((w) => w.collection === 'registrationRecoveryRequests');
+        assert.equal(recoveryWrite.updateTime, phoneRequestUpdateTime);
+        assert.equal(recoveryWrite.fields.status, 'published');
+      }
+    }
+  });
+
+  test(`S1 ${action}: rejects rejected, completed, nonpending and absent requests`, () => {
+    for (const status of ['rejected', 'published', 'pending', 'changes_requested', null]) {
+      const { input } = pendingPhoneReview(action);
+      phoneRequestFields(input).status = status;
+      assertReviewConflict(input);
+    }
+    const { input } = pendingPhoneReview(action);
+    if (action === 'approve_recovery') input.recoveryRequest = null;
+    else delete input.application.fields.replacementRequest;
+    assertReviewConflict(input);
+  });
+
+  test(`S1 ${action}: never substitutes C for reviewed B, even with a current timestamp`, () => {
+    const { input } = pendingPhoneReview(action);
+    phoneRequestFields(input).deviceRegistration = makeSignedQr('phone-s1-c').rawJson;
+    assertReviewConflict(input);
+  });
+
+  test(`S1 ${action}: requires the reviewed QR and exact request metadata, including same-QR resubmission`, () => {
+    for (const mutation of [
+      (input) => { delete input.payload.deviceRegistration; },
+      (input) => { delete input.payload.expectedRequestUpdateTime; },
+      (input) => { input.payload.expectedRequestUpdateTime = ''; },
+      (input) => { input.payload.expectedRequestUpdateTime = '2026-11-26T11:59:00.123456788Z'; },
+      (input) => { phoneRequestSnapshot(input).updateTime = '2026-11-26T12:00:01Z'; },
+      (input) => { delete phoneRequestSnapshot(input).updateTime; },
+      (input) => { phoneRequestFields(input).deviceRegistration = '{invalid'; },
+      (input) => { input.payload.deviceRegistration = '{invalid'; },
+    ]) {
+      const { input } = pendingPhoneReview(action);
+      mutation(input);
+      assertReviewConflict(input);
+    }
+  });
+
+  test(`S1 ${action}: requires every reviewed old binding field and rejects a changed current phone`, () => {
+    for (const field of ['deviceId', 'publicKey', 'signingPublicKey', 'keyVersion']) {
+      for (const missing of [false, true]) {
+        const { input } = pendingPhoneReview(action);
+        if (missing) delete input.payload.expectedOldPhone[field];
+        else input.payload.expectedOldPhone[field] = field === 'keyVersion' ? 2 : 'changed';
+        assertReviewConflict(input, 'stale_phone_binding');
+      }
+    }
+    const { input } = pendingPhoneReview(action);
+    delete input.payload.expectedOldPhone;
+    assertReviewConflict(input, 'stale_phone_binding');
+    const changed = pendingPhoneReview(action).input;
+    const other = makeSignedQr('phone-s1-a');
+    Object.assign(changed.registration.fields, {
+      deviceRegistration: other.rawJson, publicKey: other.publicKey, signingPublicKey: other.signingPublicKey,
+    });
+    assertReviewConflict(changed, 'stale_phone_binding');
+  });
+
+  test(`S1 ${action}: rejects second reviewers but replays the identical decision after a newer request`, () => {
+    const { input } = pendingPhoneReview(action);
+    const first = applyDecisionAndBuildCommit(input);
+    const committed = structuredClone(input);
+    for (const write of first.writes) {
+      const key = { trustDirectory: 'existingDirectory', pilotApplications: 'application', campusRegistrations: 'registration', registrationRecoveryRequests: 'recoveryRequest' }[write.collection];
+      committed[key] = { fields: write.fields, updateTime: 'after-commit' };
+    }
+    assertReviewConflict({ ...committed, decisionId: 'second-reviewer-decision', reviewerUid: 'second-admin' });
+    phoneRequestFields(committed).status = 'submitted';
+    phoneRequestFields(committed).deviceRegistration = makeSignedQr('phone-s1-c').rawJson;
+    const retry = applyDecisionAndBuildCommit(committed);
+    assert.equal(retry.idempotent, true);
+    assert.equal(retry.version, first.version);
+    assert.deepEqual(retry.writes, []);
+    assert.equal(phoneRequestFields(committed).status, 'submitted');
+    for (const mutatePayload of [
+      (payload) => { payload.expectedRequestUpdateTime = 'different-review'; },
+      (payload) => { payload.expectedOldPhone.publicKey = 'different-old-key'; },
+    ]) {
+      const different = structuredClone(committed);
+      mutatePayload(different.payload);
+      assertReviewConflict(different, 'decision_id_conflict');
+    }
+  });
+
+  test(`S1 ${action}: a commit retry cannot approve a rejected or superseding request`, async () => {
+    for (const nextRequest of ['rejected', 'different-qr', 'same-qr-resubmitted']) {
+      const { input } = pendingPhoneReview(action);
+      let commits = 0;
+      let reads = 0;
+      const beforeDirectory = JSON.stringify(input.existingDirectory);
+      await assert.rejects(
+        executeDecisionWithRetry({
+          readState: async () => { reads++; return input; },
+          applyDecision: (state) => applyDecisionAndBuildCommit(state),
+          commitWritesFn: async () => {
+            commits++;
+            phoneRequestSnapshot(input).updateTime = '2026-11-26T12:00:02Z';
+            if (nextRequest === 'rejected') phoneRequestFields(input).status = 'rejected';
+            if (nextRequest === 'different-qr') phoneRequestFields(input).deviceRegistration = makeSignedQr('phone-s1-c').rawJson;
+            throw new PublisherError(409, 'Snapshot changed during commit.', 'firestore_commit_error');
+          },
+        }),
+        (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'stale_request',
+      );
+      assert.equal(reads, 2);
+      assert.equal(commits, 1, 'freshness failure must stop the next commit');
+      assert.equal(JSON.stringify(input.existingDirectory), beforeDirectory);
+    }
+  });
 }
 
 test('mobile browser approval publishes v1, retries idempotently, and reconciles offline desk sync into v2', () => {
@@ -273,6 +512,7 @@ test('rejects self-review, revoked conflict on offline sync, and retires old pho
       status: 'published',
       deviceRegistration: oldQr.rawJson,
       replacementRequest: { status: 'submitted', deviceRegistration: newQr.rawJson },
+      updateTime: phoneRequestUpdateTime,
     },
     registration: {
       registrationId: 'reg-carlos',
@@ -288,7 +528,7 @@ test('rejects self-review, revoked conflict on offline sync, and retires old pho
       signingPublicKey: oldQr.signingPublicKey,
       keyVersion: 1,
     },
-    payload: { registrationId: 'reg-carlos', role: 'civilian' },
+    payload: { registrationId: 'reg-carlos', role: 'civilian', ...reviewedPhonePayload(oldQr, newQr) },
     now,
   });
 
@@ -812,6 +1052,7 @@ test('same-deviceId replacement preserves replacement QR key_version 1 and incre
       revision: 1,
       deviceRegistration: firstQr.rawJson,
       replacementRequest: { status: 'submitted', deviceRegistration: secondQr.rawJson },
+      updateTime: phoneRequestUpdateTime,
     },
     registration: {
       registrationId: 'reg-cleared-node',
@@ -828,7 +1069,7 @@ test('same-deviceId replacement preserves replacement QR key_version 1 and incre
       keyVersion: 1,
       revision: 1,
     },
-    payload: { registrationId: 'reg-cleared-node', role: 'civilian' },
+    payload: { registrationId: 'reg-cleared-node', role: 'civilian', ...reviewedPhonePayload(firstQr, secondQr) },
     now,
   });
 
@@ -1131,9 +1372,10 @@ test('R1: returning to an earlier phone removes superseded revocation and signTr
     application: {
       ...appAfterV3,
       replacementRequest: { status: 'submitted', deviceRegistration: qrB.rawJson },
+      updateTime: phoneRequestUpdateTime,
     },
     registration: regAfterV3,
-    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Temporary spare phone' },
+    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Temporary spare phone', ...reviewedPhonePayload(qrA, qrB) },
     now,
   });
   const b4 = JSON.parse(v4.bundle);
@@ -1155,9 +1397,10 @@ test('R1: returning to an earlier phone removes superseded revocation and signTr
     application: {
       ...appAfterV4,
       replacementRequest: { status: 'submitted', deviceRegistration: qrA.rawJson },
+      updateTime: phoneRequestUpdateTime,
     },
     registration: regAfterV4,
-    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Returned to primary phone' },
+    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Returned to primary phone', ...reviewedPhonePayload(qrB, qrA) },
     now,
   });
   const b5 = verifyTrustBundle(JSON.parse(v5.bundle), {
@@ -1265,6 +1508,7 @@ test('R2: legacy campusRegistrations with only deviceRegistration retires old ph
       revision: 1,
       deviceRegistration: oldQr.rawJson,
       replacementRequest: { status: 'submitted', deviceRegistration: newQr.rawJson },
+      updateTime: phoneRequestUpdateTime,
     },
     registration: {
       registrationId: 'reg-r2-owner',
@@ -1278,7 +1522,7 @@ test('R2: legacy campusRegistrations with only deviceRegistration retires old ph
       deviceRegistration: oldQr.rawJson,
       revision: 1,
     },
-    payload: { registrationId: 'reg-r2-owner', accountUid: 'uid-r2-owner', role: 'civilian', reason: 'New handset' },
+    payload: { registrationId: 'reg-r2-owner', accountUid: 'uid-r2-owner', role: 'civilian', reason: 'New handset', ...reviewedPhonePayload(oldQr, newQr) },
     now,
   });
 

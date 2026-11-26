@@ -8,6 +8,17 @@ import 'package:shadownetwork/features/registration/data/registration_review_api
 import 'package:shadownetwork/features/registration/domain/campus_identity_fields.dart';
 
 void main() {
+  test('S6: profile rules require matching campus identity and revision', () {
+    final rules = File('firestore.rules').readAsStringSync();
+    expect(rules, contains('profileCampusMatches(uid, before, after)'));
+    expect(rules, contains('sameCampusIdentity(after, getAfter(reg).data)'));
+    expect(
+      rules,
+      contains("after.revision == nextProfileRevision(before, reg)"),
+    );
+    expect(rules, contains("getAfter(reg).data.revision == after.revision"));
+  });
+
   final baseCollection = Uri.https(
     'firestore.googleapis.com',
     '/v1/projects/dnsc-test/databases/(default)/documents/pilotApplications',
@@ -68,10 +79,9 @@ void main() {
       expect(writes, hasLength(2));
 
       final appWrite = writes[0];
-      expect(
-        appWrite['currentDocument'],
-        {'updateTime': '2026-11-26T10:00:00Z'},
-      );
+      expect(appWrite['currentDocument'], {
+        'updateTime': '2026-11-26T10:00:00Z',
+      });
       final appUpdate = appWrite['update'] as Map<String, dynamic>;
       expect(
         appUpdate['name'],
@@ -90,16 +100,17 @@ void main() {
       expect(decodedApp.profileChange?['reviewerUid'], 'uid-admin-1');
 
       final dirWrite = writes[1];
-      expect(
-        dirWrite['currentDocument'],
-        {'updateTime': '2026-11-26T09:00:00Z'},
-      );
+      expect(dirWrite['currentDocument'], {
+        'updateTime': '2026-11-26T09:00:00Z',
+      });
       final dirUpdate = dirWrite['update'] as Map<String, dynamic>;
       expect(dirUpdate['name'], endsWith('/documents/trustDirectory/current'));
       final dirFields = dirUpdate['fields'] as Map<String, dynamic>;
       expect(dirFields['applicationUid'], {'stringValue': 'uid-stu-1'});
       expect(dirFields['version'], {'integerValue': '4'});
-      expect(dirFields['bundle'], {'stringValue': '{"bundle":"signed-student"}'});
+      expect(dirFields['bundle'], {
+        'stringValue': '{"bundle":"signed-student"}',
+      });
     },
   );
 
@@ -209,7 +220,8 @@ void main() {
       final api = RegistrationReviewApi(
         baseCollection,
         client: MockClient(
-          (_) async => http.Response('{"error":{"message":"PERMISSION_DENIED"}}', 403),
+          (_) async =>
+              http.Response('{"error":{"message":"PERMISSION_DENIED"}}', 403),
         ),
       );
       final selfApp = ReviewApplication.fromCache(
@@ -217,10 +229,7 @@ void main() {
         updateTime: '2026-11-26T10:00:00Z',
         fields: {
           'status': 'published',
-          'profileChange': {
-            'status': 'submitted',
-            'displayName': 'Self Edit',
-          },
+          'profileChange': {'status': 'submitted', 'displayName': 'Self Edit'},
         },
       );
       await expectLater(
@@ -258,7 +267,9 @@ void main() {
       expect(rules, contains("'phone', 'address'"));
       expect(
         rules,
-        contains("after.get('phone', '') == after.profileChange.get('phone', '')"),
+        contains(
+          "after.get('phone', '') == after.profileChange.get('phone', '')",
+        ),
       );
       expect(
         rules,
@@ -326,8 +337,9 @@ void main() {
       );
 
       expect(bodies, hasLength(1));
-      final appUpdate = ((bodies.single['writes'] as List).first as Map)['update']
-          as Map<String, dynamic>;
+      final appUpdate =
+          ((bodies.single['writes'] as List).first as Map)['update']
+              as Map<String, dynamic>;
       final decoded = ReviewApplication({
         'name': appUpdate['name'],
         'updateTime': '2026-11-26T10:00:00Z',

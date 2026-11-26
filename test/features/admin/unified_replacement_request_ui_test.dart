@@ -203,12 +203,24 @@ void main() {
       await tester.ensureVisible(
         find.widgetWithText(FilledButton, 'Approve replacement'),
       );
-      await tester.tap(find.widgetWithText(FilledButton, 'Approve replacement'));
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Approve replacement'),
+      );
       await tester.pumpAndSettle();
 
       expect(publisher.payloads, hasLength(1));
       expect(publisher.payloads.single['action'], 'approve_replacement');
       expect(publisher.payloads.single['deviceRegistration'], newQrJson);
+      expect(
+        publisher.payloads.single['expectedRequestUpdateTime'],
+        validApp.updateTime,
+      );
+      expect(publisher.payloads.single['expectedOldPhone'], {
+        'deviceId': validOldQr.deviceId,
+        'publicKey': validOldQr.publicKey,
+        'signingPublicKey': validOldQr.signingPublicKey,
+        'keyVersion': validOldQr.keyVersion,
+      });
     },
   );
 }

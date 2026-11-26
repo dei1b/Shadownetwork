@@ -258,13 +258,56 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         );
       }
     }
-    final localDevices = await _loadDevices();
-    for (final local in localDevices) {
-      final keyLower = local.deviceId.trim().toLowerCase();
-      if (!mergedById.containsKey(keyLower) &&
-          (local.status == RegisteredDeviceStatus.approved ||
-              local.status == RegisteredDeviceStatus.revoked)) {
-        mergedById[keyLower] = local;
+    // Each publication contains only its explicit decision. Other local rows
+    // may be staged approvals, revocations or replacement targets still queued.
+    if (publishedBundle != null) {
+      final registrations = {
+        for (final reg in await _loadRegistrations()) reg.registrationId: reg,
+      };
+      for (final op in await _loadPendingSync()) {
+        if (op.kind != PendingSyncKind.publishReplacement &&
+            op.kind != PendingSyncKind.publishRecovery) {
+          continue;
+        }
+        final reg = registrations[op.registrationId];
+        if (reg == null) continue;
+        final changed = localChanges
+            .where(
+              (device) =>
+                  device.status == RegisteredDeviceStatus.approved &&
+                  device.deviceId.trim().toLowerCase() ==
+                      reg.activePhone.deviceId.trim().toLowerCase(),
+            )
+            .firstOrNull;
+        if (changed == null) continue;
+        final remoteRevoked = publishedBundle.revokedDevices
+            .where(
+              (device) =>
+                  device.deviceId.trim().toLowerCase() ==
+                  changed.deviceId.trim().toLowerCase(),
+            )
+            .firstOrNull;
+        if (remoteRevoked == null) continue;
+        Map<String, dynamic>? payload;
+        try {
+          final decoded = jsonDecode(op.payloadJson);
+          if (decoded is Map<String, dynamic>) payload = decoded;
+        } on FormatException {
+          // A missing or unreadable review snapshot cannot override revocation.
+        }
+        if (changed.publicKey != reg.activePhone.publicKey ||
+            changed.signingPublicKey != reg.activePhone.signingPublicKey ||
+            changed.keyVersion != reg.activePhone.keyVersion ||
+            !_matchesReviewedTargetRevocation(
+              pendingOp: payload,
+              registration: reg,
+              remoteRevoked: remoteRevoked,
+              publishedBundleVersion: publishedBundle.bundleVersion,
+            )) {
+          throw StateError(
+            'The replacement target has an unreviewed published revocation. Review it before publishing.',
+          );
+        }
       }
     }
     for (final changed in localChanges) {
@@ -1161,6 +1204,15 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
 
       if (remoteRevoked != null &&
           reg.status == CampusRegistrationStatus.approvedLocal) {
+        if (_matchesReviewedTargetRevocation(
+          pendingOp: pendingReplacementByRegId[reg.registrationId],
+          registration: reg,
+          remoteRevoked: remoteRevoked,
+          publishedBundleVersion: published.bundleVersion,
+        )) {
+          updated.add(reg);
+          continue;
+        }
         final examinedVersion = reg.resolvedConflictVersion;
         if (pendingCorrectionRegIds.contains(reg.registrationId) &&
             examinedVersion != null &&
@@ -1222,6 +1274,39 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     });
     return updated;
   });
+
+  static bool _matchesReviewedTargetRevocation({
+    required Map<String, dynamic>? pendingOp,
+    required CampusRegistration registration,
+    required TrustedDevice remoteRevoked,
+    required int publishedBundleVersion,
+  }) {
+    if (pendingOp == null ||
+        registration.status != CampusRegistrationStatus.approvedLocal ||
+        registration.syncState != CampusSyncState.waitingToSync ||
+        registration.pendingDecisionId != pendingOp['decision_id']) {
+      return false;
+    }
+    final reviewedVersion = pendingOp['reviewed_bundle_version'];
+    final reviewedTarget = pendingOp['reviewed_target_revocation'];
+    final reviewedBinding = pendingOp['new_phone_binding'];
+    if (reviewedVersion is! int ||
+        reviewedVersion > publishedBundleVersion ||
+        reviewedTarget is! Map<String, dynamic> ||
+        reviewedBinding is! Map<String, dynamic>) {
+      return false;
+    }
+    final phone = registration.activePhone;
+    return reviewedBinding['device_id'] == phone.deviceId &&
+        reviewedBinding['public_key'] == phone.publicKey &&
+        reviewedBinding['signing_public_key'] == phone.signingPublicKey &&
+        reviewedBinding['key_version'] == phone.keyVersion &&
+        // Compare the full reviewed record, including its revocation timestamp.
+        // An unrelated publication may advance the bundle version; a changed
+        // revocation or binding always needs another review.
+        canonicalJsonEncode(reviewedTarget) ==
+            canonicalJsonEncode(remoteRevoked.toJson());
+  }
 
   static bool _matchesPendingSameIdReplacement({
     required Map<String, dynamic>? pendingOp,
@@ -1430,6 +1515,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     PendingSyncKind syncKind = PendingSyncKind.publishReplacement,
     String? verificationMethod,
     String? accountUid,
+    String? expectedRequestUpdateTime,
   }) => _serialized(() async {
     if (registration.accountUid != null &&
         registration.accountUid == reviewer.uid) {
@@ -1445,6 +1531,13 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         project: directoryProject,
       );
     }
+    final reviewedTargetRevocation = publishedBundle?.revokedDevices
+        .where(
+          (device) =>
+              device.deviceId.trim().toLowerCase() ==
+              newPhone.deviceId.trim().toLowerCase(),
+        )
+        .firstOrNull;
     final now = DateTime.now().toUtc();
     final oldPhone = registration.activePhone;
     final sameId =
@@ -1570,6 +1663,13 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         'old_role': registration.role.name,
         'expected_bundle_version': previousVersion,
         'new_device_id': resolvedPhone.deviceId,
+        'new_phone_binding': resolvedPhone.toJson(),
+        if (publishedBundle != null)
+          'reviewed_bundle_version': publishedBundle.bundleVersion,
+        if (reviewedTargetRevocation != null)
+          'reviewed_target_revocation': reviewedTargetRevocation.toJson(),
+        if (expectedRequestUpdateTime != null)
+          'expected_request_update_time': expectedRequestUpdateTime,
         if (resolvedPhone.deviceRegistrationJson != null)
           'new_device_registration': resolvedPhone.deviceRegistrationJson,
         'reason': reason,

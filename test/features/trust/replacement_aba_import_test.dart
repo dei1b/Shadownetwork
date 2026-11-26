@@ -89,7 +89,9 @@ void main() {
         directoryProject: 'dnsc-pilot',
       );
       final rootFingerprint = sha256
-          .convert(base64Url.decode(delegationResult.delegation.rootIssuer.publicKey))
+          .convert(
+            base64Url.decode(delegationResult.delegation.rootIssuer.publicKey),
+          )
           .toString();
 
       final script = '''
@@ -151,9 +153,9 @@ const v3 = applyDecisionAndBuildCommit({
   publisherSeed: input.seed,
   publisherDelegation: input.delegation,
   existingDirectory: { version: 2, bundle: v2.bundle },
-  application: { ...app2, replacementRequest: { status: 'submitted', deviceRegistration: input.qrB } },
+  application: { id: 'uid-aba', updateTime: 'review-b', fields: { ...app2, replacementRequest: { status: 'submitted', deviceRegistration: input.qrB } } },
   registration: reg2,
-  payload: { registrationId: 'reg-aba', accountUid: 'uid-aba', role: 'civilian', reason: 'Switch to B' },
+  payload: { registrationId: 'reg-aba', accountUid: 'uid-aba', role: 'civilian', reason: 'Switch to B', deviceRegistration: input.qrB, expectedRequestUpdateTime: 'review-b', expectedOldPhone: { deviceId: reg2.deviceId, publicKey: reg2.publicKey, signingPublicKey: reg2.signingPublicKey, keyVersion: reg2.keyVersion } },
   now,
 });
 const app3 = v3.writes.find((w) => w.collection === 'pilotApplications').fields;
@@ -166,9 +168,9 @@ const v4 = applyDecisionAndBuildCommit({
   publisherSeed: input.seed,
   publisherDelegation: input.delegation,
   existingDirectory: { version: 3, bundle: v3.bundle },
-  application: { ...app3, replacementRequest: { status: 'submitted', deviceRegistration: input.qrA } },
+  application: { id: 'uid-aba', updateTime: 'review-a', fields: { ...app3, replacementRequest: { status: 'submitted', deviceRegistration: input.qrA } } },
   registration: reg3,
-  payload: { registrationId: 'reg-aba', accountUid: 'uid-aba', role: 'civilian', reason: 'Return to A' },
+  payload: { registrationId: 'reg-aba', accountUid: 'uid-aba', role: 'civilian', reason: 'Return to A', deviceRegistration: input.qrA, expectedRequestUpdateTime: 'review-a', expectedOldPhone: { deviceId: reg3.deviceId, publicKey: reg3.publicKey, signingPublicKey: reg3.signingPublicKey, keyVersion: reg3.keyVersion } },
   now,
 });
 console.log(JSON.stringify([v1.bundle, v2.bundle, v3.bundle, v4.bundle]));
@@ -187,7 +189,8 @@ console.log(JSON.stringify([v1.bundle, v2.bundle, v3.bundle, v4.bundle]));
         }),
       ]);
       expect(result.exitCode, 0, reason: '${result.stderr}');
-      final bundles = (jsonDecode(result.stdout as String) as List).cast<String>();
+      final bundles = (jsonDecode(result.stdout as String) as List)
+          .cast<String>();
       expect(bundles, hasLength(4));
 
       final importerA = TrustBundleStore();
@@ -204,9 +207,7 @@ console.log(JSON.stringify([v1.bundle, v2.bundle, v3.bundle, v4.bundle]));
       expect(latestBundle, isNotNull);
       expect(latestBundle!.bundleVersion, 4);
       expect(
-        latestBundle.approvedDevices.where(
-          (d) => d.ownerName == 'ABA Student',
-        ),
+        latestBundle.approvedDevices.where((d) => d.ownerName == 'ABA Student'),
         hasLength(1),
       );
       expect(

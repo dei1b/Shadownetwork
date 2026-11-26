@@ -297,7 +297,9 @@ class _UnifiedRegistrationsWorkspaceState
     uidCtrl.dispose();
     emailCtrl.dispose();
     if (confirmed == null) {
-      throw StateError('Reviewer identity is required before offline approval.');
+      throw StateError(
+        'Reviewer identity is required before offline approval.',
+      );
     }
     if (widget.registry != null) {
       await widget.registry!.saveReviewerProfile(confirmed);
@@ -423,7 +425,9 @@ class _UnifiedRegistrationsWorkspaceState
                 (phoneId == null ? null : byDeviceId[phoneId.toLowerCase()]);
       final reg = _registrationFromApplication(
         app,
-        existing: existingKey == null ? null : byRegId[existingKey]?.registration,
+        existing: existingKey == null
+            ? null
+            : byRegId[existingKey]?.registration,
         generatedId: existingKey ?? regIdFromApp,
       );
       final repReq = app.fields['replacementRequest'];
@@ -443,13 +447,16 @@ class _UnifiedRegistrationsWorkspaceState
     }
 
     for (final remote in _remoteRegistrations) {
-      final regId = (remote.fields['registrationId'] as String? ?? remote.id).trim();
+      final regId = (remote.fields['registrationId'] as String? ?? remote.id)
+          .trim();
       if (regId.isEmpty) continue;
       final accUid = (remote.fields['accountUid'] as String?)?.trim();
       final identity = CampusIdentityFields.fromFirestoreFields(remote.fields);
       final roleRaw = (remote.fields['role'] as String?)?.trim();
       final role = RegisteredDeviceRole.fromCode(roleRaw);
-      final status = CampusRegistrationStatus.fromCode(remote.fields['status'] as String?);
+      final status = CampusRegistrationStatus.fromCode(
+        remote.fields['status'] as String?,
+      );
       final phoneId = (remote.fields['deviceId'] as String? ?? '').trim();
       final rawRemoteQr = remote.fields['deviceRegistration'];
       final parsedRemoteQr =
@@ -461,8 +468,7 @@ class _UnifiedRegistrationsWorkspaceState
         deviceId: phoneId.isNotEmpty
             ? phoneId
             : (parsedQrPhone?.deviceId ?? ''),
-        publicKey:
-            (remote.fields['publicKey'] as String?)?.isNotEmpty == true
+        publicKey: (remote.fields['publicKey'] as String?)?.isNotEmpty == true
             ? remote.fields['publicKey'] as String
             : parsedQrPhone?.publicKey,
         signingPublicKey:
@@ -479,7 +485,9 @@ class _UnifiedRegistrationsWorkspaceState
       final remoteEffectivePhoneId = remotePhone.deviceId;
       final existingKey = byRegId.containsKey(regId)
           ? regId
-          : (accUid != null && accUid.isNotEmpty && byAccountUid.containsKey(accUid))
+          : (accUid != null &&
+                accUid.isNotEmpty &&
+                byAccountUid.containsKey(accUid))
           ? byAccountUid[accUid]
           : (remoteEffectivePhoneId.isNotEmpty
                 ? byDeviceId[remoteEffectivePhoneId.toLowerCase()]
@@ -491,29 +499,10 @@ class _UnifiedRegistrationsWorkspaceState
             existing.syncState != CampusSyncState.waitingToSync &&
             existing.status != CampusRegistrationStatus.conflict;
         final remoteRevision = remote.fields['revision'] as int?;
-        final remoteUpdated = DateTime.tryParse(remote.updateTime)?.toUtc();
-        final existingUpdated = DateTime.tryParse(
-          existingItem.onlineApplication?.updateTime ??
-              existing.remoteUpdateTime ??
-              '',
-        )?.toUtc();
-        final bool remoteIsAuthoritative;
-        if (!canOverrideStatus) {
-          remoteIsAuthoritative = false;
-        } else if (remoteRevision != null &&
-            existing.revision > 0 &&
-            remoteRevision != existing.revision) {
-          remoteIsAuthoritative = remoteRevision > existing.revision;
-        } else if (remoteUpdated != null && existingUpdated != null) {
-          remoteIsAuthoritative = !remoteUpdated.isBefore(existingUpdated);
-        } else {
-          remoteIsAuthoritative =
-              remoteUpdated != null ||
-              existing.activePhone.deviceId.isEmpty ||
-              status == CampusRegistrationStatus.revoked ||
-              (status == CampusRegistrationStatus.published &&
-                  existing.status != CampusRegistrationStatus.published);
-        }
+        // Campus registration owns access, binding and reviewed identity.
+        // Applicant contact saves have independent revisions/timestamps and
+        // cannot reinstate access or replace that reviewed snapshot.
+        final remoteIsAuthoritative = canOverrideStatus;
 
         final mergedStatus = !canOverrideStatus
             ? existing.status
@@ -571,7 +560,9 @@ class _UnifiedRegistrationsWorkspaceState
       }
       final reg = CampusRegistration(
         registrationId: regId,
-        source: CampusRegistrationSource.fromCode(remote.fields['source'] as String?),
+        source: CampusRegistrationSource.fromCode(
+          remote.fields['source'] as String?,
+        ),
         status: status,
         syncState: CampusSyncState.synced,
         accountUid: accUid?.isEmpty == true ? null : accUid,
@@ -581,7 +572,10 @@ class _UnifiedRegistrationsWorkspaceState
         activePhone: remotePhone,
         revision: (remote.fields['revision'] as int?) ?? 0,
         createdAt: DateTime.now().toUtc(),
-        updatedAt: DateTime.tryParse(remote.fields['updatedAt'] as String? ?? '')?.toUtc() ??
+        updatedAt:
+            DateTime.tryParse(
+              remote.fields['updatedAt'] as String? ?? '',
+            )?.toUtc() ??
             DateTime.now().toUtc(),
         remoteUpdateTime: remote.updateTime,
       );
@@ -827,7 +821,8 @@ class _UnifiedRegistrationsWorkspaceState
       submittedSnapshot: existing?.submittedSnapshot ?? identity,
       role: assignedRole,
       activePhone: qr == null
-          ? existing?.activePhone ?? const RegistrationPhoneBinding(deviceId: '')
+          ? existing?.activePhone ??
+                const RegistrationPhoneBinding(deviceId: '')
           : RegistrationPhoneBinding(
               deviceId: qr.deviceId,
               publicKey: qr.publicKey,
@@ -891,6 +886,14 @@ class _UnifiedRegistrationsWorkspaceState
                       : 'approve_replacement',
                   'decisionId': op.decisionId,
                   'registrationId': publishedReg.registrationId,
+                  'expectedRequestUpdateTime':
+                      opPayload['expected_request_update_time'],
+                  'expectedOldPhone': {
+                    'deviceId': opPayload['old_device_id'],
+                    'publicKey': opPayload['old_public_key'],
+                    'signingPublicKey': opPayload['old_signing_public_key'],
+                    'keyVersion': opPayload['old_key_version'] ?? 1,
+                  },
                   if (effectiveAccountUid != null)
                     'accountUid': effectiveAccountUid,
                   'role': publishedReg.role.name,
@@ -1021,6 +1024,42 @@ class _UnifiedRegistrationsWorkspaceState
           synced++;
           continue;
         }
+        if (isReplacementOrRecovery) {
+          final request = op.kind == PendingSyncKind.publishRecovery
+              ? matchingRecovery
+              : matchingApp;
+          if (request == null &&
+              opPayload['expected_request_update_time'] != null) {
+            throw StateError(
+              'The reviewed phone request is missing. Refresh and review it again before syncing.',
+            );
+          }
+          if (request != null) {
+            final reviewedTime = opPayload['expected_request_update_time'];
+            final requestFields = op.kind == PendingSyncKind.publishRecovery
+                ? request.fields
+                : request.fields['replacementRequest'] as Map?;
+            if (reviewedTime == null ||
+                reviewedTime != request.updateTime ||
+                ![
+                  'submitted',
+                  'approved_pending_publication',
+                ].contains(requestFields?['status'])) {
+              throw StateError(
+                'The phone request changed. Refresh and review it again before syncing.',
+              );
+            }
+          }
+          _assertReviewedOldBinding(
+            RegistrationPhoneBinding(
+              deviceId: opPayload['old_device_id'] as String? ?? '',
+              publicKey: opPayload['old_public_key'] as String?,
+              signingPublicKey: opPayload['old_signing_public_key'] as String?,
+              keyVersion: opPayload['old_key_version'] as int? ?? 1,
+            ),
+            remoteReg ?? matchingApp,
+          );
+        }
         final localChanges = isReplacementOrRecovery
             ? DesktopAdminRegistryRepository.replacementLocalChanges(
                 publishedRegistration: publishedReg,
@@ -1045,7 +1084,8 @@ class _UnifiedRegistrationsWorkspaceState
             session.token,
             reviewerUid: session.uid,
             verificationMethod:
-                (opPayload['verification_method'] as String?) ?? 'desk_id_check',
+                (opPayload['verification_method'] as String?) ??
+                'desk_id_check',
             registration: publishedReg,
             recoveryRequest: matchingRecovery,
             existingApplication: matchingApp,
@@ -1093,7 +1133,9 @@ class _UnifiedRegistrationsWorkspaceState
     }
     await _refreshOnline();
     widget.onRegistryChanged?.call();
-    _notify('Synced $synced offline registration decision(s) to campus directory.');
+    _notify(
+      'Synced $synced offline registration decision(s) to campus directory.',
+    );
   });
 
   Future<void> _showDirectoryQr() async {
@@ -1127,7 +1169,9 @@ class _UnifiedRegistrationsWorkspaceState
     );
     final parsed = TrustBundle.fromJsonString(bundleJson);
     await Clipboard.setData(ClipboardData(text: bundleJson));
-    _notify('Signed trust bundle v${parsed.bundleVersion} copied to clipboard.');
+    _notify(
+      'Signed trust bundle v${parsed.bundleVersion} copied to clipboard.',
+    );
   });
 
   Future<void> _openUnifiedEditor(_UnifiedQueueItem item) async {
@@ -1164,7 +1208,8 @@ class _UnifiedRegistrationsWorkspaceState
             'Approved on this PC · waiting to sync. Show the QR to the phone.',
           );
           approvalQr = (
-            title: 'Approval QR · ${approved.registration.identity.displayName}',
+            title:
+                'Approval QR · ${approved.registration.identity.displayName}',
             packageJson: approved.packageJson,
           );
           break;
@@ -1172,9 +1217,12 @@ class _UnifiedRegistrationsWorkspaceState
           final session = _session!;
           final onlineApp = item.onlineApplication;
           if (onlineApp != null && onlineApp.id == session.uid) {
-            throw StateError('Another reviewer must approve your registration.');
+            throw StateError(
+              'Another reviewer must approve your registration.',
+            );
           }
-          final snapshot = registration.submittedSnapshot ?? registration.identity;
+          final snapshot =
+              registration.submittedSnapshot ?? registration.identity;
           final edited = result.identity.diffKeysFrom(snapshot);
           final decisionAction = onlineApp != null
               ? 'approve_online'
@@ -1423,7 +1471,9 @@ class _UnifiedRegistrationsWorkspaceState
             );
             await _loadLocalState();
             widget.onRegistryChanged?.call();
-            _notify('Registration revoked locally. Share or sync updated directory.');
+            _notify(
+              'Registration revoked locally. Share or sync updated directory.',
+            );
           } else if (_session != null) {
             const decisionAction = 'sync_offline_decision';
             final decisionDisc =
@@ -1606,7 +1656,8 @@ class _UnifiedRegistrationsWorkspaceState
           _notify('Phone registration linked to Firebase account.');
           break;
         case _EditorAction.approveReplacementOrRecovery:
-          if (item.recoveryTargetRequired && result.targetRegistration == null) {
+          if (item.recoveryTargetRequired &&
+              result.targetRegistration == null) {
             _notify('Select the existing registration to recover first.');
             return;
           }
@@ -1626,10 +1677,11 @@ class _UnifiedRegistrationsWorkspaceState
           }
           if (_publisher.isConfigured && _session != null) {
             final isRecovery = item.recoveryRequest != null;
-            final decisionAction =
-                isRecovery ? 'approve_recovery' : 'approve_replacement';
+            final decisionAction = isRecovery
+                ? 'approve_recovery'
+                : 'approve_replacement';
             final decisionDisc =
-                '${item.pendingNewPhone?.deviceId ?? ''}|${item.pendingNewPhone?.publicKey ?? ''}|${result.role.name}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
+                '${item.recoveryRequest?.updateTime ?? item.onlineApplication?.updateTime ?? ''}|${item.recoveryRequest?.id ?? item.onlineApplication?.id ?? targetReg.accountUid}|${targetReg.activePhone.deviceId}|${targetReg.activePhone.publicKey}|${targetReg.activePhone.signingPublicKey}|${targetReg.activePhone.keyVersion}|${result.verificationMethod ?? 'desk_id_check'}|${item.pendingNewPhone?.deviceRegistrationJson ?? ''}|${result.role.name}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
             final decisionId = _decisionIdFor(
               targetReg.registrationId,
               action: decisionAction,
@@ -1644,6 +1696,15 @@ class _UnifiedRegistrationsWorkspaceState
                 'action': decisionAction,
                 'decisionId': decisionId,
                 'registrationId': targetReg.registrationId,
+                'expectedRequestUpdateTime':
+                    item.recoveryRequest?.updateTime ??
+                    item.onlineApplication?.updateTime,
+                'expectedOldPhone': {
+                  'deviceId': targetReg.activePhone.deviceId,
+                  'publicKey': targetReg.activePhone.publicKey,
+                  'signingPublicKey': targetReg.activePhone.signingPublicKey,
+                  'keyVersion': targetReg.activePhone.keyVersion,
+                },
                 'accountUid': ?accUid,
                 'role': result.role.name,
                 'reason': result.reason,
@@ -1704,7 +1765,11 @@ class _UnifiedRegistrationsWorkspaceState
                 ? PendingSyncKind.publishRecovery
                 : PendingSyncKind.publishReplacement,
             verificationMethod: result.verificationMethod,
-            accountUid: item.recoveryRequest?.id ??
+            expectedRequestUpdateTime:
+                item.recoveryRequest?.updateTime ??
+                item.onlineApplication?.updateTime,
+            accountUid:
+                item.recoveryRequest?.id ??
                 item.onlineApplication?.id ??
                 targetReg.accountUid,
           );
@@ -1745,6 +1810,7 @@ class _UnifiedRegistrationsWorkspaceState
               _session!.token,
               item.recoveryRequest!.id,
             );
+            _assertReviewedOldBinding(targetReg.activePhone, remoteReg);
             await _api.approveRecoveryAndPublish(
               _session!.token,
               reviewerUid: _session!.uid,
@@ -1752,8 +1818,7 @@ class _UnifiedRegistrationsWorkspaceState
               registration: publishedReg,
               recoveryRequest: item.recoveryRequest!,
               existingApplication: existingApp,
-              newDeviceRegistrationJson:
-                  newPhone.deviceRegistrationJson ?? '',
+              newDeviceRegistrationJson: newPhone.deviceRegistrationJson ?? '',
               version: parsed.bundleVersion,
               bundle: mergedJson,
               directoryUpdateTime: dir?.updateTime,
@@ -1781,12 +1846,15 @@ class _UnifiedRegistrationsWorkspaceState
               'campusRegistrations',
               targetReg.registrationId,
             );
+            _assertReviewedOldBinding(
+              targetReg.activePhone,
+              remoteReg ?? item.onlineApplication,
+            );
             await _api.publishPhoneReplacement(
               _session!.token,
               application: item.onlineApplication!,
               registration: publishedReg,
-              newDeviceRegistrationJson:
-                  newPhone.deviceRegistrationJson ?? '',
+              newDeviceRegistrationJson: newPhone.deviceRegistrationJson ?? '',
               version: parsed.bundleVersion,
               bundle: mergedJson,
               directoryUpdateTime: dir?.updateTime,
@@ -1814,6 +1882,7 @@ class _UnifiedRegistrationsWorkspaceState
               'campusRegistrations',
               targetReg.registrationId,
             );
+            _assertReviewedOldBinding(targetReg.activePhone, remoteReg);
             await _api.publishCampusRegistration(
               _session!.token,
               registration: publishedReg,
@@ -1925,7 +1994,9 @@ class _UnifiedRegistrationsWorkspaceState
             }
           } else {
             if (registry == null) {
-              _notify('Hosted publisher or local registry required to publish profile changes.');
+              _notify(
+                'Hosted publisher or local registry required to publish profile changes.',
+              );
               return;
             }
             final updatedReg = registration.copyWith(
@@ -1984,6 +2055,38 @@ class _UnifiedRegistrationsWorkspaceState
       if (decoded is Map) return Map<String, dynamic>.from(decoded);
     } catch (_) {}
     return const {};
+  }
+
+  static void _assertReviewedOldBinding(
+    RegistrationPhoneBinding reviewed,
+    ReviewApplication? remote,
+  ) {
+    if (remote == null) return;
+    final parsed = _parsePendingPhone(
+      remote.fields['deviceRegistration'],
+    ).phone;
+    final currentId = remote.fields['deviceId'] as String? ?? parsed?.deviceId;
+    final currentPublic =
+        remote.fields['publicKey'] as String? ?? parsed?.publicKey;
+    final currentSigning =
+        remote.fields['signingPublicKey'] as String? ??
+        parsed?.signingPublicKey;
+    final currentVersion =
+        remote.fields['keyVersion'] as int? ?? parsed?.keyVersion ?? 1;
+    String normalized(String? value) =>
+        (value ?? '').trim().replaceFirst(RegExp(r'=+$'), '');
+    if (reviewed.deviceId.trim().isEmpty ||
+        currentId?.trim().toLowerCase() !=
+            reviewed.deviceId.trim().toLowerCase() ||
+        normalized(reviewed.publicKey).isEmpty ||
+        normalized(currentPublic) != normalized(reviewed.publicKey) ||
+        normalized(reviewed.signingPublicKey).isEmpty ||
+        normalized(currentSigning) != normalized(reviewed.signingPublicKey) ||
+        currentVersion != reviewed.keyVersion) {
+      throw StateError(
+        'The current phone binding changed. Refresh and review it again.',
+      );
+    }
   }
 
   static TrustBundle _assertBundleReflectsSync({
@@ -2080,24 +2183,23 @@ class _UnifiedRegistrationsWorkspaceState
 
     final remotePhoneMatch =
         remoteReg != null &&
-        (remoteReg.fields['deviceId'] as String? ?? '')
-                .trim()
-                .toLowerCase() ==
+        (effectiveAccountUid == null ||
+            remoteReg.fields['accountUid'] == effectiveAccountUid) &&
+        (remoteReg.fields['deviceId'] as String? ?? '').trim().toLowerCase() ==
             newIdLower &&
         remoteReg.fields['publicKey'] == newPhone.publicKey &&
         remoteReg.fields['signingPublicKey'] == newPhone.signingPublicKey &&
         ((remoteReg.fields['keyVersion'] as int?) ?? 1) ==
             newPhone.keyVersion &&
         remoteReg.fields['status'] == 'published';
-    final decisionRecorded =
-        (remoteReg?.fields['processedDecisionIds'] as List?)?.contains(
-              op.decisionId,
-            ) ==
-            true ||
-        (matchingApp?.fields['processedDecisionIds'] as List?)?.contains(
+    bool recordsDecision(ReviewApplication? document) =>
+        document?.fields['decisionId'] == op.decisionId ||
+        (document?.fields['processedDecisionIds'] as List?)?.contains(
               op.decisionId,
             ) ==
             true;
+    final decisionRecorded =
+        recordsDecision(remoteReg) || recordsDecision(matchingApp);
 
     if (op.kind == PendingSyncKind.publishRecovery) {
       final recPublished =
@@ -2112,8 +2214,7 @@ class _UnifiedRegistrationsWorkspaceState
     final repStatus =
         (matchingApp?.fields['replacementRequest'] as Map?)?['status'];
     final repPublished =
-        repStatus == 'published' ||
-        (matchingApp == null && remotePhoneMatch);
+        repStatus == 'published' || (matchingApp == null && remotePhoneMatch);
     return repPublished || (decisionRecorded && remotePhoneMatch);
   }
 
@@ -2705,6 +2806,7 @@ class _UnifiedRegistrationEditorDialogState
       _validationError = null;
     });
   }
+
   final TextEditingController _reason = TextEditingController();
   String _verificationMethod = 'desk_id_check';
   String? _validationError;
@@ -2738,7 +2840,17 @@ class _UnifiedRegistrationEditorDialogState
   );
 
   void _submit(_EditorAction action) {
-    final identity = _collectIdentity();
+    final profileStatus =
+        widget.item.onlineApplication?.profileChange?['status'];
+    final reviewingProposal =
+        profileStatus == 'submitted' ||
+        profileStatus == 'approved_pending_publication';
+    // These controls edit the proposal while it is pending. Other actions
+    // preserve the approved identity rather than approving it implicitly.
+    final identity =
+        reviewingProposal && action != _EditorAction.approveProfileChange
+        ? (_selectedRecoveryTarget ?? widget.item.registration).identity
+        : _collectIdentity();
     if (action == _EditorAction.approveProfileChange) {
       final errors = identity.validateRequired();
       if (errors.isNotEmpty) {
@@ -2823,8 +2935,8 @@ class _UnifiedRegistrationEditorDialogState
         ? 'Unspecified'
         : CampusAffiliation.fromCode(recAffRaw).label;
     final recSchoolId = (recReq?.fields['schoolId'] as String? ?? '').trim();
-    final recDisplayName =
-        (recReq?.fields['displayName'] as String? ?? '').trim();
+    final recDisplayName = (recReq?.fields['displayName'] as String? ?? '')
+        .trim();
     final recEmail = (recReq?.fields['email'] as String? ?? '').trim();
     return AlertDialog(
       title: Text(
@@ -2842,7 +2954,9 @@ class _UnifiedRegistrationEditorDialogState
               if (!widget.item.isUnresolvedRecovery ||
                   _selectedRecoveryTarget != null) ...[
                 Text('Registration ID: ${reg.registrationId}'),
-                Text('Source: ${reg.source.label} · Status: ${reg.status.label}'),
+                Text(
+                  'Source: ${reg.source.label} · Status: ${reg.status.label}',
+                ),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -2863,7 +2977,9 @@ class _UnifiedRegistrationEditorDialogState
                       if (reg.activePhone.publicKey != null)
                         Text('Encryption key: ${reg.activePhone.publicKey}'),
                       if (reg.activePhone.signingPublicKey != null)
-                        Text('Signing key: ${reg.activePhone.signingPublicKey}'),
+                        Text(
+                          'Signing key: ${reg.activePhone.signingPublicKey}',
+                        ),
                     ],
                   ),
                 ),
@@ -2890,7 +3006,9 @@ class _UnifiedRegistrationEditorDialogState
                         'Requesting recovery account',
                         style: TextStyle(fontWeight: FontWeight.w700),
                       ),
-                      Text('Requester: ${recDisplayName.isEmpty ? recReq.id : recDisplayName} ($recAffLabel)'),
+                      Text(
+                        'Requester: ${recDisplayName.isEmpty ? recReq.id : recDisplayName} ($recAffLabel)',
+                      ),
                       if (recSchoolId.isNotEmpty)
                         Text('School / Employee ID: $recSchoolId'),
                       if (recEmail.isNotEmpty) Text('Email: $recEmail'),
@@ -3002,6 +3120,10 @@ class _UnifiedRegistrationEditorDialogState
                       Text(
                         'Proposed: ${proposedIdentity.displayName}${proposedIdentity.summarySubtitle.isEmpty ? '' : ' · ${proposedIdentity.summarySubtitle}'}',
                       ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Fields below apply only to profile approval. Other actions keep the approved profile.',
+                      ),
                     ],
                   ),
                 ),
@@ -3031,7 +3153,9 @@ class _UnifiedRegistrationEditorDialogState
               if (_affiliation == CampusAffiliation.student) ...[
                 TextField(
                   controller: _studentNo,
-                  decoration: const InputDecoration(labelText: 'Student number'),
+                  decoration: const InputDecoration(
+                    labelText: 'Student number',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Row(
@@ -3095,7 +3219,9 @@ class _UnifiedRegistrationEditorDialogState
               DropdownButtonFormField<RegisteredDeviceRole>(
                 initialValue: _role,
                 isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Phone access role'),
+                decoration: const InputDecoration(
+                  labelText: 'Phone access role',
+                ),
                 items: [
                   for (final role in availableRoles)
                     DropdownMenuItem(value: role, child: Text(role.label)),
@@ -3172,10 +3298,10 @@ class _UnifiedRegistrationEditorDialogState
           FilledButton(
             onPressed:
                 selfBlocked ||
-                        pendingPhone == null ||
-                        pendingPhoneError != null ||
-                        (widget.item.recoveryTargetRequired &&
-                            _selectedRecoveryTarget == null)
+                    pendingPhone == null ||
+                    pendingPhoneError != null ||
+                    (widget.item.recoveryTargetRequired &&
+                        _selectedRecoveryTarget == null)
                 ? null
                 : () => _submit(_EditorAction.approveReplacementOrRecovery),
             child: const Text('Approve replacement'),
@@ -3211,7 +3337,8 @@ class _UnifiedRegistrationEditorDialogState
             (widget.item.onlineApplication != null ||
                 reg.source == CampusRegistrationSource.online) &&
             (reg.status == CampusRegistrationStatus.submitted ||
-                reg.status == CampusRegistrationStatus.approvedPendingPublication)) ...[
+                reg.status ==
+                    CampusRegistrationStatus.approvedPendingPublication)) ...[
           OutlinedButton(
             onPressed: selfBlocked
                 ? null
@@ -3219,9 +3346,7 @@ class _UnifiedRegistrationEditorDialogState
             child: const Text('Request correction'),
           ),
           TextButton(
-            onPressed: selfBlocked
-                ? null
-                : () => _submit(_EditorAction.reject),
+            onPressed: selfBlocked ? null : () => _submit(_EditorAction.reject),
             child: const Text('Reject'),
           ),
         ],
@@ -3229,9 +3354,7 @@ class _UnifiedRegistrationEditorDialogState
             (reg.status == CampusRegistrationStatus.published ||
                 reg.status == CampusRegistrationStatus.approvedLocal))
           TextButton(
-            onPressed: selfBlocked
-                ? null
-                : () => _submit(_EditorAction.revoke),
+            onPressed: selfBlocked ? null : () => _submit(_EditorAction.revoke),
             child: const Text('Revoke'),
           ),
         if (widget.hasLocalRegistry && !widget.item.isUnresolvedRecovery)

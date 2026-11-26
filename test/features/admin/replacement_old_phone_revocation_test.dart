@@ -80,6 +80,7 @@ class _InMemoryR2Registry implements DesktopAdminRegistryRepository {
     PendingSyncKind syncKind = PendingSyncKind.publishReplacement,
     String? verificationMethod,
     String? accountUid,
+    String? expectedRequestUpdateTime,
   }) async {
     final updated = registration.copyWith(
       status: CampusRegistrationStatus.approvedLocal,

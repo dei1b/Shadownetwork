@@ -46,8 +46,7 @@ class _LostResponseFallbackApi extends RegistrationReviewApi {
   Future<List<ReviewApplication>> listCollection(
     String token,
     String name,
-  ) async =>
-      name == 'campusRegistrations' ? campusRegistrations : const [];
+  ) async => name == 'campusRegistrations' ? campusRegistrations : const [];
 
   @override
   Future<({int version, String bundle, String updateTime})?> readDirectory(
@@ -277,6 +276,7 @@ void main() {
           'old_device_id': oldQr.deviceId,
           'old_public_key': oldQr.publicKey,
           'old_signing_public_key': oldQr.signingPublicKey,
+          'expected_request_update_time': '2026-11-26T11:00:00Z',
           'new_device_id': newQr.deviceId,
           'account_uid': 'uid-r11-1',
           'new_device_registration': jsonEncode(newQr.toJson()),
@@ -372,150 +372,162 @@ void main() {
     },
   );
 
-  testWidgets(
-    'R11: Windows fallback still replays when remote directory does not yet match new phone keys',
-    (tester) async {
-      SharedPreferences.setMockInitialValues({});
-      final signer = await TestTrustBundleSigner.create();
-      final oldQr = await _signedQr('phone-r11-old-2');
-      final newQr = await _signedQr('phone-r11-new-2');
+  for (final scenario in ['same', 'changed_binding', 'missing_request']) {
+    final changedBinding = scenario == 'changed_binding';
+    final missingRequest = scenario == 'missing_request';
+    testWidgets(
+      'S1/R11: fallback checks reviewed old binding before pending replay ($scenario)',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        final signer = await TestTrustBundleSigner.create();
+        final oldQr = await _signedQr('phone-r11-old-2');
+        final newQr = await _signedQr('phone-r11-new-2');
 
-      // Remote still only has old phone approved at v1.
-      final uncommittedBundleJson = await signer.sign(
-        bundleVersion: 1,
-        issuedAt: DateTime.utc(2026, 11, 26, 11),
-        approvedDevices: [
-          TrustedDevice(
-            deviceId: oldQr.deviceId,
-            ownerName: 'Lia Pending',
-            role: 'civilian',
-            status: 'approved',
-            publicKey: oldQr.publicKey,
-            signingPublicKey: oldQr.signingPublicKey,
-            keyVersion: oldQr.keyVersion,
-            updatedAt: DateTime.utc(2026, 11, 26, 11),
+        // Remote still only has old phone approved at v1.
+        final uncommittedBundleJson = await signer.sign(
+          bundleVersion: 1,
+          issuedAt: DateTime.utc(2026, 11, 26, 11),
+          approvedDevices: [
+            TrustedDevice(
+              deviceId: oldQr.deviceId,
+              ownerName: 'Lia Pending',
+              role: 'civilian',
+              status: 'approved',
+              publicKey: oldQr.publicKey,
+              signingPublicKey: oldQr.signingPublicKey,
+              keyVersion: oldQr.keyVersion,
+              updatedAt: DateTime.utc(2026, 11, 26, 11),
+            ),
+          ],
+        );
+
+        final reg = CampusRegistration(
+          registrationId: 'reg-r11-2',
+          source: CampusRegistrationSource.online,
+          status: CampusRegistrationStatus.approvedLocal,
+          syncState: CampusSyncState.waitingToSync,
+          accountUid: 'uid-r11-2',
+          identity: const CampusIdentityFields(
+            affiliation: CampusAffiliation.student,
+            displayName: 'Lia Pending',
+            studentNumber: '2026-1102',
+            course: 'BSIT',
+            yearLevel: '3',
+            sectionSet: 'A',
           ),
-        ],
-      );
+          role: RegisteredDeviceRole.civilian,
+          activePhone: RegistrationPhoneBinding(
+            deviceId: newQr.deviceId,
+            publicKey: newQr.publicKey,
+            signingPublicKey: newQr.signingPublicKey,
+            keyVersion: newQr.keyVersion,
+            deviceRegistrationJson: jsonEncode(newQr.toJson()),
+          ),
+          createdAt: DateTime.utc(2026, 11, 26),
+          updatedAt: DateTime.utc(2026, 11, 26),
+        );
+        final pendingOp = PendingSyncOperation(
+          decisionId: 'dec-r11-2',
+          registrationId: 'reg-r11-2',
+          kind: PendingSyncKind.publishReplacement,
+          payloadJson: jsonEncode({
+            'old_device_id': oldQr.deviceId,
+            'old_public_key': oldQr.publicKey,
+            'old_signing_public_key': oldQr.signingPublicKey,
+            'expected_request_update_time': '2026-11-26T11:00:00Z',
+            'new_device_id': newQr.deviceId,
+            'account_uid': 'uid-r11-2',
+            'new_device_registration': jsonEncode(newQr.toJson()),
+            'reason': 'Lost old handset',
+          }),
+          createdAt: DateTime.utc(2026, 11, 26),
+        );
 
-      final reg = CampusRegistration(
-        registrationId: 'reg-r11-2',
-        source: CampusRegistrationSource.online,
-        status: CampusRegistrationStatus.approvedLocal,
-        syncState: CampusSyncState.waitingToSync,
-        accountUid: 'uid-r11-2',
-        identity: const CampusIdentityFields(
-          affiliation: CampusAffiliation.student,
-          displayName: 'Lia Pending',
-          studentNumber: '2026-1102',
-          course: 'BSIT',
-          yearLevel: '3',
-          sectionSet: 'A',
-        ),
-        role: RegisteredDeviceRole.civilian,
-        activePhone: RegistrationPhoneBinding(
-          deviceId: newQr.deviceId,
-          publicKey: newQr.publicKey,
-          signingPublicKey: newQr.signingPublicKey,
-          keyVersion: newQr.keyVersion,
-          deviceRegistrationJson: jsonEncode(newQr.toJson()),
-        ),
-        createdAt: DateTime.utc(2026, 11, 26),
-        updatedAt: DateTime.utc(2026, 11, 26),
-      );
-      final pendingOp = PendingSyncOperation(
-        decisionId: 'dec-r11-2',
-        registrationId: 'reg-r11-2',
-        kind: PendingSyncKind.publishReplacement,
-        payloadJson: jsonEncode({
-          'old_device_id': oldQr.deviceId,
-          'old_public_key': oldQr.publicKey,
-          'old_signing_public_key': oldQr.signingPublicKey,
-          'new_device_id': newQr.deviceId,
-          'account_uid': 'uid-r11-2',
-          'new_device_registration': jsonEncode(newQr.toJson()),
-          'reason': 'Lost old handset',
-        }),
-        createdAt: DateTime.utc(2026, 11, 26),
-      );
-
-      final api = _LostResponseFallbackApi(
-        directoryBundle: uncommittedBundleJson,
-        directoryVersion: 1,
-        applications: [
-          ReviewApplication.fromCache(
-            id: 'uid-r11-2',
-            updateTime: '2026-11-26T11:00:00Z',
-            fields: {
-              'registrationId': 'reg-r11-2',
-              'affiliation': 'student',
-              'displayName': 'Lia Pending',
-              'studentNumber': '2026-1102',
-              'course': 'BSIT',
-              'yearLevel': '3',
-              'sectionSet': 'A',
-              'status': 'published',
-              'deviceRegistration': jsonEncode(oldQr.toJson()),
-              'replacementRequest': {
-                'status': 'submitted',
-                'deviceRegistration': jsonEncode(newQr.toJson()),
+        final api = _LostResponseFallbackApi(
+          directoryBundle: uncommittedBundleJson,
+          directoryVersion: 1,
+          applications: [
+            ReviewApplication.fromCache(
+              id: 'uid-r11-2',
+              updateTime: '2026-11-26T11:00:00Z',
+              fields: {
+                'registrationId': 'reg-r11-2',
+                'affiliation': 'student',
+                'displayName': 'Lia Pending',
+                'studentNumber': '2026-1102',
+                'course': 'BSIT',
+                'yearLevel': '3',
+                'sectionSet': 'A',
+                'status': 'published',
+                'deviceRegistration': jsonEncode(oldQr.toJson()),
+                'replacementRequest': {
+                  'status': 'submitted',
+                  'deviceRegistration': jsonEncode(newQr.toJson()),
+                },
               },
-            },
-          ),
-        ],
-        campusRegistrations: [
-          ReviewApplication.fromCache(
-            id: 'reg-r11-2',
-            updateTime: '2026-11-26T11:00:00Z',
-            fields: {
-              'registrationId': 'reg-r11-2',
-              'accountUid': 'uid-r11-2',
-              'affiliation': 'student',
-              'displayName': 'Lia Pending',
-              'studentNumber': '2026-1102',
-              'course': 'BSIT',
-              'yearLevel': '3',
-              'sectionSet': 'A',
-              'status': 'published',
-              'role': 'civilian',
-              'deviceId': oldQr.deviceId,
-              'publicKey': oldQr.publicKey,
-              'signingPublicKey': oldQr.signingPublicKey,
-              'keyVersion': oldQr.keyVersion,
-              'deviceRegistration': jsonEncode(oldQr.toJson()),
-            },
-          ),
-        ],
-      );
-      final registry = _InMemoryFallbackRegistry([reg], [pendingOp], signer);
+            ),
+          ],
+          campusRegistrations: [
+            ReviewApplication.fromCache(
+              id: 'reg-r11-2',
+              updateTime: '2026-11-26T11:00:00Z',
+              fields: {
+                'registrationId': 'reg-r11-2',
+                'accountUid': 'uid-r11-2',
+                'affiliation': 'student',
+                'displayName': 'Lia Pending',
+                'studentNumber': '2026-1102',
+                'course': 'BSIT',
+                'yearLevel': '3',
+                'sectionSet': 'A',
+                'status': 'published',
+                'role': 'civilian',
+                'deviceId': oldQr.deviceId,
+                'publicKey': changedBinding ? newQr.publicKey : oldQr.publicKey,
+                'signingPublicKey': oldQr.signingPublicKey,
+                'keyVersion': oldQr.keyVersion,
+                'deviceRegistration': jsonEncode(oldQr.toJson()),
+              },
+            ),
+          ],
+        );
+        if (missingRequest) api.applications.clear();
+        final registry = _InMemoryFallbackRegistry([reg], [pendingOp], signer);
 
-      await tester.binding.setSurfaceSize(const Size(1280, 900));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AdminTheme.light,
-          home: Scaffold(
-            body: UnifiedRegistrationsWorkspace(
-              registry: registry,
-              reviewApi: api,
-              initialSessionForTesting: (
-                token: 'tok',
-                uid: 'admin-1',
-                email: 'admin@dnsc.edu.ph',
+        await tester.binding.setSurfaceSize(const Size(1280, 900));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AdminTheme.light,
+            home: Scaffold(
+              body: UnifiedRegistrationsWorkspace(
+                registry: registry,
+                reviewApi: api,
+                initialSessionForTesting: (
+                  token: 'tok',
+                  uid: 'admin-1',
+                  email: 'admin@dnsc.edu.ph',
+                ),
               ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Sync 1 pending'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('Sync 1 pending'));
+        await tester.pumpAndSettle();
 
-      expect(api.publishReplacementCalls, 1);
-      expect(api.directoryVersion, 2);
-      expect(registry.pendingSync, isEmpty);
-      expect(tester.takeException(), isNull);
-    },
-  );
+        if (changedBinding || missingRequest) {
+          expect(api.publishReplacementCalls, 0);
+          expect(api.publishCampusCalls, 0);
+          expect(registry.pendingSync, hasLength(1));
+          return;
+        }
+        expect(api.publishReplacementCalls, 1);
+        expect(api.directoryVersion, 2);
+        expect(registry.pendingSync, isEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

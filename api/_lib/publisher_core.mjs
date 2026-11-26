@@ -542,6 +542,13 @@ function computeDecisionFingerprint({
       ? [...payload.editedFields].map(String).sort()
       : null,
     registration: normalizedEmbeddedReg,
+    ...((action === 'approve_replacement' || action === 'approve_recovery') &&
+      ('expectedRequestUpdateTime' in payload || 'expectedOldPhone' in payload)
+      ? {
+          expectedRequestUpdateTime: payload.expectedRequestUpdateTime ?? null,
+          expectedOldPhone: payload.expectedOldPhone ?? null,
+        }
+      : {}),
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
@@ -731,6 +738,61 @@ function assertExpectedRevision(expectedRevision, currentRevision) {
       409,
       'This registration changed while you were reviewing it. Refresh and try again.',
       'stale_revision',
+    );
+  }
+}
+
+function assertReviewedPhoneRequest(request, updateTime, payload) {
+  if (
+    !request ||
+    !['submitted', 'approved_pending_publication'].includes(request.status) ||
+    typeof payload.expectedRequestUpdateTime !== 'string' ||
+    !payload.expectedRequestUpdateTime ||
+    payload.expectedRequestUpdateTime !== updateTime ||
+    !request.deviceRegistration ||
+    !payload.deviceRegistration
+  ) {
+    throw new PublisherError(
+      409,
+      'This phone request changed or is no longer pending. Refresh and review it again.',
+      'stale_request',
+    );
+  }
+  const parseQr = (raw) => typeof raw === 'string' ? JSON.parse(raw) : raw;
+  let matchingQr = false;
+  try {
+    matchingQr = canonicalJsonEncode(parseQr(request.deviceRegistration)) ===
+      canonicalJsonEncode(parseQr(payload.deviceRegistration));
+  } catch {
+    // An unreadable current or reviewed QR cannot identify the reviewed request.
+  }
+  if (!matchingQr) {
+    throw new PublisherError(
+      409,
+      'The pending phone QR differs from the reviewed QR. Refresh and review it again.',
+      'stale_request',
+    );
+  }
+}
+
+function assertReviewedOldPhone(expected, current) {
+  const strip = (value) => typeof value === 'string' ? value.trim().replace(/=+$/, '') : '';
+  if (
+    !expected ||
+    typeof expected.deviceId !== 'string' ||
+    !expected.deviceId.trim() ||
+    expected.deviceId.trim().toLowerCase() !== current.deviceId.toLowerCase() ||
+    !strip(expected.publicKey) ||
+    strip(expected.publicKey) !== strip(current.publicKey) ||
+    !strip(expected.signingPublicKey) ||
+    strip(expected.signingPublicKey) !== strip(current.signingPublicKey) ||
+    !Number.isInteger(expected.keyVersion) ||
+    expected.keyVersion !== current.keyVersion
+  ) {
+    throw new PublisherError(
+      409,
+      'The current phone binding differs from the reviewed phone. Refresh and review it again.',
+      'stale_phone_binding',
     );
   }
 }
@@ -1267,13 +1329,13 @@ export function applyDecisionAndBuildCommit({
       ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
     });
   } else if (action === 'approve_replacement' || action === 'approve_recovery') {
-    const newQrRaw =
-      action === 'approve_recovery'
-        ? recoveryRequest?.deviceRegistration
-        : application?.replacementRequest?.deviceRegistration ?? payload.deviceRegistration;
-    if (!newQrRaw) {
-      throw new PublisherError(400, 'Signed replacement phone QR is missing.', 'missing_qr');
-    }
+    const isRecovery = action === 'approve_recovery';
+    assertReviewedPhoneRequest(
+      isRecovery ? recoveryRequest : application?.replacementRequest,
+      isRecovery ? recSnap.updateTime : appSnap.updateTime,
+      payload,
+    );
+    const newQrRaw = payload.deviceRegistration;
     const newPhone = verifyDeviceRegistrationQr(newQrRaw);
     let oldPhone = null;
     if (registration) {
@@ -1289,6 +1351,7 @@ export function applyDecisionAndBuildCommit({
     if (!oldPhone) {
       throw new PublisherError(404, 'Existing registration phone record not found.', 'not_found');
     }
+    assertReviewedOldPhone(payload.expectedOldPhone, oldPhone);
     const oldIdLower = String(oldPhone.deviceId).toLowerCase();
     const newIdLower = newPhone.deviceId.toLowerCase();
     const sameId = oldIdLower === newIdLower;
@@ -1352,6 +1415,7 @@ export function applyDecisionAndBuildCommit({
         publicKey: newPhone.publicKey,
         signingPublicKey: newPhone.signingPublicKey,
         keyVersion: nextKeyVersion,
+        revision: nextRevision,
         retiredKeys: [...(registration?.retiredKeys ?? []), retiredRecord],
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         decisionOutcomes: recordOutcome(registration, decisionId, replaceOutcome),

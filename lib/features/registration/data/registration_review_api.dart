@@ -46,9 +46,7 @@ class ReviewApplication {
     }
     if (value.containsKey('mapValue')) {
       final fields = value['mapValue']['fields'] as Map? ?? const {};
-      return fields.map(
-        (key, item) => MapEntry(key, _decode(item as Map)),
-      );
+      return fields.map((key, item) => MapEntry(key, _decode(item as Map)));
     }
     return null;
   }
@@ -200,9 +198,8 @@ class RegistrationReviewApi {
     ],
   });
 
-  Uri _collectionUri(String name) => collection.replace(
-    path: '/v1/$_databasePath/documents/$name',
-  );
+  Uri _collectionUri(String name) =>
+      collection.replace(path: '/v1/$_databasePath/documents/$name');
 
   Future<List<ReviewApplication>> listCollection(
     String token,
@@ -238,9 +235,11 @@ class RegistrationReviewApi {
     String docId,
   ) async {
     final uri = _collectionUri('$name/$docId');
-    final response = await http.get(uri, headers: _headers(token)).timeout(
-      timeout,
-    );
+    final response =
+        await (_client != null
+                ? _client.get(uri, headers: _headers(token))
+                : http.get(uri, headers: _headers(token)))
+            .timeout(timeout);
     if (response.statusCode == 404) return null;
     _check(response);
     return ReviewApplication(jsonDecode(response.body) as Map<String, dynamic>);
@@ -282,13 +281,19 @@ class RegistrationReviewApi {
     List<Map<String, dynamic>> writes,
   ) async {
     final path = '$_databasePath/documents';
-    final response = await http
-        .post(
-          collection.replace(path: '/v1/$path:commit'),
-          headers: _headers(token),
-          body: jsonEncode({'writes': writes}),
-        )
-        .timeout(timeout);
+    final response =
+        await (_client != null
+                ? _client.post(
+                    collection.replace(path: '/v1/$path:commit'),
+                    headers: _headers(token),
+                    body: jsonEncode({'writes': writes}),
+                  )
+                : http.post(
+                    collection.replace(path: '/v1/$path:commit'),
+                    headers: _headers(token),
+                    body: jsonEncode({'writes': writes}),
+                  ))
+            .timeout(timeout);
     _check(response);
   }
 
@@ -315,10 +320,7 @@ class RegistrationReviewApi {
         },
       },
       'updateTransforms': [
-        {
-          'fieldPath': 'publishedAt',
-          'setToServerValue': 'REQUEST_TIME',
-        },
+        {'fieldPath': 'publishedAt', 'setToServerValue': 'REQUEST_TIME'},
       ],
       'currentDocument': directoryUpdateTime == null
           ? {'exists': false}
@@ -439,7 +441,9 @@ class RegistrationReviewApi {
       {
         'update': {
           'name': '$path/campusRegistrations/${registration.registrationId}',
-          'fields': regFields.map((key, value) => MapEntry(key, _encode(value))),
+          'fields': regFields.map(
+            (key, value) => MapEntry(key, _encode(value)),
+          ),
         },
         if (remoteRegistrationUpdateTime != null)
           'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
@@ -447,7 +451,9 @@ class RegistrationReviewApi {
       {
         'update': {
           'name': '$path/pilotApplications/$uid',
-          'fields': appFields.map((key, value) => MapEntry(key, _encode(value))),
+          'fields': appFields.map(
+            (key, value) => MapEntry(key, _encode(value)),
+          ),
         },
         'currentDocument': existingApplication == null
             ? {'exists': false}
@@ -478,15 +484,66 @@ class RegistrationReviewApi {
   }) async {
     final path = documentPrefix;
     final uid = recoveryRequest.id;
+    final remote = await getDocument(
+      token,
+      'campusRegistrations',
+      registration.registrationId,
+    );
+    if (remote?.updateTime != remoteRegistrationUpdateTime ||
+        registration.accountUid != uid ||
+        (existingApplication != null && existingApplication.id != uid) ||
+        registration.revision < (existingApplication?.nextRevision ?? 0) ||
+        registration.revision < (remote?.nextRevision ?? 0)) {
+      throw StateError(
+        'The registration changed. Refresh before trying again.',
+      );
+    }
+    final decisionId = registration.pendingDecisionId;
+    if (decisionId == null || decisionId.isEmpty) {
+      throw StateError('Recovery decision ID is missing.');
+    }
+    final outcome = <String, dynamic>{
+      'action': 'approve_recovery',
+      'status': 'published',
+      'version': version,
+      'registrationId': registration.registrationId,
+      'revision': registration.revision,
+      'accountUid': uid,
+      'deviceRegistration': newDeviceRegistrationJson,
+      'deviceId': registration.activePhone.deviceId,
+      if (registration.activePhone.publicKey != null)
+        'publicKey': registration.activePhone.publicKey!,
+      if (registration.activePhone.signingPublicKey != null)
+        'signingPublicKey': registration.activePhone.signingPublicKey!,
+      'keyVersion': registration.activePhone.keyVersion,
+    };
+    Map<String, dynamic> decisionFields(Map<String, dynamic> existing) => {
+      'processedDecisionIds': [
+        ...{...existing['processedDecisionIds'] as List? ?? [], decisionId},
+      ],
+      'decisionOutcomes': {
+        ...existing['decisionOutcomes'] as Map? ?? {},
+        decisionId: outcome,
+      },
+    };
     final appFields = {
+      ...?existingApplication?.fields,
       ...registration.identity.toFirestoreFields(),
       'registrationId': registration.registrationId,
       'deviceRegistration': newDeviceRegistrationJson,
       'status': 'published',
       'publicationStatus': 'published',
       'revision': registration.revision,
+      ...decisionFields(existingApplication?.fields ?? {}),
     };
-    final regFields = _campusRegistrationFields(registration);
+    final regFields = {
+      ...?remote?.fields,
+      ..._campusRegistrationFields(registration),
+      'retiredKeys': registration.retiredKeys
+          .map((key) => key.toJson())
+          .toList(),
+      ...decisionFields(remote?.fields ?? {}),
+    };
     await commitWrites(token, [
       {
         'update': {
@@ -504,15 +561,20 @@ class RegistrationReviewApi {
       {
         'update': {
           'name': '$path/campusRegistrations/${registration.registrationId}',
-          'fields': regFields.map((key, value) => MapEntry(key, _encode(value))),
+          'fields': regFields.map(
+            (key, value) => MapEntry(key, _encode(value)),
+          ),
         },
-        if (remoteRegistrationUpdateTime != null)
-          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+        'currentDocument': remoteRegistrationUpdateTime == null
+            ? {'exists': false}
+            : {'updateTime': remoteRegistrationUpdateTime},
       },
       {
         'update': {
           'name': '$path/pilotApplications/$uid',
-          'fields': appFields.map((key, value) => MapEntry(key, _encode(value))),
+          'fields': appFields.map(
+            (key, value) => MapEntry(key, _encode(value)),
+          ),
         },
         'currentDocument': existingApplication == null
             ? {'exists': false}
@@ -540,34 +602,81 @@ class RegistrationReviewApi {
   }) async {
     final path = documentPrefix;
     final req = application.fields['replacementRequest'] as Map? ?? const {};
+    final remote = await getDocument(
+      token,
+      'campusRegistrations',
+      registration.registrationId,
+    );
+    if (remote?.updateTime != remoteRegistrationUpdateTime ||
+        (remote != null && remote.fields['accountUid'] != application.id) ||
+        registration.accountUid != application.id ||
+        registration.revision < application.nextRevision ||
+        registration.revision < (remote?.nextRevision ?? 0)) {
+      throw StateError(
+        'The registration changed. Refresh before trying again.',
+      );
+    }
+    final decisionId = registration.pendingDecisionId;
+    if (decisionId == null || decisionId.isEmpty) {
+      throw StateError('Replacement decision ID is missing.');
+    }
+    final outcome = <String, dynamic>{
+      'action': 'approve_replacement',
+      'status': 'published',
+      'version': version,
+      'registrationId': registration.registrationId,
+      'revision': registration.revision,
+      'accountUid': application.id,
+      'deviceRegistration': newDeviceRegistrationJson,
+      'deviceId': registration.activePhone.deviceId,
+      if (registration.activePhone.publicKey != null)
+        'publicKey': registration.activePhone.publicKey!,
+      if (registration.activePhone.signingPublicKey != null)
+        'signingPublicKey': registration.activePhone.signingPublicKey!,
+      'keyVersion': registration.activePhone.keyVersion,
+    };
+    Map<String, dynamic> decisionFields(Map<String, dynamic> existing) => {
+      'processedDecisionIds': [
+        ...{...existing['processedDecisionIds'] as List? ?? [], decisionId},
+      ],
+      'decisionOutcomes': {
+        ...existing['decisionOutcomes'] as Map? ?? {},
+        decisionId: outcome,
+      },
+    };
+    final appFields = <String, dynamic>{
+      'deviceRegistration': newDeviceRegistrationJson,
+      'registrationId': registration.registrationId,
+      'revision': registration.revision,
+      'replacementRequest': {...req, 'status': 'published'},
+      ...decisionFields(application.fields),
+    };
     await commitWrites(token, [
       {
         'update': {
           'name': '$path/pilotApplications/${application.id}',
-          'fields': {
-            'deviceRegistration': newDeviceRegistrationJson,
-            'registrationId': registration.registrationId,
-            'replacementRequest': {...req, 'status': 'published'},
-          }.map((key, value) => MapEntry(key, _encode(value))),
+          'fields': appFields.map(
+            (key, value) => MapEntry(key, _encode(value)),
+          ),
         },
-        'updateMask': {
-          'fieldPaths': [
-            'deviceRegistration',
-            'registrationId',
-            'replacementRequest',
-          ],
-        },
+        'updateMask': {'fieldPaths': appFields.keys.toList()},
         'currentDocument': {'updateTime': application.updateTime},
       },
       {
         'update': {
           'name': '$path/campusRegistrations/${registration.registrationId}',
-          'fields': _campusRegistrationFields(
-            registration,
-          ).map((key, value) => MapEntry(key, _encode(value))),
+          'fields': {
+            ...?remote?.fields,
+            ..._campusRegistrationFields(registration),
+            'retiredKeys': registration.retiredKeys
+                .map((key) => key.toJson())
+                .toList(),
+            ...decisionFields(remote?.fields ?? {}),
+          }.map((key, value) => MapEntry(key, _encode(value))),
         },
-        if (remoteRegistrationUpdateTime != null)
-          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+        'currentDocument': remoteRegistrationUpdateTime == null
+            ? {'exists': false}
+            : {'updateTime': remoteRegistrationUpdateTime},
       },
       directoryWrite(
         applicationUid: application.id,
@@ -687,26 +796,61 @@ class RegistrationReviewApi {
     final existingReviewerUid = change?['reviewerUid'] as String?;
     final effectiveReviewerUid =
         change?['status'] == 'approved_pending_publication' &&
-                existingReviewerUid != null &&
-                existingReviewerUid.trim().isNotEmpty
-            ? existingReviewerUid
-            : reviewerUid;
+            existingReviewerUid != null &&
+            existingReviewerUid.trim().isNotEmpty
+        ? existingReviewerUid
+        : reviewerUid;
     final reviewedMap = reviewedIdentity?.toFirestoreFields();
     final mergedChange = change == null
         ? null
         : <String, dynamic>{
+            for (final key in identityKeys) key: application.fields[key] ?? '',
             ...change,
             if (reviewedMap != null) ...reviewedMap,
           };
-    final changes =
+    final isProfilePublication =
         application.status == 'published' &&
-            mergedChange != null &&
-            (change?['status'] == 'submitted' ||
-                change?['status'] == 'approved_pending_publication')
+        mergedChange != null &&
+        (change?['status'] == 'submitted' ||
+            change?['status'] == 'approved_pending_publication');
+    final registrationId = application.fields['registrationId'] as String?;
+    final remote =
+        isProfilePublication &&
+            registrationId != null &&
+            registrationId.isNotEmpty
+        ? await getDocument(token, 'campusRegistrations', registrationId)
+        : null;
+    if (remote != null &&
+        (remote.fields['accountUid'] != application.id ||
+            remote.status != 'published' ||
+            (remote.fields['deviceRegistration'] != null &&
+                remote.fields['deviceRegistration'] !=
+                    application.fields['deviceRegistration']))) {
+      throw StateError(
+        'The registration changed. Refresh before trying again.',
+      );
+    }
+    // Older fallback replacements advanced only the campus revision. Repair
+    // that divergence while applying one reviewed identity to both documents.
+    final revision =
+        remote != null && remote.nextRevision > application.nextRevision
+        ? remote.nextRevision
+        : application.nextRevision;
+    if (isProfilePublication) {
+      // Clear fields belonging to the previous affiliation in both records.
+      if (mergedChange['affiliation'] == 'staff') {
+        for (final key in ['course', 'yearLevel', 'sectionSet']) {
+          mergedChange[key] = '';
+        }
+      } else {
+        mergedChange['employeeId'] = '';
+        mergedChange['unit'] = '';
+      }
+    }
+    final changes = isProfilePublication
         ? <String, dynamic>{
-            for (final key in identityKeys)
-              if (mergedChange.containsKey(key) && mergedChange[key] != null)
-                key: mergedChange[key],
+            for (final key in identityKeys) key: mergedChange[key],
+            'revision': revision,
             'profileChange': {
               ...mergedChange,
               'status': 'published',
@@ -734,6 +878,20 @@ class RegistrationReviewApi {
           'updateMask': {'fieldPaths': changes.keys.toList()},
           'currentDocument': {'updateTime': application.updateTime},
         },
+        if (remote != null)
+          {
+            'update': {
+              'name': '$path/campusRegistrations/$registrationId',
+              'fields': {
+                for (final key in identityKeys) key: _encode(changes[key]),
+                'revision': _encode(revision),
+              },
+            },
+            'updateMask': {
+              'fieldPaths': [...identityKeys, 'revision'],
+            },
+            'currentDocument': {'updateTime': remote.updateTime},
+          },
         {
           'update': {
             'name': '$path/trustDirectory/current',
@@ -744,10 +902,7 @@ class RegistrationReviewApi {
             },
           },
           'updateTransforms': [
-            {
-              'fieldPath': 'publishedAt',
-              'setToServerValue': 'REQUEST_TIME',
-            },
+            {'fieldPath': 'publishedAt', 'setToServerValue': 'REQUEST_TIME'},
           ],
           'currentDocument': directoryUpdateTime == null
               ? {'exists': false}
@@ -764,6 +919,7 @@ class RegistrationReviewApi {
   }
 
   static Map<String, dynamic> _encode(dynamic value) {
+    if (value == null) return {'nullValue': null};
     if (value is String) return {'stringValue': value};
     if (value is bool) return {'booleanValue': value};
     if (value is int) return {'integerValue': '$value'};

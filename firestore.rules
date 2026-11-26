@@ -120,6 +120,45 @@ service cloud.firestore {
         && change.status in ['approved_pending_publication', 'rejected'];
     }
 
+    function sameCampusIdentity(left, right) {
+      return left.get('displayName', '') == right.get('displayName', '')
+        && left.get('affiliation', '') == right.get('affiliation', '')
+        && left.get('studentNumber', '') == right.get('studentNumber', '')
+        && left.get('course', '') == right.get('course', '')
+        && left.get('yearLevel', '') == right.get('yearLevel', '')
+        && left.get('sectionSet', '') == right.get('sectionSet', '')
+        && left.get('courseYear', '') == right.get('courseYear', '')
+        && left.get('employeeId', '') == right.get('employeeId', '')
+        && left.get('unit', '') == right.get('unit', '')
+        && left.get('phone', '') == right.get('phone', '')
+        && left.get('address', '') == right.get('address', '');
+    }
+
+    function nextProfileRevision(before, reg) {
+      let revision = before.get('revision', 0);
+      return before.get('registrationId', '') != '' && exists(reg)
+        && get(reg).data.get('revision', 0) > revision
+          ? get(reg).data.revision + 1 : revision + 1;
+    }
+
+    function profileCampusMatches(uid, before, after) {
+      let regId = before.get('registrationId', uid);
+      let reg = /databases/$(database)/documents/campusRegistrations/$(regId);
+      return after.revision == nextProfileRevision(before, reg)
+        && (before.get('registrationId', '') == '' || !exists(reg) || (
+          get(reg).data.get('accountUid', '') == uid
+          && get(reg).data.status == 'published'
+          && get(reg).data.get('deviceRegistration', before.deviceRegistration) == before.deviceRegistration
+          && getAfter(reg).data.revision == after.revision
+          && sameCampusIdentity(after, getAfter(reg).data)
+          && getAfter(reg).data.diff(get(reg).data).affectedKeys().hasOnly([
+            'displayName', 'affiliation', 'studentNumber', 'course',
+            'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+            'phone', 'address', 'revision'
+          ])
+        ));
+    }
+
     function publishProfileChange(uid, before, after) {
       let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
       return reviewer() && request.auth.uid != uid
@@ -128,7 +167,7 @@ service cloud.firestore {
         && after.diff(before).affectedKeys().hasOnly([
           'displayName', 'affiliation', 'studentNumber', 'course',
           'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
-          'phone', 'address', 'profileChange'
+          'phone', 'address', 'profileChange', 'revision'
         ])
         && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly([
           'status', 'reviewerUid',
@@ -155,6 +194,7 @@ service cloud.firestore {
         && after.get('unit', '') == after.profileChange.get('unit', '')
         && after.get('phone', '') == after.profileChange.get('phone', '')
         && after.get('address', '') == after.profileChange.get('address', '')
+        && profileCampusMatches(uid, before, after)
         && snapshot.get('applicationUid', '') == uid && snapshot.publishedAt == request.time;
     }
 
@@ -190,12 +230,34 @@ service cloud.firestore {
           'submitted', 'approved_pending_publication'
         ]
         && after.diff(before).affectedKeys().hasOnly([
-          'deviceRegistration', 'replacementRequest', 'registrationId'
+          'deviceRegistration', 'replacementRequest', 'registrationId',
+          'revision', 'processedDecisionIds', 'decisionOutcomes'
         ])
         && after.replacementRequest.status == 'published'
         && after.deviceRegistration == before.replacementRequest.deviceRegistration
+        && replacementDecisionMatches(uid, before, after)
         && snapshot.get('applicationUid', '') == uid
         && snapshot.publishedAt == request.time;
+    }
+
+    function replacementDecisionMatches(uid, before, after) {
+      let reg = getAfter(/databases/$(database)/documents/campusRegistrations/$(after.registrationId)).data;
+      let decisionId = reg.decisionId;
+      let outcome = after.decisionOutcomes[decisionId];
+      return validText(decisionId, 200, true)
+        && reg.get('accountUid', '') == uid
+        && reg.status == 'published'
+        && reg.deviceRegistration == after.deviceRegistration
+        && after.revision > before.get('revision', 0)
+        && reg.revision == after.revision
+        && after.processedDecisionIds == before.get('processedDecisionIds', []).concat([decisionId])
+        && after.decisionOutcomes.diff(before.get('decisionOutcomes', {})).affectedKeys().hasOnly([decisionId])
+        && outcome == reg.decisionOutcomes[decisionId]
+        && outcome.action == 'approve_replacement' && outcome.status == 'published'
+        && outcome.registrationId == after.registrationId
+        && outcome.accountUid == uid
+        && outcome.revision == after.revision
+        && outcome.deviceRegistration == after.deviceRegistration;
     }
 
     function reviewerReconcileApplication(uid, after) {
