@@ -299,7 +299,10 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     }
     if (published.publisherDelegation != null) {
       try {
-        await published.publisherDelegation!.verify(expectedProject: project);
+        await published.publisherDelegation!.verify(
+          expectedProject: project,
+          now: published.issuedAt ?? published.generatedAt,
+        );
       } on FormatException {
         throw StateError('The published campus directory could not be verified.');
       }
@@ -397,6 +400,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     required String directoryProject,
     Duration validity = const Duration(days: 365),
     bool disposable = false,
+    DateTime? issuedAt,
   }) => _serialized(() async {
     final TrustBundleIssuer rootIssuer;
     final SimpleKeyPair rootKeyPair;
@@ -414,7 +418,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final pubSeed = await pubKeyPair.extractPrivateKeyBytes();
     final pubBytes = (await pubKeyPair.extractPublicKey()).bytes;
     final publisherIssuer = _issuerFromPublicBytes(pubBytes);
-    final now = DateTime.now().toUtc();
+    final now = (issuedAt ?? DateTime.now()).toUtc();
     final delegation = await PublisherDelegation.createSigned(
       rootIssuer: rootIssuer,
       rootKeyPair: rootKeyPair,
