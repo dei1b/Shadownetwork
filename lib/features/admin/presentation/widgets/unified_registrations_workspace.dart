@@ -1590,6 +1590,114 @@ class _UnifiedRegistrationsWorkspaceState
           widget.onRegistryChanged?.call();
           _notify('Replacement approved. Previous phone keys retired.');
           break;
+        case _EditorAction.declineProfileChange:
+          final declineApp = item.onlineApplication;
+          if (declineApp == null || _session == null) return;
+          if (_publisher.isConfigured) {
+            final decisionId = _decisionIdFor(registration.registrationId);
+            await _publisher.publishDecision(
+              token: _session!.token,
+              payload: {
+                'action': 'decline_profile_change',
+                'decisionId': decisionId,
+                'accountUid': declineApp.id,
+                'registrationId': registration.registrationId,
+                'expectedRevision': declineApp.fields['revision'] as int? ?? 0,
+                'reason': result.reason,
+              },
+            );
+            _clearDecisionId(registration.registrationId);
+          } else {
+            await _api.reviewProfileChange(
+              _session!.token,
+              declineApp,
+              status: 'rejected',
+              reviewerUid: _session!.uid,
+              reason: result.reason,
+            );
+          }
+          await _refreshOnline();
+          widget.onRegistryChanged?.call();
+          _notify('Profile change declined.');
+          break;
+        case _EditorAction.approveProfileChange:
+          final changeApp = item.onlineApplication;
+          if (changeApp == null || _session == null) return;
+          if (_publisher.isConfigured) {
+            final decisionId = _decisionIdFor(registration.registrationId);
+            final res = await _publisher.publishDecision(
+              token: _session!.token,
+              payload: {
+                'action': 'approve_profile_change',
+                'decisionId': decisionId,
+                'accountUid': changeApp.id,
+                'registrationId': registration.registrationId,
+                'expectedRevision': changeApp.fields['revision'] as int? ?? 0,
+                'role': result.role.name,
+                'reason': result.reason,
+                'reviewedFields': result.identity.toFirestoreFields(),
+              },
+            );
+            _clearDecisionId(registration.registrationId);
+            if (registry != null) {
+              if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
+                await registry.saveLastPublishedRoster(
+                  TrustBundle.fromJsonString(res.bundle!),
+                  res.bundle!,
+                );
+              }
+              await registry.saveRegistration(
+                registration.copyWith(
+                  identity: result.identity,
+                  role: result.role,
+                  status: CampusRegistrationStatus.published,
+                  syncState: CampusSyncState.synced,
+                  updatedAt: DateTime.now().toUtc(),
+                ),
+                removePendingForRegistration: true,
+              );
+              await _loadLocalState();
+            }
+          } else {
+            if (registry == null) {
+              _notify('Hosted publisher or local registry required to publish profile changes.');
+              return;
+            }
+            final updatedReg = registration.copyWith(
+              identity: result.identity,
+              role: result.role,
+              status: CampusRegistrationStatus.published,
+              syncState: CampusSyncState.synced,
+              updatedAt: DateTime.now().toUtc(),
+            );
+            final dir = await _api.readDirectory(_session!.token);
+            final mergedJson = await registry.buildMergedTrustBundleJson(
+              publishedBundle: dir == null
+                  ? null
+                  : TrustBundle.fromJsonString(dir.bundle),
+              localChanges: [updatedReg.toRegisteredDevice()],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: dir?.version ?? 0,
+            );
+            final parsed = TrustBundle.fromJsonString(mergedJson);
+            await _api.publish(
+              _session!.token,
+              changeApp,
+              parsed.bundleVersion,
+              mergedJson,
+              directoryUpdateTime: dir?.updateTime,
+            );
+            await registry.saveLastPublishedRoster(parsed, mergedJson);
+            await registry.saveRegistration(
+              updatedReg,
+              removePendingForRegistration: true,
+            );
+            await _loadLocalState();
+          }
+          await _refreshOnline();
+          widget.onRegistryChanged?.call();
+          _notify('Profile change published.');
+          break;
       }
     });
     if (approvalQr != null && mounted) {
@@ -2006,6 +2114,9 @@ class _UnifiedQueueCard extends StatelessWidget {
                 const Chip(label: Text('Lost phone recovery')),
               if (hasOnlineReplacement)
                 const Chip(label: Text('Phone replacement')),
+              if (item.onlineApplication?.profileChange?['status'] ==
+                  'submitted')
+                const Chip(label: Text('Profile change')),
             ],
           ),
           subtitle: Column(
@@ -2037,6 +2148,8 @@ enum _EditorAction {
   resolveConflict,
   approveLink,
   approveReplacementOrRecovery,
+  approveProfileChange,
+  declineProfileChange,
 }
 
 class _EditorOutcome {
@@ -2138,7 +2251,29 @@ class _UnifiedRegistrationEditorDialogState
   );
 
   void _submit(_EditorAction action) {
-    final identity = _collectIdentity();
+    final reg = widget.item.registration;
+    var identity = _collectIdentity();
+    if (action == _EditorAction.approveProfileChange) {
+      final rawChange = widget.item.onlineApplication?.profileChange;
+      if (rawChange != null && rawChange['status'] == 'submitted') {
+        final unchangedInForm =
+            identity.affiliation == reg.identity.affiliation &&
+            identity.displayName == reg.identity.displayName &&
+            identity.schoolId == reg.identity.schoolId &&
+            identity.formattedCourseYear == reg.identity.formattedCourseYear;
+        if (unchangedInForm) {
+          identity = CampusIdentityFields.fromFirestoreFields({
+            ...widget.item.onlineApplication!.fields,
+            ...rawChange,
+          });
+        }
+      }
+      final errors = identity.validateRequired();
+      if (errors.isNotEmpty) {
+        setState(() => _validationError = errors.values.first);
+        return;
+      }
+    }
     if (action == _EditorAction.approveOffline ||
         action == _EditorAction.approveAndPublishOnline) {
       final errors = identity.validateRequired();
@@ -2148,7 +2283,8 @@ class _UnifiedRegistrationEditorDialogState
       }
     }
     if ((action == _EditorAction.requestChanges ||
-            action == _EditorAction.reject) &&
+            action == _EditorAction.reject ||
+            action == _EditorAction.declineProfileChange) &&
         _reason.text.trim().isEmpty) {
       setState(() => _validationError = 'Enter a reason for the applicant.');
       return;
@@ -2185,6 +2321,15 @@ class _UnifiedRegistrationEditorDialogState
         pendingPhoneError != null ||
         widget.item.recoveryRequest != null ||
         repStatus == 'submitted';
+    final rawChange = widget.item.onlineApplication?.profileChange;
+    final profileChangePending =
+        rawChange != null && rawChange['status'] == 'submitted';
+    final proposedIdentity = profileChangePending
+        ? CampusIdentityFields.fromFirestoreFields({
+            ...widget.item.onlineApplication!.fields,
+            ...rawChange,
+          })
+        : null;
     return AlertDialog(
       title: Text(
         reg.identity.displayName.isEmpty
@@ -2262,6 +2407,33 @@ class _UnifiedRegistrationEditorDialogState
                   child: Text(
                     pendingPhoneError,
                     style: const TextStyle(color: AdminTheme.action),
+                  ),
+                ),
+              ],
+              if (profileChangePending && proposedIdentity != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AdminTheme.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Proposed profile change',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Current: ${reg.identity.displayName}${reg.identity.summarySubtitle.isEmpty ? '' : ' · ${reg.identity.summarySubtitle}'}',
+                      ),
+                      Text(
+                        'Proposed: ${proposedIdentity.displayName}${proposedIdentity.summarySubtitle.isEmpty ? '' : ' · ${proposedIdentity.summarySubtitle}'}',
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -2435,6 +2607,20 @@ class _UnifiedRegistrationEditorDialogState
                 : () => _submit(_EditorAction.approveReplacementOrRecovery),
             child: const Text('Approve replacement'),
           ),
+        if (profileChangePending && widget.hasOnlineSession) ...[
+          OutlinedButton(
+            onPressed: selfBlocked
+                ? null
+                : () => _submit(_EditorAction.declineProfileChange),
+            child: const Text('Decline profile change'),
+          ),
+          FilledButton(
+            onPressed: selfBlocked
+                ? null
+                : () => _submit(_EditorAction.approveProfileChange),
+            child: const Text('Approve profile change'),
+          ),
+        ],
         if (reg.status == CampusRegistrationStatus.conflict &&
             widget.hasLocalRegistry)
           FilledButton(

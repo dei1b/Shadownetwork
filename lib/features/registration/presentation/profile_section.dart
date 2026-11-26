@@ -36,10 +36,17 @@ class ProfileSection extends ConsumerStatefulWidget {
 }
 
 class _ProfileSectionState extends ConsumerState<ProfileSection> {
-  static const _identityFields = {
+  static const _studentIdentityFields = {
     'displayName': 'Full name',
     'studentNumber': 'Student number',
-    'courseYear': 'Course and year',
+    'course': 'Course',
+    'yearLevel': 'Year',
+    'sectionSet': 'Set',
+  };
+  static const _staffIdentityFields = {
+    'displayName': 'Full name',
+    'employeeId': 'Employee ID',
+    'unit': 'Unit or office',
   };
   static const _contactFields = {'phone': 'Phone number', 'address': 'Address'};
 
@@ -317,10 +324,33 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
     final application = _application;
     final user = _user;
     if (application == null || user == null) return;
-    final labels = identity ? _identityFields : _contactFields;
-    final initial = labels.map(
-      (key, _) => MapEntry(key, application.fields[key] as String? ?? ''),
+    final currentIdentity = CampusIdentityFields.fromFirestoreFields(
+      application.fields,
     );
+    final isStaff = currentIdentity.affiliation == CampusAffiliation.staff;
+    final labels = identity
+        ? (isStaff ? _staffIdentityFields : _studentIdentityFields)
+        : _contactFields;
+    final initial = identity
+        ? (isStaff
+              ? {
+                  'displayName': currentIdentity.displayName,
+                  'employeeId': currentIdentity.employeeId,
+                  'unit': currentIdentity.unit,
+                }
+              : {
+                  'displayName': currentIdentity.displayName,
+                  'studentNumber': currentIdentity.studentNumber,
+                  'course': currentIdentity.course.isNotEmpty
+                      ? currentIdentity.course
+                      : currentIdentity.legacyCourseYear,
+                  'yearLevel': currentIdentity.yearLevel,
+                  'sectionSet': currentIdentity.sectionSet,
+                })
+        : {
+            'phone': currentIdentity.phone,
+            'address': currentIdentity.address,
+          };
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -335,6 +365,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       ),
       builder: (_) => _ProfileEditSheet(
         identity: identity,
+        affiliation: currentIdentity.affiliation,
         labels: labels,
         initial: initial,
         onSave: (values) async {
@@ -342,11 +373,30 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
           if (registration.auth.currentUser?.uid != user.uid) {
             throw StateError('Sign in again before saving.');
           }
-          final changes = identity
-              ? {
-                  'profileChange': {...values, 'status': 'submitted'},
-                }
-              : values;
+          final Map<String, dynamic> changes;
+          if (identity) {
+            final updated = isStaff
+                ? currentIdentity.copyWith(
+                    displayName: values['displayName'] ?? '',
+                    employeeId: values['employeeId'] ?? '',
+                    unit: values['unit'] ?? '',
+                  )
+                : currentIdentity.copyWith(
+                    displayName: values['displayName'] ?? '',
+                    studentNumber: values['studentNumber'] ?? '',
+                    course: values['course'] ?? '',
+                    yearLevel: values['yearLevel'] ?? '',
+                    sectionSet: values['sectionSet'] ?? '',
+                  );
+            final canonical = updated.toFirestoreFields()
+              ..remove('phone')
+              ..remove('address');
+            changes = {
+              'profileChange': {...canonical, 'status': 'submitted'},
+            };
+          } else {
+            changes = values;
+          }
           try {
             await registration.updateProfile(user, application, changes);
           } catch (_) {
@@ -692,6 +742,8 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
                           ? 'Your request is awaiting review or publication.'
                           : changeStatus == 'rejected'
                           ? 'Your last request was declined.'
+                          : parsedIdentity.affiliation == CampusAffiliation.staff
+                          ? 'Changes to name, employee ID, or unit need admin approval.'
                           : 'Changes to name, student number, or course need admin approval.',
                       onTap: _busy || awaitingChange
                           ? null
@@ -1010,9 +1062,11 @@ class _ProfileEditSheet extends StatefulWidget {
     required this.labels,
     required this.initial,
     required this.onSave,
+    this.affiliation = CampusAffiliation.student,
   });
 
   final bool identity;
+  final CampusAffiliation affiliation;
   final Map<String, String> labels;
   final Map<String, String> initial;
   final Future<void> Function(Map<String, String>) onSave;
@@ -1025,7 +1079,12 @@ class _ProfileEditSheetState extends State<_ProfileEditSheet> {
   static const _fieldIcons = {
     'displayName': Icons.person_outline_rounded,
     'studentNumber': Icons.badge_outlined,
+    'course': Icons.school_outlined,
+    'yearLevel': Icons.calendar_today_outlined,
+    'sectionSet': Icons.group_outlined,
     'courseYear': Icons.school_outlined,
+    'employeeId': Icons.work_outline_rounded,
+    'unit': Icons.apartment_outlined,
     'phone': Icons.phone_outlined,
     'address': Icons.home_outlined,
   };
@@ -1112,7 +1171,9 @@ class _ProfileEditSheetState extends State<_ProfileEditSheet> {
                 const SizedBox(height: 4),
                 Text(
                   widget.identity
-                      ? 'Changes to your name, student number, or course require campus admin review.'
+                      ? (widget.affiliation == CampusAffiliation.staff
+                            ? 'Changes to your name, employee ID, or unit require campus admin review.'
+                            : 'Changes to your name, student number, or course require campus admin review.')
                       : 'Phone number and address update your profile immediately.',
                   style: MobileUiTokens.subtitle,
                 ),

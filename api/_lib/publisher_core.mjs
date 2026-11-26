@@ -597,7 +597,9 @@ export function applyDecisionAndBuildCommit({
   const recoveryRequest = recSnap.fields;
 
   const rosterIndependentAction =
-    action === 'request_changes' || action === 'reject';
+    action === 'request_changes' ||
+    action === 'reject' ||
+    action === 'decline_profile_change';
   const rawDelegation = publisherDelegation
     ? typeof publisherDelegation === 'string'
       ? JSON.parse(publisherDelegation)
@@ -699,6 +701,64 @@ export function applyDecisionAndBuildCommit({
     };
     return {
       status: targetStatus,
+      idempotent: false,
+      version: Number(existingDirectory?.version ?? 0),
+      bundle: existingDirectory?.bundle ?? null,
+      registrationId: nextFields.registrationId ?? null,
+      decisionId,
+      writes: [
+        {
+          collection: 'pilotApplications',
+          docId: application.uid,
+          fields: nextFields,
+          ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : {}),
+        },
+      ],
+    };
+  }
+
+  if (action === 'decline_profile_change') {
+    if (!application) {
+      throw new PublisherError(404, 'Online application not found.', 'not_found');
+    }
+    if (
+      application.status !== 'published' ||
+      application.profileChange?.status !== 'submitted'
+    ) {
+      throw new PublisherError(
+        409,
+        'No submitted profile change is waiting for review.',
+        'invalid_transition',
+      );
+    }
+    assertExpectedRevision(payload.expectedRevision, application.revision);
+    if (!reason) {
+      throw new PublisherError(400, 'Enter a reason for declining this change.', 'missing_reason');
+    }
+    const nextFields = {
+      ...application,
+      profileChange: {
+        ...application.profileChange,
+        status: 'rejected',
+        reviewerUid,
+        reason,
+      },
+      revision: nextRevision,
+      reviewHistory: [
+        ...(application.reviewHistory ?? []),
+        { ...historyEntry, status: 'rejected', action: 'decline_profile_change' },
+      ],
+      processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
+      decisionOutcomes: recordOutcome(application, decisionId, {
+        action,
+        status: 'rejected',
+        version: Number(existingDirectory?.version ?? 0),
+        registrationId: application.registrationId ?? registrationId ?? null,
+        revision: nextRevision,
+      }),
+    };
+    return {
+      status: 'rejected',
       idempotent: false,
       version: Number(existingDirectory?.version ?? 0),
       bundle: existingDirectory?.bundle ?? null,
@@ -1071,6 +1131,131 @@ export function applyDecisionAndBuildCommit({
         ...(recSnap.updateTime ? { updateTime: recSnap.updateTime } : {}),
       });
     }
+  } else if (action === 'approve_profile_change') {
+    if (!application) {
+      throw new PublisherError(404, 'Online application not found.', 'not_found');
+    }
+    if (application.status !== 'published') {
+      throw new PublisherError(
+        409,
+        'Only published registrations can publish profile changes.',
+        'invalid_transition',
+      );
+    }
+    const pendingChange = application.profileChange;
+    if (
+      !pendingChange ||
+      (pendingChange.status !== 'submitted' &&
+        pendingChange.status !== 'approved_pending_publication')
+    ) {
+      throw new PublisherError(
+        409,
+        'No submitted profile change is waiting for review.',
+        'invalid_transition',
+      );
+    }
+    assertExpectedRevision(payload.expectedRevision, application.revision);
+    const mergedFields = {
+      ...application,
+      ...pendingChange,
+      ...(payload.reviewedFields ?? {}),
+    };
+    const reviewed = buildIdentityFieldsPayload(mergedFields);
+    const phone = registration
+      ? resolveRegistrationPhone(registration)
+      : (() => {
+          const verifiedQr = verifyDeviceRegistrationQr(application.deviceRegistration);
+          return {
+            deviceId: verifiedQr.deviceId,
+            publicKey: verifiedQr.publicKey,
+            signingPublicKey: verifiedQr.signingPublicKey,
+            keyVersion: verifiedQr.keyVersion,
+          };
+        })();
+    const keyLower = phone.deviceId.toLowerCase();
+    if (registration?.status === 'revoked' || revoked.has(keyLower)) {
+      throw new PublisherError(
+        409,
+        'Revoked phones cannot publish profile changes.',
+        'revoked_registration',
+      );
+    }
+    const existingApproved = approved.get(keyLower);
+    const effectiveRole =
+      payload.role === 'responder'
+        ? 'responder'
+        : payload.role === 'civilian'
+          ? 'civilian'
+          : (registration?.role ?? existingApproved?.role ?? 'civilian');
+    revoked.delete(keyLower);
+    approved.set(keyLower, {
+      device_id: phone.deviceId,
+      owner_name: reviewed.displayName,
+      role: effectiveRole,
+      status: 'approved',
+      public_key: phone.publicKey,
+      signing_public_key: phone.signingPublicKey,
+      key_version: phone.keyVersion,
+      updated_at: nowIso,
+    });
+    directoryOwnerFields = {
+      applicationUid: application.uid,
+      registrationId,
+    };
+    const changeOutcome = {
+      action,
+      status: 'published',
+      version: nextVersion,
+      registrationId,
+      revision: nextRevision,
+    };
+    writes.push({
+      collection: 'pilotApplications',
+      docId: application.uid,
+      fields: {
+        ...application,
+        ...reviewed,
+        registrationId,
+        profileChange: {
+          ...pendingChange,
+          ...reviewed,
+          status: 'published',
+          reviewerUid,
+        },
+        revision: nextRevision,
+        reviewHistory: [
+          ...(application.reviewHistory ?? []),
+          { ...historyEntry, role: effectiveRole, action: 'approve_profile_change' },
+        ],
+        processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(application, decisionId, changeOutcome),
+      },
+      ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : {}),
+    });
+    writes.push({
+      collection: 'campusRegistrations',
+      docId: registrationId,
+      fields: {
+        ...(registration ?? {}),
+        ...reviewed,
+        registrationId,
+        source: registration?.source ?? 'online',
+        status: 'published',
+        role: effectiveRole,
+        accountUid: application.uid,
+        ...(application.deviceRegistration
+          ? { deviceRegistration: application.deviceRegistration }
+          : {}),
+        deviceId: phone.deviceId,
+        publicKey: phone.publicKey,
+        signingPublicKey: phone.signingPublicKey,
+        keyVersion: phone.keyVersion,
+        processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(registration, decisionId, changeOutcome),
+        updatedAt: nowIso,
+      },
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
+    });
   } else {
     throw new PublisherError(400, `Unsupported publisher action: ${action}`, 'unsupported_action');
   }

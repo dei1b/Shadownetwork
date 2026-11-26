@@ -839,3 +839,197 @@ test('same-deviceId replacement preserves replacement QR key_version 1 and incre
   assert.equal(regWrite.keyVersion, 1);
   assert.equal(regWrite.retiredKeys.length, 1);
 });
+
+test('approve_profile_change updates staff and student affiliation fields and trust bundle owner name, and decline_profile_change works without delegations', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const staffQr = makeSignedQr('staff-prof-1');
+  const now = new Date('2026-11-26T12:00:00.000Z');
+
+  const init = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-staff-init',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: {
+      uid: 'uid-staff-prof',
+      affiliation: 'staff',
+      displayName: 'Old Staff Name',
+      employeeId: 'EMP-100',
+      unit: 'Old Office',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: staffQr.rawJson,
+    },
+    payload: { registrationId: 'reg-staff-prof', role: 'responder' },
+    now,
+  });
+
+  // Decline a pending staff change without requiring fresh delegation
+  const declined = applyDecisionAndBuildCommit({
+    action: 'decline_profile_change',
+    decisionId: 'dec-prof-decline',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: null,
+    publisherDelegation: null,
+    existingDirectory: { version: 1, bundle: init.bundle },
+    application: {
+      uid: 'uid-staff-prof',
+      affiliation: 'staff',
+      displayName: 'Old Staff Name',
+      employeeId: 'EMP-100',
+      unit: 'Old Office',
+      registrationId: 'reg-staff-prof',
+      status: 'published',
+      revision: 1,
+      deviceRegistration: staffQr.rawJson,
+      profileChange: {
+        affiliation: 'staff',
+        displayName: 'Unverified Alias',
+        employeeId: 'EMP-100',
+        unit: 'New Unit',
+        status: 'submitted',
+      },
+    },
+    payload: { reason: 'ID badge does not match alias' },
+    now,
+  });
+  assert.equal(declined.status, 'rejected');
+  assert.equal(declined.version, 1);
+  assert.equal(declined.writes.length, 1);
+  assert.equal(declined.writes[0].fields.profileChange.status, 'rejected');
+  assert.equal(
+    declined.writes[0].fields.profileChange.reason,
+    'ID badge does not match alias',
+  );
+
+  // Approve updated staff change -> updates pilotApplications, campusRegistrations, and trust bundle owner_name
+  const regBefore = init.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  const approved = applyDecisionAndBuildCommit({
+    action: 'approve_profile_change',
+    decisionId: 'dec-prof-approve',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: init.bundle },
+    application: {
+      uid: 'uid-staff-prof',
+      affiliation: 'staff',
+      displayName: 'Old Staff Name',
+      employeeId: 'EMP-100',
+      unit: 'Old Office',
+      registrationId: 'reg-staff-prof',
+      status: 'published',
+      revision: 2,
+      deviceRegistration: staffQr.rawJson,
+      profileChange: {
+        affiliation: 'staff',
+        displayName: 'Updated Staff Officer',
+        employeeId: 'EMP-109',
+        unit: 'DRRMO Command',
+        status: 'submitted',
+      },
+    },
+    registration: regBefore,
+    payload: {
+      registrationId: 'reg-staff-prof',
+      role: 'responder',
+      reason: 'Verified updated staff ID',
+    },
+    now,
+  });
+  assert.equal(approved.status, 'published');
+  assert.equal(approved.version, 2);
+  const appWrite = approved.writes.find((w) => w.collection === 'pilotApplications').fields;
+  assert.equal(appWrite.displayName, 'Updated Staff Officer');
+  assert.equal(appWrite.employeeId, 'EMP-109');
+  assert.equal(appWrite.unit, 'DRRMO Command');
+  assert.equal(appWrite.profileChange.status, 'published');
+  const regWrite = approved.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  assert.equal(regWrite.displayName, 'Updated Staff Officer');
+  assert.equal(regWrite.unit, 'DRRMO Command');
+  const bundle2 = verifyTrustBundle(JSON.parse(approved.bundle), {
+    expectedProject: 'dnsc-pilot',
+    expectedRootPublicKey: root.publicKeyBase64Url,
+    now,
+  });
+  assert.equal(bundle2.approved_devices[0].owner_name, 'Updated Staff Officer');
+  assert.equal(bundle2.approved_devices[0].role, 'responder');
+
+  // Student profile change updates student affiliation fields and owner_name too
+  const stuQr = makeSignedQr('stu-prof-1');
+  const stuInit = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-stu-init',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 2, bundle: approved.bundle },
+    application: {
+      uid: 'uid-stu-prof',
+      affiliation: 'student',
+      displayName: 'Old Student Name',
+      studentNumber: '2026-1001',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'B',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: stuQr.rawJson,
+    },
+    payload: { registrationId: 'reg-stu-prof', role: 'civilian' },
+    now,
+  });
+  const stuApproved = applyDecisionAndBuildCommit({
+    action: 'approve_profile_change',
+    decisionId: 'dec-stu-prof-approve',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 3, bundle: stuInit.bundle },
+    application: {
+      uid: 'uid-stu-prof',
+      affiliation: 'student',
+      displayName: 'Old Student Name',
+      studentNumber: '2026-1001',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'B',
+      registrationId: 'reg-stu-prof',
+      status: 'published',
+      revision: 1,
+      deviceRegistration: stuQr.rawJson,
+      profileChange: {
+        affiliation: 'student',
+        displayName: 'Updated Student Name',
+        studentNumber: '2026-1001',
+        course: 'BSIT',
+        yearLevel: '3',
+        sectionSet: 'A',
+        status: 'submitted',
+      },
+    },
+    registration: stuInit.writes.find((w) => w.collection === 'campusRegistrations').fields,
+    payload: { registrationId: 'reg-stu-prof', role: 'civilian', reason: 'Updated year level' },
+    now,
+  });
+  const stuAppWrite = stuApproved.writes.find((w) => w.collection === 'pilotApplications').fields;
+  assert.equal(stuAppWrite.displayName, 'Updated Student Name');
+  assert.equal(stuAppWrite.courseYear, 'BSIT · 3 · A');
+  const stuBundle = verifyTrustBundle(JSON.parse(stuApproved.bundle), {
+    expectedProject: 'dnsc-pilot',
+    expectedRootPublicKey: root.publicKeyBase64Url,
+    now,
+  });
+  assert.equal(
+    stuBundle.approved_devices.find((d) => d.device_id === 'stu-prof-1').owner_name,
+    'Updated Student Name',
+  );
+});

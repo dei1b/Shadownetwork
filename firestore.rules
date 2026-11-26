@@ -100,8 +100,14 @@ service cloud.firestore {
         ])
         && change.status == 'submitted'
         && validText(change.displayName, 100, true)
+        && (!('affiliation' in change) || change.affiliation in ['student', 'staff'])
         && validText(change.get('studentNumber', ''), 100, false)
-        && validText(change.get('courseYear', ''), 100, false);
+        && validText(change.get('course', ''), 100, false)
+        && validText(change.get('yearLevel', ''), 100, false)
+        && validText(change.get('sectionSet', ''), 100, false)
+        && validText(change.get('courseYear', ''), 100, false)
+        && validText(change.get('employeeId', ''), 100, false)
+        && validText(change.get('unit', ''), 100, false);
     }
 
     function reviewProfileChange(uid, before, after) {
@@ -109,7 +115,7 @@ service cloud.firestore {
       return reviewer() && request.auth.uid != uid
         && before.status == 'published' && before.profileChange.status == 'submitted'
         && after.diff(before).affectedKeys().hasOnly(['profileChange'])
-        && change.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
+        && change.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid', 'reason'])
         && change.reviewerUid == request.auth.uid
         && change.status in ['approved_pending_publication', 'rejected'];
     }
@@ -118,16 +124,22 @@ service cloud.firestore {
       let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
       return reviewer() && request.auth.uid != uid
         && before.status == 'published'
-        && before.profileChange.status == 'approved_pending_publication'
+        && before.profileChange.status in ['submitted', 'approved_pending_publication']
         && after.diff(before).affectedKeys().hasOnly([
           'displayName', 'affiliation', 'studentNumber', 'course',
           'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit', 'profileChange'
         ])
-        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status'])
+        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
         && after.profileChange.status == 'published'
         && after.displayName == before.profileChange.displayName
+        && after.get('affiliation', '') == before.profileChange.get('affiliation', '')
         && after.get('studentNumber', '') == before.profileChange.get('studentNumber', '')
+        && after.get('course', '') == before.profileChange.get('course', '')
+        && after.get('yearLevel', '') == before.profileChange.get('yearLevel', '')
+        && after.get('sectionSet', '') == before.profileChange.get('sectionSet', '')
         && after.get('courseYear', '') == before.profileChange.get('courseYear', '')
+        && after.get('employeeId', '') == before.profileChange.get('employeeId', '')
+        && after.get('unit', '') == before.profileChange.get('unit', '')
         && snapshot.get('applicationUid', '') == uid && snapshot.publishedAt == request.time;
     }
 

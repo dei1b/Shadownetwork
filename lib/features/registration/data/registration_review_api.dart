@@ -638,6 +638,26 @@ class RegistrationReviewApi {
     );
   }
 
+  Future<void> reviewProfileChange(
+    String token,
+    ReviewApplication application, {
+    required String status,
+    required String reviewerUid,
+    String? reason,
+  }) async {
+    final change = application.profileChange;
+    if (change == null) {
+      throw StateError('No pending profile change found.');
+    }
+    final nextChange = <String, dynamic>{
+      ...change,
+      'status': status,
+      'reviewerUid': reviewerUid,
+      if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+    };
+    await update(token, application, {'profileChange': nextChange});
+  }
+
   Future<void> publish(
     String token,
     ReviewApplication application,
@@ -646,13 +666,26 @@ class RegistrationReviewApi {
     required String? directoryUpdateTime,
   }) async {
     final change = application.profileChange;
+    const identityKeys = [
+      'displayName',
+      'affiliation',
+      'studentNumber',
+      'course',
+      'yearLevel',
+      'sectionSet',
+      'courseYear',
+      'employeeId',
+      'unit',
+    ];
     final changes =
         application.status == 'published' &&
             change != null &&
-            change['status'] == 'approved_pending_publication'
+            (change['status'] == 'submitted' ||
+                change['status'] == 'approved_pending_publication')
         ? <String, dynamic>{
-            for (final key in ['displayName', 'studentNumber', 'courseYear'])
-              key: change[key],
+            for (final key in identityKeys)
+              if (change.containsKey(key) && change[key] != null)
+                key: change[key],
             'profileChange': {...change, 'status': 'published'},
           }
         : <String, dynamic>{
