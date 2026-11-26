@@ -339,9 +339,8 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         publicKey: base64UrlEncode(publicBytes),
       );
 
-  Future<({int version, String bundleJson})?> _loadLastPublishedRoster([
-    DatabaseExecutor? executor,
-  ]) async {
+  Future<({int version, String bundleJson, String syncedAt})?>
+  _loadLastPublishedRoster([DatabaseExecutor? executor]) async {
     final rows = await (executor ?? database).query(
       'admin_published_roster',
       where: 'id = 1',
@@ -351,22 +350,28 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     return (
       version: row['version']! as int,
       bundleJson: row['bundle_json']! as String,
+      syncedAt: row['synced_at']! as String,
     );
   }
 
   Future<({int version, String bundleJson})?> loadLastPublishedRoster() =>
-      _serialized(() => _loadLastPublishedRoster());
+      _serialized(() async {
+        final entry = await _loadLastPublishedRoster();
+        if (entry == null) return null;
+        return (version: entry.version, bundleJson: entry.bundleJson);
+      });
 
   Future<void> _saveLastPublishedRoster(
     DatabaseExecutor executor,
     TrustBundle bundle,
-    String rawJson,
-  ) async {
+    String rawJson, {
+    String? syncedAtIso,
+  }) async {
     await executor.insert('admin_published_roster', {
       'id': 1,
       'version': bundle.bundleVersion,
       'bundle_json': rawJson,
-      'synced_at': DateTime.now().toUtc().toIso8601String(),
+      'synced_at': syncedAtIso ?? DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -607,8 +612,9 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         final registrations = await _loadRegistrations();
         final pendingSync = await _loadPendingSync();
         final reviewerProfile = await _loadReviewerProfile();
+        final publishedRoster = await _loadLastPublishedRoster();
         return AdminRegistryBackup.encrypt({
-          'version': 2,
+          'version': 3,
           'identity': jsonDecode(backupIdentity.source),
           'fingerprint': identity.fingerprint,
           'bundle_version': version,
@@ -618,6 +624,13 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
           'registrations': registrations.map((r) => r.toJson()).toList(),
           'pending_sync': pendingSync.map((p) => p.toJson()).toList(),
           'reviewer_profile': reviewerProfile?.toJson(),
+          'published_roster': publishedRoster == null
+              ? null
+              : {
+                  'version': publishedRoster.version,
+                  'bundle_json': publishedRoster.bundleJson,
+                  'synced_at': publishedRoster.syncedAt,
+                },
         }, password);
       });
 
@@ -654,7 +667,23 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
             'reviewer_profile',
           }.contains,
         );
-    if ((!isV1 && !isV2) ||
+    final isV3 =
+        payloadVersion == 3 &&
+        payload.length == 9 &&
+        payload.keys.every(
+          {
+            'version',
+            'identity',
+            'fingerprint',
+            'bundle_version',
+            'devices',
+            'registrations',
+            'pending_sync',
+            'reviewer_profile',
+            'published_roster',
+          }.contains,
+        );
+    if ((!isV1 && !isV2 && !isV3) ||
         payload['bundle_version'] is! int ||
         (payload['bundle_version']! as int) < 0 ||
         (payload['bundle_version']! as int) > _maxVersion ||
@@ -674,7 +703,8 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final List<CampusRegistration> registrations;
     final List<PendingSyncOperation> pendingSync;
     final ReviewerProfile? reviewerProfile;
-    if (isV2) {
+    ({TrustBundle bundle, String rawJson, String syncedAtIso})? restoredRoster;
+    if (isV2 || isV3) {
       registrations = _decodeRegistrations(payload['registrations']);
       pendingSync = _decodePendingSync(payload['pending_sync']);
       final rawReviewer = payload['reviewer_profile'];
@@ -689,6 +719,35 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         }
       } else {
         throw const FormatException('Invalid reviewer profile in backup.');
+      }
+      if (isV3 && payload['published_roster'] != null) {
+        final rawRoster = payload['published_roster'];
+        if (rawRoster is! Map ||
+            rawRoster['version'] is! int ||
+            rawRoster['bundle_json'] is! String ||
+            rawRoster['synced_at'] is! String) {
+          throw const FormatException('Invalid published roster in backup.');
+        }
+        final rosterVersion = rawRoster['version']! as int;
+        final rawJson = rawRoster['bundle_json']! as String;
+        final syncedAtIso = rawRoster['synced_at']! as String;
+        if (DateTime.tryParse(syncedAtIso) == null) {
+          throw const FormatException('Invalid roster timestamp in backup.');
+        }
+        final parsed = TrustBundle.fromJsonString(rawJson);
+        if (parsed.bundleVersion != rosterVersion) {
+          throw const FormatException('Published roster version mismatch.');
+        }
+        await _verifyPublishedBundleForAdmin(
+          parsed,
+          identity,
+          project: parsed.directoryProject,
+        );
+        restoredRoster = (
+          bundle: parsed,
+          rawJson: rawJson,
+          syncedAtIso: syncedAtIso,
+        );
       }
     } else {
       registrations = devices.map(CampusRegistration.fromLegacyDevice).toList();
@@ -734,6 +793,14 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
           'reviewer_uid': reviewerProfile.uid,
           'reviewer_email': reviewerProfile.email,
         }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      if (restoredRoster != null) {
+        await _saveLastPublishedRoster(
+          transaction,
+          restoredRoster.bundle,
+          restoredRoster.rawJson,
+          syncedAtIso: restoredRoster.syncedAtIso,
+        );
       }
     });
   });
