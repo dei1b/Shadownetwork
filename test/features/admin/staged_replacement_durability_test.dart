@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:shadownetwork/features/admin/data/admin_signing_key_store.dart';
 import 'package:shadownetwork/features/admin/data/desktop_admin_registry_database.dart';
 import 'package:shadownetwork/features/admin/data/desktop_admin_registry_repository.dart';
