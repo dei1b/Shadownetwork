@@ -104,7 +104,10 @@ void main() {
     ]);
     expect(await receiveSos(), isFalse);
     store.bundle = approval([device(local.id, 'civilian')]);
+    expect(await inboxAccess(), SosInboxAccess.broadcastOnly);
     expect(await receiveSos(), isFalse);
+    final markResponded = container.read(setSosRespondedProvider);
+    expect(await markResponded('missing-sos', responded: true), isFalse);
     store.bundle = approval([device(local.id, 'responder')], expired: true);
     expect(await receiveSos(), isFalse);
     expect(await inboxAccess(), SosInboxAccess.awaitingRenewal);

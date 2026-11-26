@@ -623,4 +623,89 @@ void main() {
       later.toIso8601String(),
     );
   });
+
+  test('verified student receives broadcast SOS but not targeted SOS', () async {
+    final db = await LocalMessagingDatabase.open(
+      databasePath: inMemoryDatabasePath,
+      factory: databaseFactoryFfi,
+    );
+    addTearDown(db.close);
+    const student = Peer(
+      id: 'student-peer',
+      name: 'Student',
+      type: PeerType.civilian,
+      isConnected: true,
+    );
+    final network = MockScfTransportNetwork();
+    final studentTransport = network.registerPeer(student);
+    final container = ProviderContainer(
+      overrides: [
+        localMessagingDatabaseProvider.overrideWith((ref) async => db),
+        scfTransportProvider.overrideWithValue(studentTransport),
+        incomingMessageNotificationsProvider.overrideWithValue(null),
+        sosInboxAccessProvider.overrideWithValue(
+          () async => SosInboxAccess.broadcastOnly,
+        ),
+        deviceIdentityStoreProvider.overrideWithValue(
+          DeviceIdentityStore(secretStore: InMemorySecretValueStore()),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final now = DateTime.now().toUtc();
+    final broadcast = SosMessage(
+      id: 'sos-broadcast',
+      sender: sender,
+      body: 'Need help near building A',
+      category: Category.medical,
+      latitude: 7.3026,
+      longitude: 125.6888,
+      status: MessageStatus.queued,
+      createdAt: now,
+    );
+    final broadcastHash = SosMessagePayload.messageHash(broadcast);
+    network.send(
+      fromPeerId: sender.id,
+      toPeerId: student.id,
+      envelope: ScfEnvelope(
+        messageHash: broadcastHash,
+        payloadJson: SosMessagePayload.canonicalJson(broadcast),
+        hopCount: 1,
+        receivedAt: now,
+        expiresAt: now.add(const Duration(hours: 24)),
+      ),
+    );
+
+    final targeted = SosMessage(
+      id: 'sos-targeted',
+      sender: sender,
+      recipient: receiver,
+      body: 'Private responder SOS',
+      category: Category.fireSmoke,
+      status: MessageStatus.queued,
+      createdAt: now,
+    );
+    final targetedHash = SosMessagePayload.messageHash(targeted);
+    network.send(
+      fromPeerId: sender.id,
+      toPeerId: student.id,
+      envelope: ScfEnvelope(
+        messageHash: targetedHash,
+        payloadJson: SosMessagePayload.canonicalJson(targeted),
+        hopCount: 1,
+        receivedAt: now,
+        expiresAt: now.add(const Duration(hours: 24)),
+      ),
+    );
+
+    await container.read(relayRuntimeProvider.notifier).receiveIncoming();
+
+    final sosRows = await db.query(LocalMessagingDatabase.sosMessagesTable);
+    expect(sosRows, hasLength(1));
+    expect(sosRows.single['id'], 'sos-broadcast');
+
+    final markResponded = container.read(setSosRespondedProvider);
+    expect(await markResponded('sos-broadcast', responded: true), isFalse);
+  });
 }

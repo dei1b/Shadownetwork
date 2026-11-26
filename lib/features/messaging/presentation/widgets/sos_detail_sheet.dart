@@ -22,6 +22,8 @@ Future<bool?> showSosDetailSheet(
   String? ownSenderLabel,
   bool canUpdateResponse = false,
   bool canUpdateArchive = false,
+  bool showTechnicalDetails = true,
+  String? locationSummary,
 }) => showModalBottomSheet<bool>(
   context: context,
   isScrollControlled: true,
@@ -31,6 +33,8 @@ Future<bool?> showSosDetailSheet(
   builder: (sheetContext) => SosDetailSheet(
     message: message,
     ownSenderLabel: ownSenderLabel,
+    showTechnicalDetails: showTechnicalDetails,
+    locationSummary: locationSummary,
     onShowOnMap: onShowOnMap == null
         ? null
         : () {
@@ -61,6 +65,8 @@ class SosDetailSheet extends StatelessWidget {
     this.ownSenderLabel,
     this.onUpdateResponse,
     this.onUpdateArchive,
+    this.showTechnicalDetails = true,
+    this.locationSummary,
   });
 
   final SosMessage message;
@@ -69,6 +75,8 @@ class SosDetailSheet extends StatelessWidget {
   final String? ownSenderLabel;
   final VoidCallback? onUpdateResponse;
   final VoidCallback? onUpdateArchive;
+  final bool showTechnicalDetails;
+  final String? locationSummary;
 
   static const _actionStyle = ButtonStyle(
     minimumSize: WidgetStatePropertyAll(Size(0, 48)),
@@ -138,9 +146,11 @@ class SosDetailSheet extends StatelessWidget {
                   _DetailRow(
                     label: 'Location',
                     value: hasLocation
-                        ? '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}'
+                        ? (showTechnicalDetails
+                              ? '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}'
+                              : (locationSummary ?? 'Location attached'))
                         : 'No GPS location attached',
-                    description: hasLocation && accuracy != null
+                    description: showTechnicalDetails && hasLocation && accuracy != null
                         ? 'GPS accuracy ±${accuracy.toStringAsFixed(1)} m'
                         : null,
                   ),
@@ -231,13 +241,15 @@ class SosDetailSheet extends StatelessWidget {
                     if (!isRevoked) const Text('Created on this phone'),
                     SosSendStatus(message: message),
                   ],
-                  const Divider(),
-                  _SosDeliveryDetails(
-                    message: message,
-                    isOwn: isOwn,
-                    showCreatedTime: !showCreatedTime,
-                    showGpsAccuracy: !hasLocation,
-                  ),
+                  if (showTechnicalDetails) ...[
+                    const Divider(),
+                    _SosDeliveryDetails(
+                      message: message,
+                      isOwn: isOwn,
+                      showCreatedTime: !showCreatedTime,
+                      showGpsAccuracy: !hasLocation,
+                    ),
+                  ],
                 ],
               ),
             ),

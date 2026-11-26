@@ -534,6 +534,38 @@ void main() {
       expect(find.byType(SosDetailSheet), findsNothing);
     }
   });
+
+  testWidgets('student detail sheet hides technical delivery info and coordinates', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        SosDetailSheet(
+          message: _message().copyWith(
+            latitude: 7.3026,
+            longitude: 125.6888,
+            gpsAccuracyMeters: 4.5,
+          ),
+          showTechnicalDetails: false,
+          locationSummary: '120 m away · Location attached',
+          onShowOnMap: () {},
+          onMessageSender: () {},
+        ),
+        () => _now,
+      ),
+    );
+    expect(find.text('120 m away · Location attached'), findsOneWidget);
+    expect(find.text('Show on map'), findsOneWidget);
+    expect(find.text('Message sender'), findsOneWidget);
+    expect(find.text('Mark responded'), findsNothing);
+    expect(find.text('Delivery details'), findsNothing);
+    expect(find.text('TTL'), findsNothing);
+    expect(find.text('Hop count'), findsNothing);
+    expect(find.text('Message hash'), findsNothing);
+    expect(find.textContaining('7.30260'), findsNothing);
+    expect(find.textContaining('125.68880'), findsNothing);
+    expect(find.textContaining('GPS accuracy'), findsNothing);
+  });
 }
 
 Future<void> _toggleDeliveryDetails(WidgetTester tester) async {

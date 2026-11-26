@@ -589,6 +589,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           approvalUnavailable: approvalUnavailable,
           messageTabLabel: _isResponder ? 'Alerts' : 'Messages',
           trustedRecipients: trustedRecipients,
+          showCoordinates: _isResponder,
           onUpdateLocation: () => _locateMe(showError: false),
           onSend: _saveSosMessage,
         );
@@ -1486,6 +1487,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                         typeLabel: _peerTypeLabel(peer),
                         actionLabel: _peerActionLabel(peer),
                         actionStyle: _peerActionStyle(peer),
+                        showTechnicalDetails: _isResponder,
                         onActionTap: () => _connectToPeer(peer),
                         onShowLocation: location == null
                             ? null
@@ -1820,18 +1822,28 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _openSosMessage(messaging.SosMessage message) async {
     final isLocalSender = _isLocalPeerId(message.sender.id);
-    if (!_isResponder && !isLocalSender) {
-      await _openConversation(message.sender, linkedSosMessage: message);
-      return;
-    }
     final canUpdateArchive =
         _ownSosSenderLabel(message) != null &&
         message.trustStatus != DeviceTrustStatus.revoked;
+    final hasValidLocation =
+        message.latitude != null &&
+        message.longitude != null &&
+        PeerLocationShare.hasValidCoordinates(
+          message.latitude!,
+          message.longitude!,
+        );
+    final locationSummary = !hasValidLocation
+        ? null
+        : _myPosition != null
+        ? '${_distanceTextForMessage(message)} · Location attached'
+        : 'Location attached';
     final updateResponse = await showSosDetailSheet(
       context,
       message: message,
       ownSenderLabel: _ownSosSenderLabel(message),
       canUpdateArchive: canUpdateArchive,
+      showTechnicalDetails: _isResponder,
+      locationSummary: _isResponder ? null : locationSummary,
       canUpdateResponse:
           _isResponder &&
           !isLocalSender &&
@@ -1844,9 +1856,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       onMessageSender: isLocalSender
           ? null
           : () => _openConversation(message.sender, linkedSosMessage: message),
-      onShowOnMap: message.latitude == null || message.longitude == null
-          ? null
-          : () => _focusSosLocation(message),
+      onShowOnMap: !hasValidLocation ? null : () => _focusSosLocation(message),
     );
     if (!mounted || updateResponse != true) return;
     final moveToArchive = canUpdateArchive
@@ -4141,6 +4151,7 @@ class _SosComposerSheet extends StatefulWidget {
     required this.trustedRecipients,
     required this.onUpdateLocation,
     required this.onSend,
+    this.showCoordinates = true,
   });
 
   final _SosDraft draft;
@@ -4148,6 +4159,7 @@ class _SosComposerSheet extends StatefulWidget {
   final bool approvalUnavailable;
   final String messageTabLabel;
   final List<TrustedDevice> trustedRecipients;
+  final bool showCoordinates;
   final Future<LatLng?> Function() onUpdateLocation;
   final Future<void> Function(
     String body,
@@ -4255,7 +4267,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
           (device) => device.deviceId == recipientId,
         );
     final location = _location;
-    final coordinates = location == null
+    final coordinates = location == null || !widget.showCoordinates
         ? null
         : '${location.latitude.abs().toStringAsFixed(4)}° '
               '${location.latitude >= 0 ? 'N' : 'S'}, '
@@ -4728,6 +4740,7 @@ class _PeerDirectoryCard extends StatelessWidget {
     required this.actionStyle,
     required this.onActionTap,
     this.onShowLocation,
+    this.showTechnicalDetails = true,
   });
 
   final messaging.Peer peer;
@@ -4740,6 +4753,7 @@ class _PeerDirectoryCard extends StatelessWidget {
   final _PeerActionStyle actionStyle;
   final VoidCallback onActionTap;
   final VoidCallback? onShowLocation;
+  final bool showTechnicalDetails;
 
   @override
   Widget build(BuildContext context) {
@@ -4788,17 +4802,19 @@ class _PeerDirectoryCard extends StatelessWidget {
                     color: Color(0xFF171717),
                   ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  'ID: ${peer.id}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF6D6D6D),
+                if (showTechnicalDetails) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'ID: ${peer.id}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Color(0xFF6D6D6D),
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 8),
                 Wrap(
                   crossAxisAlignment: WrapCrossAlignment.center,
@@ -4813,12 +4829,16 @@ class _PeerDirectoryCard extends StatelessWidget {
                           color: signalColor,
                         ),
                         const SizedBox(width: 5),
-                        Text(
-                          signalLabel,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF676767),
+                        Flexible(
+                          child: Text(
+                            signalLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF676767),
+                            ),
                           ),
                         ),
                       ],
@@ -4841,12 +4861,16 @@ class _PeerDirectoryCard extends StatelessWidget {
                           size: 16,
                         ),
                         const SizedBox(width: 5),
-                        Text(
-                          typeLabel,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF676767),
+                        Flexible(
+                          child: Text(
+                            typeLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF676767),
+                            ),
                           ),
                         ),
                       ],

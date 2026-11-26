@@ -609,14 +609,18 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         }
         sosAccess ??= await ref.read(sosInboxAccessProvider)();
         if (sosAccess == SosInboxAccess.awaitingRenewal) continue;
-        if (sosAccess == SosInboxAccess.denied) {
+        final isSecureSos = SecureSosMessagePayload.supportsVersion(
+          payload['schema_version'],
+        );
+        final allowBroadcastStudent =
+            sosAccess == SosInboxAccess.broadcastOnly &&
+            targetPeerId == null &&
+            !isSecureSos;
+        if (sosAccess != SosInboxAccess.allowed && !allowBroadcastStudent) {
           // Keep the forwarding copy so a rescuer can receive it later.
           await scfService.discardPendingMessage(envelope.messageHash);
           continue;
         }
-        final isSecureSos = SecureSosMessagePayload.supportsVersion(
-          payload['schema_version'],
-        );
         final incoming = await RelayPayloadCodec.decodeFields(
           () async => isSecureSos
               ? await SecureSosMessagePayload.decode(

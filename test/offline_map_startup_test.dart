@@ -927,7 +927,8 @@ void main() {
     await tester.ensureVisible(update);
     await tester.tap(update);
     await tester.pump();
-    expect(find.text('7.3026° N, 125.6888° E'), findsOneWidget);
+    expect(find.text('Location attached'), findsOneWidget);
+    expect(find.text('7.3026° N, 125.6888° E'), findsNothing);
 
     gpsEnabled = false;
     await tester.tap(update);
@@ -938,7 +939,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('7.3026° N, 125.6888° E'), findsOneWidget);
+    expect(find.text('Location attached'), findsOneWidget);
 
     final send = find.text('Send SOS');
     await tester.tap(send);
@@ -1063,6 +1064,112 @@ void main() {
       );
       expect(helper.style?.fontSize, 13);
 
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    },
+  );
+
+  testWidgets(
+    'verified student opens incoming SOS details without respond or technical fields',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(430, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final originalFactory = ml.MapLibrePlatform.createInstance;
+      ml.MapLibrePlatform.createInstance = _MapPlatform.new;
+      addTearDown(() => ml.MapLibrePlatform.createInstance = originalFactory);
+      SharedPreferences.setMockInitialValues({});
+      addTearDown(() => SharedPreferences.setMockInitialValues({}));
+
+      final now = DateTime.now().toUtc();
+      final incomingBroadcast = SosMessage(
+        id: 'sos-incoming-1',
+        sender: const Peer(
+          id: 'sender-device-1',
+          name: 'Ana Cruz',
+          type: PeerType.civilian,
+          isConnected: false,
+        ),
+        body: 'Trapped near Science Building.',
+        category: Category.medical,
+        latitude: 7.3026,
+        longitude: 125.6888,
+        gpsAccuracyMeters: 5.0,
+        hopCount: 2,
+        ttl: const Duration(hours: 24),
+        messageHash:
+            'abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567',
+        status: MessageStatus.received,
+        receivedAt: now,
+        createdAt: now.subtract(const Duration(minutes: 2)),
+        trustStatus: DeviceTrustStatus.approved,
+        trustOwnerName: 'Ana Cruz',
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            nearbyPeersProvider.overrideWith(
+              (ref) async => const [
+                Peer(
+                  id: 'peer-device-99',
+                  name: 'Campus Peer',
+                  type: PeerType.civilian,
+                  isConnected: true,
+                ),
+              ],
+            ),
+            sosMessagesProvider.overrideWith((ref) async => [incomingBroadcast]),
+            conversationsProvider.overrideWith((ref) async => const []),
+            mapTileCacheStoreProvider.overrideWith(
+              (ref) async => MemCacheStore(),
+            ),
+            relayRuntimeProvider.overrideWith(_NoopRelayRuntime.new),
+            localPeerProvider.overrideWith(
+              (ref) async => const Peer(
+                id: 'student-local',
+                name: 'Student Local',
+                type: PeerType.civilian,
+                isConnected: false,
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: HomePage(
+              accessProfile: DeviceAccessProfile(
+                level: DeviceAccessLevel.civilian,
+                deviceId: 'student-local',
+                ownerName: 'Student Local',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Nearby'));
+      await tester.pump();
+      expect(find.text('Campus Peer'), findsOneWidget);
+      expect(find.text('ID: peer-device-99'), findsNothing);
+
+      await tester.tap(find.text('Messages'));
+      await tester.pump();
+      final sosCard = find.byKey(const ValueKey('sos-card-sos-incoming-1'));
+      expect(sosCard, findsOneWidget);
+      await tester.tap(sosCard);
+      await tester.pumpAndSettle();
+
+      expect(find.text('SOS details'), findsOneWidget);
+      expect(find.text('Location attached'), findsOneWidget);
+      expect(find.text('Show on map'), findsOneWidget);
+      expect(find.text('Message sender'), findsOneWidget);
+      expect(find.text('Mark responded'), findsNothing);
+      expect(find.text('Delivery details'), findsNothing);
+      expect(find.text('TTL'), findsNothing);
+      expect(find.text('Hop count'), findsNothing);
+      expect(find.textContaining('7.30260'), findsNothing);
+
+      await tester.tap(find.byTooltip('Close SOS details'));
+      await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     },

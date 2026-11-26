@@ -14,7 +14,7 @@ final deviceAccessResolverProvider = Provider<DeviceAccessResolver>(
   (ref) => const DeviceAccessResolver(),
 );
 
-enum SosInboxAccess { allowed, awaitingRenewal, denied }
+enum SosInboxAccess { allowed, broadcastOnly, awaitingRenewal, denied }
 
 final sosInboxAccessProvider = Provider<Future<SosInboxAccess> Function()>((
   ref,
@@ -46,8 +46,13 @@ final sosInboxAccessProvider = Provider<Future<SosInboxAccess> Function()>((
               ? expiresAt.subtract(const Duration(microseconds: 1))
               : now,
         );
-    if (!profile.canAccessResponderInterface) return SosInboxAccess.denied;
-    return expired ? SosInboxAccess.awaitingRenewal : SosInboxAccess.allowed;
+    if (profile.canAccessResponderInterface) {
+      return expired ? SosInboxAccess.awaitingRenewal : SosInboxAccess.allowed;
+    }
+    if (!expired && profile.isApproved) {
+      return SosInboxAccess.broadcastOnly;
+    }
+    return SosInboxAccess.denied;
   };
 });
 
