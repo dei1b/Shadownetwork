@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -28,6 +29,7 @@ class UnifiedRegistrationsWorkspace extends StatefulWidget {
     this.publisherClient,
     this.validationPanel,
     this.initialSessionForTesting,
+    this.onlineRefreshEnabled = true,
   });
 
   final DesktopAdminRegistryRepository? registry;
@@ -37,6 +39,7 @@ class UnifiedRegistrationsWorkspace extends StatefulWidget {
   final HostedPublisherClient? publisherClient;
   final Widget? validationPanel;
   final ({String token, String uid, String email})? initialSessionForTesting;
+  final bool onlineRefreshEnabled;
 
   @override
   State<UnifiedRegistrationsWorkspace> createState() =>
@@ -44,7 +47,8 @@ class UnifiedRegistrationsWorkspace extends StatefulWidget {
 }
 
 class _UnifiedRegistrationsWorkspaceState
-    extends State<UnifiedRegistrationsWorkspace> {
+    extends State<UnifiedRegistrationsWorkspace>
+    with WidgetsBindingObserver {
   late final RegistrationReviewApi _api =
       widget.reviewApi ?? RegistrationReviewApi.live();
   late final HostedPublisherClient _publisher =
@@ -59,6 +63,9 @@ class _UnifiedRegistrationsWorkspaceState
 
   bool _loading = true;
   bool _busy = false;
+  Timer? _refreshTimer;
+  String? _syncError;
+  DateTime? _lastOnlineSync;
   String? _loadError;
   String _statusFilter = 'all';
   String _roleFilter = 'all';
@@ -100,6 +107,11 @@ class _UnifiedRegistrationsWorkspaceState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshTimer = Timer.periodic(
+      const Duration(minutes: 1),
+      (_) => _refreshAutomatically(),
+    );
     _loadLocalState();
     if (_session != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -111,7 +123,46 @@ class _UnifiedRegistrationsWorkspaceState
   }
 
   @override
+  void didUpdateWidget(covariant UnifiedRegistrationsWorkspace oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.onlineRefreshEnabled && widget.onlineRefreshEnabled) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _refreshAutomatically(),
+      );
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshAutomatically();
+  }
+
+  Future<void> _refreshAutomatically() async {
+    if (!mounted ||
+        _loading ||
+        _busy ||
+        _session == null ||
+        !widget.onlineRefreshEnabled ||
+        ModalRoute.of(context)?.isCurrent == false) {
+      return;
+    }
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    setState(() => _busy = true);
+    try {
+      await _refreshOnline(reconcile: _hasLocalRegistry);
+    } catch (_) {
+      // The persistent sync error below keeps failures visible without repeated
+      // background notifications. The next check or manual Refresh can retry.
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
   void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _search.dispose();
     _email.dispose();
     _password.dispose();
@@ -201,28 +252,44 @@ class _UnifiedRegistrationsWorkspaceState
   });
 
   Future<void> _refreshOnline({bool reconcile = false}) async {
+    try {
+      await _fetchOnline(reconcile: reconcile);
+      if (!mounted) return;
+      setState(() {
+        _syncError = null;
+        _lastOnlineSync = DateTime.now();
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _syncError = error is StateError
+              ? error.message.toString()
+              : 'Could not check registrations. Check the connection and retry.',
+        );
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _fetchOnline({bool reconcile = false}) async {
     final session = _session;
     if (session == null) return;
     final apps = await _api.list(session.token);
     List<ReviewApplication> remoteRegs = [];
     List<ReviewApplication> links = [];
     List<ReviewApplication> recoveries = [];
-    try {
-      remoteRegs = await _api.listCollection(
-        session.token,
-        'campusRegistrations',
-      );
-      links = await _api.listCollection(
-        session.token,
-        'registrationLinkRequests',
-      );
-      recoveries = await _api.listCollection(
-        session.token,
-        'registrationRecoveryRequests',
-      );
-    } on StateError {
-      // Optional collections remain gracefully empty if project rules are older.
-    }
+    remoteRegs = await _api.listCollection(
+      session.token,
+      'campusRegistrations',
+    );
+    links = await _api.listCollection(
+      session.token,
+      'registrationLinkRequests',
+    );
+    recoveries = await _api.listCollection(
+      session.token,
+      'registrationRecoveryRequests',
+    );
     if (widget.registry != null) {
       for (final remote in remoteRegs.where((r) => r.status == 'deleted')) {
         final local = _localRegistrations
@@ -2712,6 +2779,22 @@ class _UnifiedRegistrationsWorkspaceState
                   ),
                 ],
               ),
+            if (_session != null) ...[
+              const SizedBox(height: 8),
+              if (_syncError != null)
+                Text(
+                  'Online sync failed: $_syncError Saved registrations are still shown. Press Refresh to retry.',
+                  key: const Key('registration-sync-error'),
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                )
+              else
+                Text(
+                  _lastOnlineSync == null
+                      ? 'Checking online registrations…'
+                      : 'Online list updated at ${TimeOfDay.fromDateTime(_lastOnlineSync!).format(context)}. Checks every minute while this page is active.',
+                  key: const Key('registration-sync-status'),
+                ),
+            ],
           ],
         ),
       ),
