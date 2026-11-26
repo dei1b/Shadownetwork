@@ -1307,9 +1307,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final oldPhone = registration.activePhone;
     final sameId =
         oldPhone.deviceId.toLowerCase() == newPhone.deviceId.toLowerCase();
-    final nextKeyVersion = sameId
-        ? max(oldPhone.keyVersion + 1, newPhone.keyVersion)
-        : newPhone.keyVersion;
+    final nextKeyVersion = newPhone.keyVersion;
     final resolvedPhone = RegistrationPhoneBinding(
       deviceId: newPhone.deviceId,
       publicKey: newPhone.publicKey,

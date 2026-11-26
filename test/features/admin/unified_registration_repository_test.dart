@@ -180,7 +180,7 @@ void main() {
     expect(bundle1.approvedDevices.map((d) => d.deviceId), contains('new-device'));
     expect(diffReplace.registration.retiredKeys, hasLength(1));
 
-    // Data clear reuses same deviceId -> keyVersion increments and old key fingerprint retired.
+    // Data clear reuses same deviceId -> keyVersion matches new phone keys while revision & retiredKeys track history.
     final sameReplace = await repo.stagePhoneReplacement(
       registration: diffReplace.registration,
       newPhone: RegistrationPhoneBinding(
@@ -193,7 +193,11 @@ void main() {
       directoryProject: 'dnsc-pilot',
       previousVersion: bundle1.bundleVersion,
     );
-    expect(sameReplace.registration.activePhone.keyVersion, 2);
+    expect(sameReplace.registration.activePhone.keyVersion, 1);
+    expect(
+      sameReplace.registration.revision,
+      greaterThan(diffReplace.registration.revision),
+    );
     expect(sameReplace.registration.retiredKeys, hasLength(2));
   });
 

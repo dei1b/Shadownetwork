@@ -758,3 +758,84 @@ test('approve_link rejects revoked or already-claimed phones and supports legacy
     (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'already_linked',
   );
 });
+
+test('same-deviceId replacement preserves replacement QR key_version 1 and increments revision', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const firstQr = makeSignedQr('phone-cleared-node');
+  const secondQr = makeSignedQr('phone-cleared-node');
+
+  const init = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-clear-init',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: {
+      uid: 'uid-cleared',
+      affiliation: 'student',
+      displayName: 'Cleared Node Student',
+      studentNumber: '2026-9911',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'A',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: firstQr.rawJson,
+    },
+    payload: { registrationId: 'reg-cleared-node', role: 'civilian' },
+    now,
+  });
+
+  const rep = applyDecisionAndBuildCommit({
+    action: 'approve_replacement',
+    decisionId: 'dec-clear-rep',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: init.bundle },
+    application: {
+      uid: 'uid-cleared',
+      affiliation: 'student',
+      displayName: 'Cleared Node Student',
+      studentNumber: '2026-9911',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'A',
+      registrationId: 'reg-cleared-node',
+      status: 'published',
+      revision: 1,
+      deviceRegistration: firstQr.rawJson,
+      replacementRequest: { status: 'submitted', deviceRegistration: secondQr.rawJson },
+    },
+    registration: {
+      registrationId: 'reg-cleared-node',
+      accountUid: 'uid-cleared',
+      affiliation: 'student',
+      displayName: 'Cleared Node Student',
+      studentNumber: '2026-9911',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'A',
+      deviceId: 'phone-cleared-node',
+      publicKey: firstQr.publicKey,
+      signingPublicKey: firstQr.signingPublicKey,
+      keyVersion: 1,
+      revision: 1,
+    },
+    payload: { registrationId: 'reg-cleared-node', role: 'civilian' },
+    now,
+  });
+
+  const bundle2 = JSON.parse(rep.bundle);
+  assert.equal(bundle2.approved_devices.length, 1);
+  assert.equal(bundle2.approved_devices[0].key_version, 1);
+  assert.equal(bundle2.approved_devices[0].public_key, secondQr.publicKey);
+  const regWrite = rep.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  assert.equal(regWrite.keyVersion, 1);
+  assert.equal(regWrite.retiredKeys.length, 1);
+});

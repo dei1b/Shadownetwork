@@ -971,9 +971,7 @@ export function applyDecisionAndBuildCommit({
     const oldIdLower = String(oldPhone.deviceId).toLowerCase();
     const newIdLower = newPhone.deviceId.toLowerCase();
     const sameId = oldIdLower === newIdLower;
-    const nextKeyVersion = sameId
-      ? Math.max(Number(oldPhone.keyVersion ?? 1) + 1, newPhone.keyVersion)
-      : newPhone.keyVersion;
+    const nextKeyVersion = newPhone.keyVersion;
     if (!sameId && oldPhone.publicKey) {
       approved.delete(oldIdLower);
       revoked.set(oldIdLower, {
