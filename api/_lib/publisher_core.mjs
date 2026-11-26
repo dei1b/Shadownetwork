@@ -326,6 +326,30 @@ export function signTrustBundle({
   now = new Date(),
   validityDays = 30,
 }) {
+  const seenApproved = new Set();
+  const seenRevoked = new Set();
+  for (const device of approvedDevices ?? []) {
+    const id = String(device?.device_id ?? '').trim().toLowerCase();
+    if (!id || seenApproved.has(id)) {
+      throw new PublisherError(
+        500,
+        'Trust bundle contains a missing or duplicate approved device ID.',
+        'duplicate_device_id',
+      );
+    }
+    seenApproved.add(id);
+  }
+  for (const device of revokedDevices ?? []) {
+    const id = String(device?.device_id ?? '').trim().toLowerCase();
+    if (!id || seenRevoked.has(id) || seenApproved.has(id)) {
+      throw new PublisherError(
+        500,
+        'Approved and revoked device lists must be disjoint without duplicates.',
+        'duplicate_device_id',
+      );
+    }
+    seenRevoked.add(id);
+  }
   const issuedAt = now.toISOString();
   const expiresAt = new Date(now.getTime() + validityDays * 86400_000).toISOString();
   const unsigned = {
@@ -957,6 +981,7 @@ export function applyDecisionAndBuildCommit({
       expectedProject: directoryProject,
     });
     const reviewed = buildIdentityFieldsPayload(payload.reviewedFields ?? registration);
+    revoked.delete(keyLower);
     approved.set(keyLower, {
       device_id: phone.deviceId,
       owner_name: reviewed.displayName,
@@ -1046,6 +1071,7 @@ export function applyDecisionAndBuildCommit({
       });
     }
     const ownerFields = buildIdentityFieldsPayload(payload.reviewedFields ?? registration ?? application ?? {});
+    revoked.delete(newIdLower);
     approved.set(newIdLower, {
       device_id: newPhone.deviceId,
       owner_name: ownerFields.displayName,

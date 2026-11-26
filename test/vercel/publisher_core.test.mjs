@@ -9,6 +9,7 @@ import {
   ed25519Sign,
   keyIdForX25519PublicKey,
   PublisherError,
+  signTrustBundle,
   toBase64UrlPadded,
   verifyDeviceRegistrationQr,
   verifyTrustBundle,
@@ -1031,5 +1032,157 @@ test('approve_profile_change updates staff and student affiliation fields and tr
   assert.equal(
     stuBundle.approved_devices.find((d) => d.device_id === 'stu-prof-1').owner_name,
     'Updated Student Name',
+  );
+});
+
+test('R1: returning to an earlier phone removes superseded revocation and signTrustBundle rejects overlapping device IDs', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qrA = makeSignedQr('phone-aba-a');
+  const qrB = makeSignedQr('phone-aba-b');
+  const qrOtherApproved = makeSignedQr('phone-other-approved');
+  const qrOtherRevoked = makeSignedQr('phone-other-revoked');
+
+  const v1 = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-aba-1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: {
+      uid: 'uid-other-app',
+      affiliation: 'student',
+      displayName: 'Unrelated Student',
+      studentNumber: '2026-1111',
+      course: 'BSIT',
+      yearLevel: '1',
+      sectionSet: 'A',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: qrOtherApproved.rawJson,
+    },
+    payload: { registrationId: 'reg-other-app', role: 'civilian' },
+    now,
+  });
+
+  const v2 = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-aba-2',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: v1.bundle },
+    registration: {
+      registrationId: 'reg-other-revoked',
+      source: 'qr',
+      status: 'revoked',
+      affiliation: 'student',
+      displayName: 'Unrelated Revoked',
+      studentNumber: '2026-1112',
+      course: 'BSIT',
+      yearLevel: '1',
+      sectionSet: 'A',
+      deviceRegistration: qrOtherRevoked.rawJson,
+    },
+    payload: { registrationId: 'reg-other-revoked', role: 'civilian', targetStatus: 'revoked' },
+    now,
+  });
+
+  // Approve phone A -> v3
+  const v3 = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-aba-3',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 2, bundle: v2.bundle },
+    application: {
+      uid: 'uid-aba-owner',
+      affiliation: 'student',
+      displayName: 'Returning Phone Student',
+      studentNumber: '2026-2222',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'B',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: qrA.rawJson,
+    },
+    payload: { registrationId: 'reg-aba-owner', role: 'civilian' },
+    now,
+  });
+  const regAfterV3 = v3.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  const appAfterV3 = v3.writes.find((w) => w.collection === 'pilotApplications').fields;
+
+  // Replace A -> B -> v4 (A revoked, B approved)
+  const v4 = applyDecisionAndBuildCommit({
+    action: 'approve_replacement',
+    decisionId: 'dec-aba-4',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 3, bundle: v3.bundle },
+    application: {
+      ...appAfterV3,
+      replacementRequest: { status: 'submitted', deviceRegistration: qrB.rawJson },
+    },
+    registration: regAfterV3,
+    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Temporary spare phone' },
+    now,
+  });
+  const b4 = JSON.parse(v4.bundle);
+  assert.deepEqual(b4.approved_devices.map((d) => d.device_id).sort(), ['phone-aba-b', 'phone-other-approved']);
+  assert.deepEqual(b4.revoked_devices.map((d) => d.device_id).sort(), ['phone-aba-a', 'phone-other-revoked']);
+
+  const regAfterV4 = v4.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  const appAfterV4 = v4.writes.find((w) => w.collection === 'pilotApplications').fields;
+
+  // Return B -> A -> v5 (A approved cleanly, A removed from revoked, B revoked, unrelated kept)
+  const v5 = applyDecisionAndBuildCommit({
+    action: 'approve_replacement',
+    decisionId: 'dec-aba-5',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 4, bundle: v4.bundle },
+    application: {
+      ...appAfterV4,
+      replacementRequest: { status: 'submitted', deviceRegistration: qrA.rawJson },
+    },
+    registration: regAfterV4,
+    payload: { registrationId: 'reg-aba-owner', accountUid: 'uid-aba-owner', role: 'civilian', reason: 'Returned to primary phone' },
+    now,
+  });
+  const b5 = verifyTrustBundle(JSON.parse(v5.bundle), {
+    expectedProject: 'dnsc-pilot',
+    expectedRootPublicKey: root.publicKeyBase64Url,
+    now,
+  });
+  assert.deepEqual(b5.approved_devices.map((d) => d.device_id).sort(), ['phone-aba-a', 'phone-other-approved']);
+  assert.deepEqual(b5.revoked_devices.map((d) => d.device_id).sort(), ['phone-aba-b', 'phone-other-revoked']);
+  const regAfterV5 = v5.writes.find((w) => w.collection === 'campusRegistrations').fields;
+  assert.equal(regAfterV5.retiredKeys.length, 2);
+  assert.equal(regAfterV5.deviceId, 'phone-aba-a');
+
+  // signTrustBundle itself enforces disjoint approved/revoked device IDs.
+  assert.throws(
+    () =>
+      signTrustBundle({
+        version: 6,
+        directoryProject: 'dnsc-pilot',
+        publisherKeyPair: publisher,
+        delegation,
+        approvedDevices: [{ device_id: 'Phone-Dup', status: 'approved' }],
+        revokedDevices: [{ device_id: 'phone-dup', status: 'revoked' }],
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.code === 'duplicate_device_id',
   );
 });
