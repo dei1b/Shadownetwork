@@ -10,12 +10,17 @@ import 'package:qr_flutter/qr_flutter.dart';
 import '../../../messaging/domain/entities/peer.dart';
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
 import '../../../messaging/presentation/providers/peer_location_providers.dart';
+import '../../../registration/data/pilot_registration.dart';
 import '../../../security/domain/entities/device_crypto_identity.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../data/services/trust_bundle_store.dart';
+import '../../domain/entities/approval_receipt.dart';
 import '../../domain/entities/device_access_profile.dart';
 import '../../domain/entities/trust_bundle.dart';
+import '../../domain/services/multi_frame_qr.dart';
 import '../providers/device_access_provider.dart';
+
+const _issuerFingerprint = String.fromEnvironment('DNSC_ISSUER_FINGERPRINT');
 
 class TrustBundleImportPage extends ConsumerStatefulWidget {
   const TrustBundleImportPage({super.key});
@@ -149,17 +154,38 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     });
 
     try {
-      final candidate = TrustBundle.fromJsonString(source.trim());
+      final pkg = ApprovalQrPackage.parse(source.trim());
+      final candidate = pkg.bundleJson.trim().isEmpty
+          ? null
+          : TrustBundle.fromJsonString(pkg.bundleJson);
+      final keyIdToConfirm =
+          candidate?.rootAuthorityIssuer?.signingKeyId ??
+          pkg.receipt?.issuer.signingKeyId;
       if (!await _store.hasPinnedIssuer()) {
         if (!mounted) {
           return;
         }
-        final trusted = await _confirmFirstAdmin(candidate);
+        final trusted = await _confirmFirstAdmin(keyIdToConfirm);
         if (trusted != true) {
           return;
         }
       }
-      final bundle = await _store.importBundleJson(source.trim());
+      final peer = await ref.read(localPeerProvider.future);
+      final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+      final signing = await ref.read(deviceSigningIdentityProvider.future);
+      final imported = await _store.importApprovalPayload(
+        source.trim(),
+        directoryProject: pilotRegistrationIsLive &&
+                liveRegistrationProject.isNotEmpty
+            ? liveRegistrationProject
+            : null,
+        issuerFingerprint: _issuerFingerprint,
+        localDeviceId: peer.id,
+        localPublicKey: crypto.encodedPublicKey,
+        localSigningPublicKey: signing.encodedPublicKey,
+        localKeyVersion: crypto.keyVersion,
+      );
+      final bundle = imported.bundle ?? await _store.loadBundle();
       container.invalidate(deviceAccessProfileProvider);
       if (!mounted) {
         return;
@@ -168,6 +194,11 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
         _bundle = bundle;
         _jsonController.clear();
       });
+      if (imported.receipt != null) {
+        _showSnackBar(
+          'Approval saved. Sign in under Profile later to link this phone.',
+        );
+      }
     } on FormatException catch (error) {
       if (!mounted) {
         return;
@@ -196,7 +227,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
     }
   }
 
-  Future<bool?> _confirmFirstAdmin(TrustBundle bundle) {
+  Future<bool?> _confirmFirstAdmin(String? signingKeyId) {
     return showDialog<bool>(
       context: context,
       builder: (context) {
@@ -211,7 +242,7 @@ class _TrustBundleImportPageState extends ConsumerState<TrustBundleImportPage> {
             style: MobileUiTokens.sectionHeading,
           ),
           content: Text(
-            'Only continue if your campus administrator gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${bundle.issuer?.signingKeyId ?? 'unavailable'}',
+            'Only continue if your campus administrator gave you this code. This phone will accept future approval updates from the same admin.\n\nAdmin ID: ${signingKeyId ?? 'unavailable'}',
             style: MobileUiTokens.body.copyWith(fontSize: 14),
           ),
           actions: [
@@ -429,10 +460,14 @@ class _TrustBundleScannerPage extends StatefulWidget {
 }
 
 class _TrustBundleScannerPageState extends State<_TrustBundleScannerPage> {
+  final _collector = MultiFrameQrCollector();
+  MultiFrameQrProgress? _progress;
+  String? _scanError;
   bool _handledCode = false;
 
   @override
   Widget build(BuildContext context) {
+    final progress = _progress;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -454,8 +489,20 @@ class _TrustBundleScannerPageState extends State<_TrustBundleScannerPage> {
               if (rawValue == null || rawValue.trim().isEmpty) {
                 return;
               }
-              _handledCode = true;
-              Navigator.of(context).pop(rawValue);
+              try {
+                final next = _collector.accept(rawValue);
+                if (next.isComplete) {
+                  _handledCode = true;
+                  Navigator.of(context).pop(next.completedPayload);
+                  return;
+                }
+                setState(() {
+                  _progress = next;
+                  _scanError = null;
+                });
+              } on FormatException catch (error) {
+                setState(() => _scanError = error.message);
+              }
             },
           ),
           Center(
@@ -468,16 +515,26 @@ class _TrustBundleScannerPageState extends State<_TrustBundleScannerPage> {
               ),
             ),
           ),
-          const Positioned(
+          Positioned(
             left: 24,
             right: 24,
             bottom: 32,
-            child: Text(
-              'Point the phone at the QR shown on the PC admin dashboard.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.72),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                _scanError ??
+                    (progress != null && progress.totalFrames > 1
+                        ? 'Scanned ${progress.receivedCount} of ${progress.totalFrames} frames — hold steady for remaining codes.'
+                        : 'Point the phone at the QR shown on the PC admin dashboard.'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _scanError != null ? Colors.amberAccent : Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
           ),

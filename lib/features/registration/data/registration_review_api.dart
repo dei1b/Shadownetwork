@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../../admin/domain/entities/campus_registration.dart';
+
 const reviewProject = String.fromEnvironment('DNSC_FIREBASE_PROJECT');
 const reviewApiKey = String.fromEnvironment('DNSC_FIREBASE_API_KEY');
 
@@ -32,6 +34,8 @@ class ReviewApplication {
 
   static dynamic _decode(Map value) {
     if (value.containsKey('stringValue')) return value['stringValue'];
+    if (value.containsKey('booleanValue')) return value['booleanValue'];
+    if (value.containsKey('timestampValue')) return value['timestampValue'];
     if (value.containsKey('integerValue')) {
       return int.parse(value['integerValue'].toString());
     }
@@ -40,7 +44,8 @@ class ReviewApplication {
       return values.map((item) => _decode(item as Map)).toList();
     }
     if (value.containsKey('mapValue')) {
-      return (value['mapValue']['fields'] as Map).map(
+      final fields = value['mapValue']['fields'] as Map? ?? const {};
+      return fields.map(
         (key, item) => MapEntry(key, _decode(item as Map)),
       );
     }
@@ -150,7 +155,13 @@ class RegistrationReviewApi {
     String status,
     String reason, {
     String? role,
+    Map<String, dynamic>? reviewedFields,
+    String? registrationId,
+    String? decisionId,
+    List<String>? editedFields,
   }) => update(token, application, {
+    ...?reviewedFields,
+    'registrationId': ?registrationId,
     'status': status,
     'revision': application.nextRevision,
     'publicationStatus': status == 'approved_pending_publication'
@@ -164,9 +175,383 @@ class RegistrationReviewApi {
         'reason': reason,
         'revision': application.nextRevision,
         'role': ?role,
+        'decisionId': ?decisionId,
+        'editedFields': ?editedFields,
       },
     ],
   });
+
+  Uri _collectionUri(String name) => collection.replace(
+    path: '/v1/$_databasePath/documents/$name',
+  );
+
+  Future<List<ReviewApplication>> listCollection(
+    String token,
+    String name,
+  ) async {
+    final documents = <ReviewApplication>[];
+    String? page;
+    final uri = _collectionUri(name);
+    do {
+      final response = await http
+          .get(
+            uri.replace(
+              queryParameters: {'pageSize': '100', 'pageToken': ?page},
+            ),
+            headers: _headers(token),
+          )
+          .timeout(timeout);
+      _check(response);
+      final data = jsonDecode(response.body) as Map;
+      documents.addAll(
+        (data['documents'] as List? ?? []).map(
+          (item) => ReviewApplication(Map<String, dynamic>.from(item as Map)),
+        ),
+      );
+      page = data['nextPageToken'] as String?;
+    } while (page != null && page.isNotEmpty);
+    return documents;
+  }
+
+  Future<ReviewApplication?> getDocument(
+    String token,
+    String name,
+    String docId,
+  ) async {
+    final uri = _collectionUri('$name/$docId');
+    final response = await http.get(uri, headers: _headers(token)).timeout(
+      timeout,
+    );
+    if (response.statusCode == 404) return null;
+    _check(response);
+    return ReviewApplication(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  Future<void> upsertDocument(
+    String token,
+    String name,
+    String docId,
+    Map<String, dynamic> fields, {
+    String? updateTime,
+  }) async {
+    final path = '$_databasePath/documents';
+    final response = await http
+        .post(
+          collection.replace(path: '/v1/$path:commit'),
+          headers: _headers(token),
+          body: jsonEncode({
+            'writes': [
+              {
+                'update': {
+                  'name': '$path/$name/$docId',
+                  'fields': fields.map(
+                    (key, value) => MapEntry(key, _encode(value)),
+                  ),
+                },
+                if (updateTime != null)
+                  'currentDocument': {'updateTime': updateTime},
+              },
+            ],
+          }),
+        )
+        .timeout(timeout);
+    _check(response);
+  }
+
+  Future<void> commitWrites(
+    String token,
+    List<Map<String, dynamic>> writes,
+  ) async {
+    final path = '$_databasePath/documents';
+    final response = await http
+        .post(
+          collection.replace(path: '/v1/$path:commit'),
+          headers: _headers(token),
+          body: jsonEncode({'writes': writes}),
+        )
+        .timeout(timeout);
+    _check(response);
+  }
+
+  String get documentPrefix => '$_databasePath/documents';
+
+  Map<String, dynamic> directoryWrite({
+    String? applicationUid,
+    String? registrationId,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+  }) {
+    final path = documentPrefix;
+    return {
+      'update': {
+        'name': '$path/trustDirectory/current',
+        'fields': {
+          if (applicationUid != null && applicationUid.isNotEmpty)
+            'applicationUid': _encode(applicationUid),
+          if (registrationId != null && registrationId.isNotEmpty)
+            'registrationId': _encode(registrationId),
+          'version': _encode(version),
+          'bundle': _encode(bundle),
+        },
+      },
+      'updateTransforms': [
+        {
+          'fieldPath': 'publishedAt',
+          'setToServerValue': 'REQUEST_TIME',
+        },
+      ],
+      'currentDocument': directoryUpdateTime == null
+          ? {'exists': false}
+          : {'updateTime': directoryUpdateTime},
+    };
+  }
+
+  Future<void> publishCampusRegistration(
+    String token, {
+    required CampusRegistration registration,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+    String? remoteRegistrationUpdateTime,
+  }) async {
+    final path = documentPrefix;
+    final fields = _campusRegistrationFields(registration);
+    await commitWrites(token, [
+      {
+        'update': {
+          'name': '$path/campusRegistrations/${registration.registrationId}',
+          'fields': fields.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        if (remoteRegistrationUpdateTime != null)
+          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+      },
+      directoryWrite(
+        registrationId: registration.registrationId,
+        applicationUid: registration.accountUid,
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
+
+  static Map<String, dynamic> _campusRegistrationFields(
+    CampusRegistration reg,
+  ) => {
+    'registrationId': reg.registrationId,
+    'source': reg.source.name,
+    'status': reg.status.code,
+    'role': reg.role.name,
+    'revision': reg.revision,
+    if (reg.accountUid != null && reg.accountUid!.isNotEmpty)
+      'accountUid': reg.accountUid!,
+    if (reg.pendingDecisionId != null) 'decisionId': reg.pendingDecisionId!,
+    ...reg.identity.toFirestoreFields(),
+    if (reg.activePhone.deviceRegistrationJson != null)
+      'deviceRegistration': reg.activePhone.deviceRegistrationJson!,
+    'deviceId': reg.activePhone.deviceId,
+    'reviewHistory': reg.reviewHistory
+        .map(
+          (entry) => {
+            'decisionId': entry.decisionId,
+            'reviewerUid': entry.reviewerUid,
+            'status': entry.status,
+            'reason': entry.reason,
+            'revision': entry.revision,
+            if (entry.role != null) 'role': entry.role!,
+          },
+        )
+        .toList(),
+  };
+
+  Future<void> completeAccountLink(
+    String token, {
+    required String reviewerUid,
+    required CampusRegistration registration,
+    required ReviewApplication linkRequest,
+    required ReviewApplication? existingApplication,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+    String? remoteRegistrationUpdateTime,
+  }) async {
+    final path = documentPrefix;
+    final uid = linkRequest.id;
+    final deviceRegJson = registration.activePhone.deviceRegistrationJson ?? '';
+    final appFields = {
+      ...registration.identity.toFirestoreFields(),
+      'registrationId': registration.registrationId,
+      'deviceRegistration': deviceRegJson,
+      'status': 'published',
+      'publicationStatus': 'published',
+      'revision': registration.revision,
+      'reviewHistory': [
+        for (final entry in registration.reviewHistory)
+          {
+            'reviewerUid': entry.reviewerUid,
+            'status': 'approved_pending_publication',
+            'reason': entry.reason,
+            'revision': entry.revision,
+            if (entry.role != null) 'role': entry.role!,
+          },
+      ],
+    };
+    final regFields = _campusRegistrationFields(registration);
+    await commitWrites(token, [
+      {
+        'update': {
+          'name': '$path/registrationLinkRequests/$uid',
+          'fields': {
+            ...linkRequest.fields,
+            'status': 'linked',
+            'reviewerUid': reviewerUid,
+          }.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'currentDocument': {'updateTime': linkRequest.updateTime},
+      },
+      {
+        'update': {
+          'name': '$path/campusRegistrations/${registration.registrationId}',
+          'fields': regFields.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        if (remoteRegistrationUpdateTime != null)
+          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+      },
+      {
+        'update': {
+          'name': '$path/pilotApplications/$uid',
+          'fields': appFields.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'currentDocument': existingApplication == null
+            ? {'exists': false}
+            : {'updateTime': existingApplication.updateTime},
+      },
+      directoryWrite(
+        applicationUid: uid,
+        registrationId: registration.registrationId,
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
+
+  Future<void> approveRecoveryAndPublish(
+    String token, {
+    required String reviewerUid,
+    required String verificationMethod,
+    required CampusRegistration registration,
+    required ReviewApplication recoveryRequest,
+    required ReviewApplication? existingApplication,
+    required String newDeviceRegistrationJson,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+    String? remoteRegistrationUpdateTime,
+  }) async {
+    final path = documentPrefix;
+    final uid = recoveryRequest.id;
+    final appFields = {
+      ...registration.identity.toFirestoreFields(),
+      'registrationId': registration.registrationId,
+      'deviceRegistration': newDeviceRegistrationJson,
+      'status': 'published',
+      'publicationStatus': 'published',
+      'revision': registration.revision,
+    };
+    final regFields = _campusRegistrationFields(registration);
+    await commitWrites(token, [
+      {
+        'update': {
+          'name': '$path/registrationRecoveryRequests/$uid',
+          'fields': {
+            ...recoveryRequest.fields,
+            'status': 'published',
+            'reviewerUid': reviewerUid,
+            'verificationMethod': verificationMethod,
+            'registrationId': registration.registrationId,
+          }.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'currentDocument': {'updateTime': recoveryRequest.updateTime},
+      },
+      {
+        'update': {
+          'name': '$path/campusRegistrations/${registration.registrationId}',
+          'fields': regFields.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        if (remoteRegistrationUpdateTime != null)
+          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+      },
+      {
+        'update': {
+          'name': '$path/pilotApplications/$uid',
+          'fields': appFields.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'currentDocument': existingApplication == null
+            ? {'exists': false}
+            : {'updateTime': existingApplication.updateTime},
+      },
+      directoryWrite(
+        applicationUid: uid,
+        registrationId: registration.registrationId,
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
+
+  Future<void> publishPhoneReplacement(
+    String token, {
+    required ReviewApplication application,
+    required CampusRegistration registration,
+    required String newDeviceRegistrationJson,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+    String? remoteRegistrationUpdateTime,
+  }) async {
+    final path = documentPrefix;
+    final req = application.fields['replacementRequest'] as Map? ?? const {};
+    await commitWrites(token, [
+      {
+        'update': {
+          'name': '$path/pilotApplications/${application.id}',
+          'fields': {
+            'deviceRegistration': newDeviceRegistrationJson,
+            'registrationId': registration.registrationId,
+            'replacementRequest': {...req, 'status': 'published'},
+          }.map((key, value) => MapEntry(key, _encode(value))),
+        },
+        'updateMask': {
+          'fieldPaths': [
+            'deviceRegistration',
+            'registrationId',
+            'replacementRequest',
+          ],
+        },
+        'currentDocument': {'updateTime': application.updateTime},
+      },
+      {
+        'update': {
+          'name': '$path/campusRegistrations/${registration.registrationId}',
+          'fields': _campusRegistrationFields(
+            registration,
+          ).map((key, value) => MapEntry(key, _encode(value))),
+        },
+        if (remoteRegistrationUpdateTime != null)
+          'currentDocument': {'updateTime': remoteRegistrationUpdateTime},
+      },
+      directoryWrite(
+        applicationUid: application.id,
+        registrationId: registration.registrationId,
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
 
   Future<void> update(
     String token,
@@ -296,6 +681,7 @@ class RegistrationReviewApi {
 
   static Map<String, dynamic> _encode(dynamic value) {
     if (value is String) return {'stringValue': value};
+    if (value is bool) return {'booleanValue': value};
     if (value is int) return {'integerValue': '$value'};
     if (value is List) {
       return {

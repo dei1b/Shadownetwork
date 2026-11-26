@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shadownetwork/features/admin/data/desktop_admin_registry_repository.dart';
+import 'package:shadownetwork/features/admin/domain/entities/campus_registration.dart';
 import 'package:shadownetwork/features/admin/domain/entities/registered_device.dart';
 import 'package:shadownetwork/features/admin/presentation/pages/desktop_admin_shell.dart';
 import 'package:shadownetwork/features/admin/presentation/providers/admin_recovery_provider.dart';
@@ -24,12 +25,14 @@ class _Registry implements DesktopAdminRegistryRepository {
   _Registry({this.hasIdentity = true, this.empty = false});
   final bool empty;
   final bool hasIdentity;
+
   @override
   Future<AdminIdentityStatus> identityStatus() async => AdminIdentityStatus(
     fingerprint: null,
     bundleVersion: 0,
     hasIdentity: hasIdentity,
   );
+
   @override
   Future<List<RegisteredDevice>> loadDevices() async => empty
       ? []
@@ -58,6 +61,19 @@ class _Registry implements DesktopAdminRegistryRepository {
               lastSeenLabel: 'Registered locally',
             ),
         ];
+
+  @override
+  Future<List<CampusRegistration>> loadRegistrations() async => [
+    for (final device in await loadDevices())
+      CampusRegistration.fromLegacyDevice(device),
+  ];
+
+  @override
+  Future<List<PendingSyncOperation>> loadPendingSync() async => const [];
+
+  @override
+  Future<ReviewerProfile?> loadReviewerProfile() async => null;
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -68,6 +84,7 @@ class _RestoringRegistry extends _Registry {
   List<RegisteredDevice> saved = [];
   List<String> publicationIds = [];
   int loads = 0;
+
   @override
   Future<AdminIdentityStatus> identityStatus() async =>
       const AdminIdentityStatus(
@@ -75,11 +92,18 @@ class _RestoringRegistry extends _Registry {
         bundleVersion: 0,
         hasIdentity: true,
       );
+
   @override
   Future<List<RegisteredDevice>> loadDevices() async {
     loads++;
     return List.of(saved);
   }
+
+  @override
+  Future<List<CampusRegistration>> loadRegistrations() async => [
+    for (final device in await loadDevices())
+      CampusRegistration.fromLegacyDevice(device),
+  ];
 
   @override
   Future<void> restoreEncryptedBackup(String source, String password) async {
@@ -100,6 +124,24 @@ class _RestoringRegistry extends _Registry {
   @override
   Future<void> saveDevices(List<RegisteredDevice> devices) async =>
       saved = List.of(devices);
+
+  @override
+  Future<void> saveRegistration(
+    CampusRegistration registration, {
+    PendingSyncOperation? pendingSync,
+    bool removePendingForRegistration = false,
+    bool syncDeviceList = true,
+  }) async {
+    final device = registration.toRegisteredDevice();
+    final next = [
+      for (final existing in saved)
+        if (existing.deviceId == device.deviceId) device else existing,
+      if (!saved.any((existing) => existing.deviceId == device.deviceId))
+        device,
+    ];
+    saved = next;
+  }
+
   @override
   Future<String> buildTrustBundleJson(
     List<RegisteredDevice> devices, {
@@ -213,6 +255,7 @@ void main() {
       await tester.tap(showQr);
       await tester.pumpAndSettle();
       final qr = find.byType(QrImageView);
+      expect(qr, findsOneWidget);
       if (count == 3) {
         final painterFinder = find.descendant(
           of: qr,
@@ -246,8 +289,7 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(tester.getSize(qr).width, lessThan(desktopWidth));
       } else {
-        expect(qr, findsNothing);
-        expect(find.textContaining('too large for one QR'), findsOneWidget);
+        expect(find.textContaining('Frame 1 of'), findsOneWidget);
       }
       await tester.tap(find.text('Copy JSON'));
       await tester.pumpAndSettle();
@@ -257,7 +299,7 @@ void main() {
 
   for (final failRestore in [false, true]) {
     testWidgets(
-      'same-identity restore ${failRestore ? 'failure retains draft' : 'reloads before publication and registration'}',
+      'same-identity restore ${failRestore ? 'failure retains search draft' : 'reloads before publication'}',
       (tester) async {
         final repository = _RestoringRegistry(failRestore: failRestore);
         final container = ProviderContainer(
@@ -281,19 +323,12 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Add your first phone'), findsOneWidget);
+        expect(find.text('Scan phone QR'), findsOneWidget);
         final initialLoads = repository.loads;
         final identity = container.read(adminRecoveryProvider).requireValue;
         if (failRestore) {
-          await tester.ensureVisible(find.text('Registration details'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Registration details'));
-          await tester.pumpAndSettle();
-          final owner = find.widgetWithText(
-            TextField,
-            'User full name / Unit name',
-          );
-          await tester.enterText(owner, 'Keep unfinished registration');
+          final search = find.byKey(const ValueKey('unified-registration-search'));
+          await tester.enterText(search, 'Keep unfinished filter');
           await expectLater(
             container
                 .read(adminRecoveryProvider.notifier)
@@ -303,8 +338,8 @@ void main() {
           await tester.pumpAndSettle();
           expect(repository.loads, initialLoads);
           expect(
-            tester.widget<TextField>(owner).controller!.text,
-            'Keep unfinished registration',
+            tester.widget<TextField>(search).controller!.text,
+            'Keep unfinished filter',
           );
         } else {
           await tester.tap(find.text('Backup & recovery').first);
@@ -317,7 +352,7 @@ void main() {
             container.read(adminRecoveryProvider).requireValue.fingerprint,
             identity.fingerprint,
           );
-          await tester.tap(find.text('Devices').first);
+          await tester.tap(find.text('Registrations').first);
           await tester.pumpAndSettle();
           expect(find.text('Recovered responder'), findsOneWidget);
           await tester.ensureVisible(find.text('Copy Trust Bundle JSON'));
@@ -325,29 +360,6 @@ void main() {
           await tester.tap(find.text('Copy Trust Bundle JSON'));
           await tester.pumpAndSettle();
           expect(repository.publicationIds, ['RESTORED-PHONE']);
-          await tester.ensureVisible(find.text('Registration details'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Registration details'));
-          await tester.pumpAndSettle();
-          for (final (label, value) in [
-            ('Device ID', 'NEW-PHONE'),
-            ('User full name / Unit name', 'New registration'),
-            ('X25519 public key', base64UrlEncode(List.filled(32, 1))),
-            ('Ed25519 signing public key', base64UrlEncode(List.filled(32, 2))),
-          ]) {
-            final field = find.widgetWithText(TextField, label);
-            await tester.ensureVisible(field);
-            await tester.pumpAndSettle();
-            await tester.enterText(field, value);
-          }
-          await tester.ensureVisible(find.text('Add to registry'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Add to registry'));
-          await tester.pumpAndSettle();
-          expect(
-            repository.saved.map((device) => device.deviceId),
-            containsAll(['RESTORED-PHONE', 'NEW-PHONE']),
-          );
         }
         expect(tester.takeException(), isNull);
       },
@@ -355,43 +367,36 @@ void main() {
   }
 
   testWidgets(
-    'registration draft survives validation and recovery navigation',
+    'search draft survives validation and recovery navigation',
     (tester) async {
       await mount(tester, const Size(1440, 1000));
-      await tester.ensureVisible(find.text('Registration details'));
-      await tester.tap(find.text('Registration details'));
-      await tester.pumpAndSettle();
-      final owner = find.widgetWithText(
-        TextField,
-        'User full name / Unit name',
-      );
-      await tester.ensureVisible(owner);
-      await tester.enterText(owner, 'Draft responder name');
+      final search = find.byKey(const ValueKey('unified-registration-search'));
+      await tester.ensureVisible(search);
+      await tester.enterText(search, 'Maria');
       await tester.tap(find.text('Validation data').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Backup & recovery').first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Devices').first);
+      await tester.tap(find.text('Registrations').first);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<TextField>(owner).controller!.text,
-        'Draft responder name',
+        tester.widget<TextField>(search).controller!.text,
+        'Maria',
       );
       expect(tester.takeException(), isNull);
     },
   );
 
   testWidgets(
-    'empty registry offers registration above fold in a small PC window',
+    'empty registry offers phone QR scan above fold in a small PC window',
     (tester) async {
       await mount(tester, const Size(786, 715), empty: true);
-      final action = find.byKey(const ValueKey('admin-first-registration'));
+      final action = find.byKey(const ValueKey('unified-scan-qr-button'));
       expect(action.hitTestable(), findsOneWidget);
-      expect(find.text('Search devices'), findsNothing);
       await tester.tap(action);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Scan phone QR'), findsOneWidget);
+      expect(find.text('Scan phone QR'), findsWidgets);
       await tester.tap(find.text('Close'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
@@ -400,15 +405,17 @@ void main() {
   );
 
   testWidgets(
-    'desktop shell keeps device review visible and all destinations reachable',
+    'desktop shell keeps registration queue visible and all destinations reachable',
     (tester) async {
       await mount(tester, const Size(1440, 900));
       expect(find.text('Maria Santos').hitTestable(), findsOneWidget);
-      final approve = find.text('Approve');
-      await tester.ensureVisible(approve);
+      final showQr = find.byKey(const ValueKey('unified-show-approval-qr'));
+      await tester.ensureVisible(showQr);
       await tester.pumpAndSettle();
-      expect(approve.hitTestable(), findsOneWidget);
-      final pasteRegistration = find.text('Paste Phone Registration JSON');
+      expect(showQr.hitTestable(), findsOneWidget);
+      final pasteRegistration = find.byKey(
+        const ValueKey('unified-paste-qr-button'),
+      );
       await tester.ensureVisible(pasteRegistration);
       await tester.pumpAndSettle();
       expect(pasteRegistration.hitTestable(), findsOneWidget);

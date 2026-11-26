@@ -488,7 +488,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(headerText('Profile'), findsOneWidget);
     expect(find.text('This phone’s offline access'), findsOneWidget);
-    expect(find.textContaining('Campus responder'), findsOneWidget);
+    expect(find.textContaining('DNSC Responder'), findsOneWidget);
     expect(find.text('Active on this phone'), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));

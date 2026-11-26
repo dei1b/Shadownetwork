@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'publisher_delegation.dart';
+
 class TrustBundle {
   const TrustBundle({
     required this.schemaVersion,
@@ -10,6 +12,7 @@ class TrustBundle {
     this.issuedAt,
     this.expiresAt,
     this.issuer,
+    this.publisherDelegation,
     this.signature,
     this.directoryProject,
     this.importedAt,
@@ -23,6 +26,7 @@ class TrustBundle {
   final DateTime? issuedAt;
   final DateTime? expiresAt;
   final TrustBundleIssuer? issuer;
+  final PublisherDelegation? publisherDelegation;
   final List<TrustedDevice> approvedDevices;
   final List<TrustedDevice> revokedDevices;
   final String? signature;
@@ -30,6 +34,9 @@ class TrustBundle {
   final DateTime? importedAt;
   final String? bundleHash;
   final bool isSignatureVerified;
+
+  TrustBundleIssuer? get rootAuthorityIssuer =>
+      publisherDelegation?.rootIssuer ?? issuer;
 
   int get approvedCount => approvedDevices.length;
   int get revokedCount => revokedDevices.length;
@@ -62,6 +69,8 @@ class TrustBundle {
       'issued_at': (issuedAt ?? generatedAt).toUtc().toIso8601String(),
       'expires_at': expiresAt?.toUtc().toIso8601String(),
       'issuer': issuer?.toJson(),
+      if (publisherDelegation != null)
+        'publisher_delegation': publisherDelegation!.toJson(),
       if (directoryProject != null) 'directory_project': directoryProject,
       'approved_devices': approvedDevices
           .map((device) => device.toJson())
@@ -88,6 +97,7 @@ class TrustBundle {
       issuedAt: issuedAt,
       expiresAt: expiresAt,
       issuer: issuer,
+      publisherDelegation: publisherDelegation,
       approvedDevices: approvedDevices,
       revokedDevices: revokedDevices,
       signature: signature,
@@ -126,6 +136,11 @@ class TrustBundle {
       issuer: json['issuer'] is Map
           ? TrustBundleIssuer.fromJson(
               Map<String, Object?>.from(json['issuer']! as Map),
+            )
+          : null,
+      publisherDelegation: json['publisher_delegation'] is Map
+          ? PublisherDelegation.fromJson(
+              Map<String, Object?>.from(json['publisher_delegation']! as Map),
             )
           : null,
       approvedDevices: _parseDevices(json['approved_devices']),

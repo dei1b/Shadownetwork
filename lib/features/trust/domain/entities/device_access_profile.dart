@@ -39,7 +39,7 @@ class DeviceAccessProfile {
 
   String get roleLabel => switch (level) {
     DeviceAccessLevel.civilian => 'Student',
-    DeviceAccessLevel.responder => 'Campus responder',
+    DeviceAccessLevel.responder => 'DNSC Responder',
     DeviceAccessLevel.relay => 'Relay',
     DeviceAccessLevel.admin => 'Admin',
     DeviceAccessLevel.revoked => 'Revoked',

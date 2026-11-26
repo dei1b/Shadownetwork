@@ -1,3 +1,4 @@
+import '../entities/approval_receipt.dart';
 import '../entities/device_access_profile.dart';
 import '../entities/trust_bundle.dart';
 
@@ -9,10 +10,12 @@ class DeviceAccessResolver {
     required String publicKey,
     required int keyVersion,
     required TrustBundle? bundle,
+    SignedApprovalReceipt? receipt,
     DateTime? now,
     String? signingPublicKey,
   }) {
     final normalizedDeviceId = deviceId.trim();
+    final checkNow = now ?? DateTime.now();
     final revokedDevice = _findDevice(
       bundle?.revokedDevices,
       normalizedDeviceId,
@@ -25,41 +28,60 @@ class DeviceAccessResolver {
       );
     }
 
+    final bundleValid =
+        bundle?.isSignatureVerified == true && !bundle!.isExpiredAt(checkNow);
+    final approvedDevice = bundleValid
+        ? _findDevice(bundle.approvedDevices, normalizedDeviceId)
+        : null;
+    if (approvedDevice != null && approvedDevice.status == 'approved') {
+      if (!_matchesLocalKey(approvedDevice, publicKey, keyVersion) ||
+          (signingPublicKey != null &&
+              (approvedDevice.signingPublicKey == null ||
+                  _withoutPadding(approvedDevice.signingPublicKey!) !=
+                      _withoutPadding(signingPublicKey)))) {
+        return DeviceAccessProfile(
+          deviceId: normalizedDeviceId,
+          ownerName: approvedDevice.ownerName,
+          level: DeviceAccessLevel.keyMismatch,
+        );
+      }
+
+      return DeviceAccessProfile(
+        deviceId: normalizedDeviceId,
+        ownerName: approvedDevice.ownerName,
+        level: _approvedLevel(approvedDevice.role),
+      );
+    }
+
+    if (receipt != null &&
+        receipt.isSignatureVerified &&
+        !receipt.isExpiredAt(checkNow) &&
+        receipt.matchesPhone(
+          deviceId: normalizedDeviceId,
+          publicKey: publicKey,
+          signingPublicKey: signingPublicKey ?? '',
+          keyVersion: keyVersion,
+        ) &&
+        (receipt.status ?? 'approved') == 'approved' &&
+        receipt.role != null &&
+        receipt.role!.isNotEmpty) {
+      return DeviceAccessProfile(
+        deviceId: normalizedDeviceId,
+        ownerName: receipt.ownerName,
+        level: _approvedLevel(receipt.role!),
+      );
+    }
+
     if (bundle?.isSignatureVerified != true) {
       return DeviceAccessProfile.unregistered(deviceId: normalizedDeviceId);
     }
-    if (bundle!.isExpiredAt(now ?? DateTime.now())) {
+    if (bundle!.isExpiredAt(checkNow)) {
       return DeviceAccessProfile(
         deviceId: normalizedDeviceId,
         level: DeviceAccessLevel.outdatedBundle,
       );
     }
-
-    final approvedDevice = _findDevice(
-      bundle.approvedDevices,
-      normalizedDeviceId,
-    );
-    if (approvedDevice == null || approvedDevice.status != 'approved') {
-      return DeviceAccessProfile.unregistered(deviceId: normalizedDeviceId);
-    }
-
-    if (!_matchesLocalKey(approvedDevice, publicKey, keyVersion) ||
-        (signingPublicKey != null &&
-            (approvedDevice.signingPublicKey == null ||
-                _withoutPadding(approvedDevice.signingPublicKey!) !=
-                    _withoutPadding(signingPublicKey)))) {
-      return DeviceAccessProfile(
-        deviceId: normalizedDeviceId,
-        ownerName: approvedDevice.ownerName,
-        level: DeviceAccessLevel.keyMismatch,
-      );
-    }
-
-    return DeviceAccessProfile(
-      deviceId: normalizedDeviceId,
-      ownerName: approvedDevice.ownerName,
-      level: _approvedLevel(approvedDevice.role),
-    );
+    return DeviceAccessProfile.unregistered(deviceId: normalizedDeviceId);
   }
 
   TrustedDevice? _findDevice(List<TrustedDevice>? devices, String deviceId) {

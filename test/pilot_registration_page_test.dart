@@ -1,20 +1,29 @@
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shadownetwork/features/trust/domain/entities/trust_bundle.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer.dart';
 import 'package:shadownetwork/features/messaging/domain/entities/peer_type.dart';
 import 'package:shadownetwork/features/messaging/presentation/providers/local_messaging_providers.dart';
 import 'package:shadownetwork/features/registration/data/pilot_registration.dart';
 import 'package:shadownetwork/features/registration/data/registration_review_api.dart';
+import 'package:shadownetwork/features/registration/domain/campus_identity_fields.dart';
 import 'package:shadownetwork/features/registration/presentation/pilot_registration_page.dart';
 import 'package:shadownetwork/features/registration/presentation/profile_section.dart';
 import 'package:shadownetwork/features/security/data/services/device_identity_store.dart';
 import 'package:shadownetwork/features/security/data/services/device_signing_identity_store.dart';
+import 'package:shadownetwork/features/trust/data/services/trust_bundle_store.dart';
+import 'package:shadownetwork/features/trust/domain/entities/approval_receipt.dart';
 import 'package:shadownetwork/features/trust/domain/entities/device_access_profile.dart';
 import 'package:shadownetwork/features/trust/presentation/providers/device_access_provider.dart';
+
+import 'support/signed_trust_bundle_fixture.dart';
 
 class _Student extends Fake implements User {
   @override
@@ -57,6 +66,10 @@ class _Registration extends PilotRegistration {
   bool offline = false;
   bool failUpdate = false;
   Map<String, dynamic>? savedChanges;
+  ReviewApplication? linkRequest;
+  AccountLinkProof? submittedLinkProof;
+  ReviewApplication? recoveryRequest;
+  Map<String, dynamic>? submittedRecovery;
   final submission = Completer<void>();
   final submissionStarted = Completer<void>();
   int refreshes = 0;
@@ -91,6 +104,52 @@ class _Registration extends PilotRegistration {
   }
 
   @override
+  Future<ReviewApplication?> readLinkRequest(User user) async => linkRequest;
+
+  @override
+  Future<void> submitLinkRequest(User user, AccountLinkProof proof) async {
+    submittedLinkProof = proof;
+    linkRequest = ReviewApplication.fromCache(
+      id: user.uid,
+      updateTime: 'link-1',
+      fields: {
+        'registrationId': proof.registrationId,
+        'accountUid': user.uid,
+        'status': 'pending',
+      },
+    );
+  }
+
+  @override
+  Future<ReviewApplication?> readRecoveryRequest(User user) async =>
+      recoveryRequest;
+
+  @override
+  Future<void> submitRecoveryRequest(
+    User user, {
+    required CampusAffiliation affiliation,
+    required String schoolId,
+    required String displayName,
+    required String deviceRegistrationJson,
+  }) async {
+    submittedRecovery = {
+      'affiliation': affiliation.name,
+      'schoolId': schoolId,
+      'displayName': displayName,
+      'deviceRegistration': deviceRegistrationJson,
+    };
+    recoveryRequest = ReviewApplication.fromCache(
+      id: user.uid,
+      updateTime: 'rec-1',
+      fields: {
+        'schoolId': schoolId,
+        'displayName': displayName,
+        'status': 'submitted',
+      },
+    );
+  }
+
+  @override
   Future<void> submit(User user, Map<String, String> details) {
     submissionStarted.complete();
     return submission.future;
@@ -111,6 +170,10 @@ ReviewApplication _application(
 );
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   Future<void> open(
     WidgetTester tester,
     _Registration registration, {
@@ -403,15 +466,16 @@ void main() {
         TextField,
         'Student number (required)',
       );
-      final course = find.widgetWithText(
-        TextField,
-        'Course and year (required)',
-      );
+      final course = find.widgetWithText(TextField, 'Course (required)');
+      final year = find.widgetWithText(TextField, 'Year (required)');
+      final section = find.widgetWithText(TextField, 'Set (required)');
       await submitDetails();
       expectFocused(name);
       expect(tester.widget<TextField>(name).decoration!.errorText, isNotNull);
       expect(tester.widget<TextField>(number).decoration!.errorText, isNotNull);
       expect(tester.widget<TextField>(course).decoration!.errorText, isNotNull);
+      expect(tester.widget<TextField>(year).decoration!.errorText, isNotNull);
+      expect(tester.widget<TextField>(section).decoration!.errorText, isNotNull);
       expect(
         tester
             .widget<TextField>(
@@ -430,6 +494,14 @@ void main() {
       await tester.pumpAndSettle();
       await submitDetails();
       expectFocused(course);
+      await tester.enterText(course, 'BSIT');
+      await tester.pumpAndSettle();
+      await submitDetails();
+      expectFocused(year);
+      await tester.enterText(year, 'Year 4');
+      await tester.pumpAndSettle();
+      await submitDetails();
+      expectFocused(section);
       expect(tester.takeException(), isNull);
     });
   }
@@ -540,9 +612,158 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('This phone’s offline access'), findsOneWidget);
-    expect(find.textContaining('Campus responder'), findsOneWidget);
+    expect(find.textContaining('DNSC Responder'), findsOneWidget);
     expect(find.textContaining('Last known · Changes requested'), findsOneWidget);
     expect(find.text('Update application'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('switching to Staff affiliation swaps required fields', (
+    tester,
+  ) async {
+    final registration = _Registration()..draft = {};
+    await open(tester, registration);
+    expect(find.widgetWithText(TextField, 'Student number (required)'), findsOneWidget);
+    await tester.tap(find.text('Staff'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Employee ID (required)'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Unit or office (required)'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Student number (required)'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('offline receipt enables Link this phone and transitions to waiting for sync', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final registration = _Registration()..draft = {};
+    final signer = await TestTrustBundleSigner.create();
+    const peer = Peer(
+      id: 'this-phone',
+      name: 'this-phone',
+      type: PeerType.civilian,
+      isConnected: false,
+    );
+    final secrets = InMemorySecretValueStore();
+    final crypto = await DeviceIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    final signing = await DeviceSigningIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    final now = DateTime.now().toUtc();
+    final receipt = await SignedApprovalReceipt.createSigned(
+      registrationId: 'reg-qr-99',
+      deviceId: peer.id,
+      publicKey: crypto.encodedPublicKey,
+      signingPublicKey: signing.encodedPublicKey,
+      keyVersion: crypto.keyVersion,
+      issuer: TrustBundleIssuer(
+        issuerId: signer.issuerId,
+        signingKeyId: 'k1',
+        signatureAlgorithm: 'ed25519',
+        publicKey: base64UrlEncode(signer.publicKeyBytes),
+      ),
+      issuerKeyPair: signer.keyPair as SimpleKeyPair,
+      issuedAt: now,
+      expiresAt: now.add(const Duration(days: 30)),
+    );
+    final store = TrustBundleStore();
+    await store.saveReceipt(receipt);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localPeerProvider.overrideWith((ref) async => peer),
+          deviceCryptoIdentityProvider.overrideWith((ref) async => crypto),
+          deviceSigningIdentityProvider.overrideWith((ref) async => signing),
+          trustBundleStoreProvider.overrideWithValue(store),
+          deviceAccessProfileProvider.overrideWith(
+            (ref) async => const DeviceAccessProfile(
+              deviceId: 'this-phone',
+              level: DeviceAccessLevel.civilian,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: PilotRegistrationPage(openRegistration: () async => registration),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final linkButton = find.widgetWithText(
+      FilledButton,
+      'Link this phone to my account',
+    );
+    expect(linkButton, findsOneWidget);
+    await tester.ensureVisible(linkButton);
+    await tester.tap(linkButton);
+    await tester.pumpAndSettle();
+
+    expect(registration.submittedLinkProof, isNotNull);
+    expect(registration.submittedLinkProof!.registrationId, 'reg-qr-99');
+    expect(find.text('Waiting for campus sync · Retry'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('recovery form submits name, school ID, and signed device keys', (
+    tester,
+  ) async {
+    final registration = _Registration()..draft = {};
+    const peer = Peer(
+      id: 'this-phone',
+      name: 'this-phone',
+      type: PeerType.civilian,
+      isConnected: false,
+    );
+    final secrets = InMemorySecretValueStore();
+    final crypto = await DeviceIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    final signing = await DeviceSigningIdentityStore(
+      secretStore: secrets,
+    ).loadOrCreate();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          localPeerProvider.overrideWith((ref) async => peer),
+          deviceCryptoIdentityProvider.overrideWith((ref) async => crypto),
+          deviceSigningIdentityProvider.overrideWith((ref) async => signing),
+          deviceAccessProfileProvider.overrideWith(
+            (ref) async => const DeviceAccessProfile(
+              deviceId: 'this-phone',
+              level: DeviceAccessLevel.civilian,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: PilotRegistrationPage(openRegistration: () async => registration),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final openRecovery = find.text('Recover registration');
+    await tester.ensureVisible(openRecovery);
+    await tester.tap(openRecovery);
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Full name'),
+      'Juan Dela Cruz',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Student number'),
+      '2026-4455',
+    );
+    final submitRecovery = find.text('Submit recovery request');
+    await tester.ensureVisible(submitRecovery);
+    await tester.tap(submitRecovery);
+    await tester.pumpAndSettle();
+
+    expect(registration.submittedRecovery, isNotNull);
+    expect(registration.submittedRecovery!['schoolId'], '2026-4455');
+    expect(find.textContaining('Recovery request sent'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

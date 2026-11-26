@@ -6,8 +6,7 @@ import '../../../admin_validation/presentation/desktop_validation_import_panel.d
 import '../../../admin_validation/presentation/providers/validation_import_provider.dart';
 import '../providers/admin_recovery_provider.dart';
 import '../widgets/admin_recovery_panel.dart';
-import '../widgets/registration_review_panel.dart';
-import 'browser_admin_dashboard_page.dart';
+import '../widgets/unified_registrations_workspace.dart';
 import '../theme/admin_theme.dart';
 
 class DesktopAdminShell extends ConsumerStatefulWidget {
@@ -18,7 +17,6 @@ class DesktopAdminShell extends ConsumerStatefulWidget {
 
 class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
   int _selected = 0;
-  int _deviceView = 0;
   final _files = DesktopFileDialogs();
   void _select(int index) {
     setState(() => _selected = index);
@@ -42,78 +40,44 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
       data: (repository) => IndexedStack(
         index: _selected,
         children: [
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 16, 24, 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(
-                        value: 0,
-                        label: Text('Registered devices'),
-                      ),
-                      ButtonSegment(value: 1, label: Text('Requests')),
-                    ],
-                    selected: {_deviceView},
-                    onSelectionChanged: (selection) =>
-                        setState(() => _deviceView = selection.single),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: IndexedStack(
-                  index: _deviceView,
+          UnifiedRegistrationsWorkspace(
+            key: ValueKey(
+              '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
+            ),
+            registry: repository,
+            onRegistryChanged: () => ref
+                .read(adminRegistryRevisionProvider.notifier)
+                .registryChanged(),
+            validationPanel: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    BrowserAdminDashboardPage(
-                      key: ValueKey(
-                        '$registryRevision-${identity.valueOrNull?.fingerprint}-${identity.valueOrNull?.hasIdentity}',
-                      ),
-                      registry: repository,
-                      desktopMode: true,
-                      validationPanel: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Validation data',
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                imports.when(
-                                  data: (state) =>
-                                      '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
-                                  loading: () => 'Loading imported datasets…',
-                                  error: (_, _) =>
-                                      'Unable to load imported datasets.',
-                                ),
-                              ),
-                              const Text(
-                                'Import phone exports to review run evidence and data completeness.',
-                              ),
-                              TextButton(
-                                onPressed: () => _select(1),
-                                child: const Text('Open validation data'),
-                              ),
-                            ],
-                          ),
-                        ),
+                    Text(
+                      'Validation data',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      imports.when(
+                        data: (state) =>
+                            '${state.datasets.length} datasets · ${state.datasets.fold<int>(0, (sum, item) => sum + item.recordCount)} records stored on this computer',
+                        loading: () => 'Loading imported datasets…',
+                        error: (_, _) => 'Unable to load imported datasets.',
                       ),
                     ),
-                    RegistrationReviewPanel(
-                      registry: repository,
-                      onRegistryChanged: () => ref
-                          .read(adminRegistryRevisionProvider.notifier)
-                          .registryChanged(),
+                    const Text(
+                      'Import phone exports to review run evidence and data completeness.',
+                    ),
+                    TextButton(
+                      onPressed: () => _select(1),
+                      child: const Text('Open validation data'),
                     ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
           DesktopValidationImportPanel(
             onChooseFiles: _files.chooseValidationFiles,
@@ -204,8 +168,8 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
                         groupAlignment: -0.9,
                         destinations: const [
                           NavigationRailDestination(
-                            icon: Icon(Icons.devices_outlined),
-                            label: Text('Devices'),
+                            icon: Icon(Icons.how_to_reg_outlined),
+                            label: Text('Registrations'),
                           ),
                           NavigationRailDestination(
                             icon: Icon(Icons.assessment_outlined),
@@ -232,8 +196,8 @@ class _DesktopAdminShellState extends ConsumerState<DesktopAdminShell> {
                   onDestinationSelected: _select,
                   destinations: const [
                     NavigationDestination(
-                      icon: Icon(Icons.devices_outlined),
-                      label: 'Devices',
+                      icon: Icon(Icons.how_to_reg_outlined),
+                      label: 'Registrations',
                     ),
                     NavigationDestination(
                       icon: Icon(Icons.assessment_outlined),

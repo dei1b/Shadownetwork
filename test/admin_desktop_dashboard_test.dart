@@ -332,7 +332,7 @@ void main() {
     expect(find.text('Stored desktop resident'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('admin-role-filter')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Campus responder').last);
+    await tester.tap(find.text('DNSC Responder').last);
     await tester.pumpAndSettle();
     expect(find.text('Maria Santos'), findsOneWidget);
     expect(find.text('Stored desktop resident'), findsNothing);
