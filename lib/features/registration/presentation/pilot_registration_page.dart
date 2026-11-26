@@ -556,13 +556,76 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     }
   }
 
+  static bool _matchesPendingLink(
+    ReviewApplication link, {
+    required String registrationId,
+    required String deviceId,
+    required String publicKey,
+    required String signingPublicKey,
+    required int keyVersion,
+  }) {
+    final fields = link.fields;
+    if (fields['registrationId'] != registrationId) return false;
+    final linkDevice = fields['deviceId'] as String?;
+    if (linkDevice == null) return true;
+    return linkDevice == deviceId &&
+        fields['publicKey'] == publicKey &&
+        fields['signingPublicKey'] == signingPublicKey &&
+        (fields['keyVersion'] as int? ?? keyVersion) == keyVersion;
+  }
+
   Future<void> _linkLocalPhone() => _run(() async {
     final user = _user;
     final receipt = _localReceipt;
     if (user == null || receipt == null) return;
+    final repo = _repository!;
+    final latestApp = await repo.refreshProfile(user);
+    if (!_isCurrentUser(user)) return;
+    final currentLink = await repo.readLinkRequest(user);
+    if (!_isCurrentUser(user)) return;
+    _linkRequest = currentLink;
+    if (latestApp != null && latestApp.status == 'published') {
+      await _applyStatus(latestApp, syncApproval: true);
+      if (_isCurrentUser(user)) {
+        _message = 'This phone is already linked to your account.';
+      }
+      return;
+    }
+    if (currentLink?.status == 'linked') {
+      _application = latestApp;
+      try {
+        await ref.read(trustDirectorySyncProvider).refresh();
+      } catch (_) {}
+      if (_isCurrentUser(user)) {
+        _message = 'This phone is already linked to your account.';
+      }
+      return;
+    }
+    if (currentLink?.status == 'rejected') {
+      _application = latestApp;
+      _message = 'Phone link request was rejected by campus admin.';
+      return;
+    }
+    if (currentLink?.status == 'replacement_required') {
+      _application = latestApp;
+      _message = 'A new phone replacement review is required before linking.';
+      return;
+    }
     final peer = await ref.read(localPeerProvider.future);
     final crypto = await ref.read(deviceCryptoIdentityProvider.future);
     final signing = await ref.read(deviceSigningIdentityProvider.future);
+    if (currentLink?.status == 'pending' &&
+        _matchesPendingLink(
+          currentLink!,
+          registrationId: receipt.registrationId,
+          deviceId: peer.id,
+          publicKey: crypto.encodedPublicKey,
+          signingPublicKey: signing.encodedPublicKey,
+          keyVersion: crypto.keyVersion,
+        )) {
+      _message = 'Link request is already pending campus admin approval.';
+      return;
+    }
     final nonceBytes = List<int>.generate(12, (_) => Random.secure().nextInt(256));
     final proof = await AccountLinkProof.createSigned(
       registrationId: receipt.registrationId,
@@ -573,8 +636,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       signingIdentity: signing,
       directoryProject: receipt.directoryProject,
     );
-    await _repository!.submitLinkRequest(user, proof);
-    _linkRequest = await _repository!.readLinkRequest(user);
+    await repo.submitLinkRequest(user, proof);
+    _linkRequest = await repo.readLinkRequest(user);
     _message =
         'Link request sent. Waiting for campus staff to match your registration.';
   });

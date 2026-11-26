@@ -273,8 +273,22 @@ service cloud.firestore {
     match /registrationLinkRequests/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || reviewer());
       allow list: if reviewer();
-      allow create, update: if (request.auth != null
+      allow create: if request.auth != null
           && request.auth.uid == uid
+          && request.resource.data.accountUid == uid
+          && request.resource.data.status == 'pending'
+          && validText(request.resource.data.registrationId, 100, true)
+          && validText(request.resource.data.nonce, 128, true)
+          && validText(request.resource.data.deviceId, 200, true)
+          && validText(request.resource.data.publicKey, 128, true)
+          && validText(request.resource.data.signingPublicKey, 128, true)
+          && request.resource.data.keyVersion is int
+          && request.resource.data.keyVersion > 0
+          && validText(request.resource.data.proofSignature, 256, true)
+          && validText(request.resource.data.issuedAt, 64, true);
+      allow update: if (request.auth != null
+          && request.auth.uid == uid
+          && resource.data.status == 'pending'
           && request.resource.data.accountUid == uid
           && request.resource.data.status == 'pending'
           && validText(request.resource.data.registrationId, 100, true)
