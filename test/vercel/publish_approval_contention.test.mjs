@@ -13,6 +13,7 @@ import {
 } from '../../api/_lib/publisher_core.mjs';
 import {
   buildFirestoreCommitBody,
+  decodeDocument,
   executeDecisionWithRetry,
 } from '../../api/publish-approval.mjs';
 
@@ -211,4 +212,77 @@ test('simultaneous first approvals enforce exists:false on missing directory and
     finalBundle.approved_devices.map((d) => d.device_id).sort(),
     ['phone-alice', 'phone-bob'],
   );
+});
+
+test('decodeDocument and publisher never persist updateTime as a field and ignore legacy field updateTime', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qrJson = makeSignedQr('phone-meta-check');
+
+  const rawFirestoreDoc = {
+    name: 'projects/dnsc-pilot/databases/(default)/documents/pilotApplications/uid-meta',
+    updateTime: '2026-11-26T12:05:00.000Z',
+    fields: {
+      affiliation: { stringValue: 'student' },
+      displayName: { stringValue: 'Meta Check' },
+      studentNumber: { stringValue: '2026-777' },
+      course: { stringValue: 'BSIT' },
+      yearLevel: { stringValue: '3' },
+      sectionSet: { stringValue: 'C' },
+      status: { stringValue: 'submitted' },
+      revision: { integerValue: '0' },
+      deviceRegistration: { stringValue: qrJson },
+      // Simulate a legacy doc poisoned with a persisted updateTime field.
+      updateTime: { stringValue: '1999-01-01T00:00:00.000Z' },
+    },
+  };
+  const decoded = decodeDocument(rawFirestoreDoc, 'uid');
+  assert.equal(decoded.updateTime, '2026-11-26T12:05:00.000Z');
+  assert.equal(Object.hasOwn(decoded.fields, 'updateTime'), false);
+
+  const correction = applyDecisionAndBuildCommit({
+    action: 'request_changes',
+    decisionId: 'dec-corr-meta',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: decoded,
+    payload: { reason: 'Check ID number' },
+    now,
+  });
+  assert.equal(correction.writes[0].updateTime, '2026-11-26T12:05:00.000Z');
+  assert.equal(Object.hasOwn(correction.writes[0].fields, 'updateTime'), false);
+  const commitCorrection = buildFirestoreCommitBody('dnsc-pilot', correction.writes);
+  assert.equal(commitCorrection.writes[0].currentDocument.updateTime, '2026-11-26T12:05:00.000Z');
+  assert.equal(Object.hasOwn(commitCorrection.writes[0].update.fields, 'updateTime'), false);
+
+  // Applicant resubmits -> reviewer approves online cleanly.
+  const resubmitted = {
+    id: 'uid-meta',
+    updateTime: '2026-11-26T12:06:00.000Z',
+    fields: {
+      ...correction.writes[0].fields,
+      status: 'submitted',
+      revision: 2,
+    },
+  };
+  const approved = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-app-meta',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: resubmitted,
+    payload: { role: 'civilian', registrationId: 'reg-meta' },
+    now,
+  });
+  const commitApproved = buildFirestoreCommitBody('dnsc-pilot', approved.writes);
+  for (const w of commitApproved.writes) {
+    assert.equal(Object.hasOwn(w.update.fields, 'updateTime'), false);
+  }
+  assert.equal(commitApproved.writes[0].currentDocument.updateTime, '2026-11-26T12:06:00.000Z');
 });

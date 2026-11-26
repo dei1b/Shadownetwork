@@ -388,6 +388,25 @@ function hasDecisionId(doc, decisionId) {
   return history.some((entry) => entry && entry.decisionId === decisionId);
 }
 
+function unwrapSnapshot(doc, idFieldName) {
+  if (!doc) return { exists: false, updateTime: null, fields: null };
+  const isWrapped =
+    typeof doc.fields === 'object' &&
+    doc.fields !== null &&
+    !Array.isArray(doc.fields) &&
+    ('updateTime' in doc || 'id' in doc);
+  const rawFields = isWrapped ? doc.fields : doc;
+  const { updateTime: _legacyUpdateTime, ...clean } = rawFields;
+  if (idFieldName && doc.id && !clean[idFieldName]) {
+    clean[idFieldName] = doc.id;
+  }
+  return {
+    exists: true,
+    updateTime: doc.updateTime ?? null,
+    fields: clean,
+  };
+}
+
 /**
  * Pure state machine + commit builder shared cleanly by `api/publish-approval.mjs` and unit tests.
  */
@@ -398,11 +417,11 @@ export function applyDecisionAndBuildCommit({
   directoryProject,
   publisherSeed,
   publisherDelegation,
-  existingDirectory = null,
-  application = null,
-  registration = null,
-  linkRequest = null,
-  recoveryRequest = null,
+  existingDirectory: existingDirectoryInput = null,
+  application: applicationInput = null,
+  registration: registrationInput = null,
+  linkRequest: linkRequestInput = null,
+  recoveryRequest: recoveryRequestInput = null,
   payload = {},
   now = new Date(),
 }) {
@@ -420,6 +439,18 @@ export function applyDecisionAndBuildCommit({
   if (publisherKeyPair.publicKeyBase64Url !== delegation.publisher.public_key) {
     throw new PublisherError(500, 'Publisher seed does not match delegation public key.', 'server_key_mismatch');
   }
+
+  const dirSnap = unwrapSnapshot(existingDirectoryInput);
+  const appSnap = unwrapSnapshot(applicationInput, 'uid');
+  const regSnap = unwrapSnapshot(registrationInput, 'registrationId');
+  const linkSnap = unwrapSnapshot(linkRequestInput, 'accountUid');
+  const recSnap = unwrapSnapshot(recoveryRequestInput, 'accountUid');
+
+  const existingDirectory = dirSnap.fields;
+  const application = appSnap.fields;
+  const registration = regSnap.fields;
+  const linkRequest = linkSnap.fields;
+  const recoveryRequest = recSnap.fields;
 
   let parsedBundle = null;
   if (existingDirectory?.bundle) {
@@ -496,7 +527,14 @@ export function applyDecisionAndBuildCommit({
       bundle: existingDirectory?.bundle ?? null,
       registrationId: nextFields.registrationId ?? null,
       decisionId,
-      writes: [{ collection: 'pilotApplications', docId: application.uid, fields: nextFields, updateTime: application.updateTime }],
+      writes: [
+        {
+          collection: 'pilotApplications',
+          docId: application.uid,
+          fields: nextFields,
+          ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : {}),
+        },
+      ],
     };
   }
 
@@ -539,7 +577,12 @@ export function applyDecisionAndBuildCommit({
       reviewHistory: [...(application.reviewHistory ?? []), historyEntry],
       processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
     };
-    writes.push({ collection: 'pilotApplications', docId: application.uid, fields: nextApp, updateTime: application.updateTime });
+    writes.push({
+      collection: 'pilotApplications',
+      docId: application.uid,
+      fields: nextApp,
+      ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : {}),
+    });
     writes.push({
       collection: 'campusRegistrations',
       docId: registrationId,
@@ -558,7 +601,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      ...(registration?.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
     });
   } else if (action === 'sync_offline_decision') {
     if (!registration) {
@@ -617,7 +660,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      ...(registration.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
     });
   } else if (action === 'approve_link') {
     if (!linkRequest || !registration) {
@@ -652,7 +695,7 @@ export function applyDecisionAndBuildCommit({
       collection: 'registrationLinkRequests',
       docId: linkRequest.accountUid,
       fields: { ...linkRequest, status: 'linked', reviewerUid },
-      updateTime: linkRequest.updateTime,
+      ...(linkSnap.updateTime ? { updateTime: linkSnap.updateTime } : {}),
     });
     writes.push({
       collection: 'campusRegistrations',
@@ -665,7 +708,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      ...(registration.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
     });
     writes.push({
       collection: 'pilotApplications',
@@ -680,7 +723,7 @@ export function applyDecisionAndBuildCommit({
         reviewHistory: [...(application?.reviewHistory ?? []), historyEntry],
         processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
       },
-      ...(application?.updateTime ? { updateTime: application.updateTime } : { createOnly: true }),
+      ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
     });
   } else if (action === 'approve_replacement' || action === 'approve_recovery') {
     const newQrRaw =
@@ -756,7 +799,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      ...(registration?.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
     });
     if (targetAccountUid) {
       writes.push({
@@ -775,7 +818,7 @@ export function applyDecisionAndBuildCommit({
             : {}),
           processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
         },
-        ...(application?.updateTime ? { updateTime: application.updateTime } : { createOnly: true }),
+        ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
       });
     }
     if (action === 'approve_recovery' && recoveryRequest) {
@@ -788,7 +831,7 @@ export function applyDecisionAndBuildCommit({
           reviewerUid,
           ...(payload.verificationMethod ? { verificationMethod: payload.verificationMethod } : {}),
         },
-        updateTime: recoveryRequest.updateTime,
+        ...(recSnap.updateTime ? { updateTime: recSnap.updateTime } : {}),
       });
     }
   } else {
@@ -816,8 +859,8 @@ export function applyDecisionAndBuildCommit({
       lastDecisionId: decisionId,
       publishedAt: nowIso,
     },
-    ...(existingDirectory?.updateTime
-      ? { updateTime: existingDirectory.updateTime }
+    ...(dirSnap.updateTime
+      ? { updateTime: dirSnap.updateTime }
       : { createOnly: true }),
   });
 

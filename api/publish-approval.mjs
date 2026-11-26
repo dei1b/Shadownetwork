@@ -178,15 +178,23 @@ function encodeFirestoreValue(value, timestampKeys = new Set(['publishedAt'])) {
   return { stringValue: String(value) };
 }
 
-function decodeDocument(doc, idFieldName) {
+export function decodeDocument(doc, idFieldName) {
   if (!doc) return null;
   const id = String(doc.name ?? '').split('/').pop();
-  const out = { updateTime: doc.updateTime };
-  if (idFieldName) out[idFieldName] = id;
+  const fields = {};
   for (const [k, v] of Object.entries(doc.fields ?? {})) {
-    out[k] = decodeFirestoreValue(v);
+    // Ignore any legacy persisted updateTime field so it never shadows doc.updateTime.
+    if (k === 'updateTime') continue;
+    fields[k] = decodeFirestoreValue(v);
   }
-  return out;
+  if (idFieldName && !fields[idFieldName]) {
+    fields[idFieldName] = id;
+  }
+  return {
+    id,
+    updateTime: doc.updateTime ?? null,
+    fields,
+  };
 }
 
 async function getDoc(origin, accessToken, projectId, collection, docId, idFieldName) {
@@ -207,7 +215,8 @@ export function buildFirestoreCommitBody(projectId, writes) {
   return {
     writes: (writes ?? []).map((w) => {
       const fields = {};
-      for (const [k, v] of Object.entries(w.fields)) {
+      for (const [k, v] of Object.entries(w.fields ?? {})) {
+        if (k === 'updateTime') continue;
         fields[k] = k === 'publishedAt' && typeof v === 'string'
           ? { timestampValue: v }
           : encodeFirestoreValue(v);
