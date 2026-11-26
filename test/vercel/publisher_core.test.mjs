@@ -168,6 +168,293 @@ function assertReviewConflict(input, code = 'stale_request') {
   assert.equal(JSON.stringify(input), before, 'conflict must leave request and directory unchanged');
 }
 
+function deletionReview() {
+  const { input, oldQr, newQr } = pendingPhoneReview('approve_replacement');
+  input.action = 'delete_registration';
+  input.decisionId = 'delete-s1';
+  input.payload = {
+    registrationId: 'reg-s1', accountUid: 'uid-s1', expectedRevision: 1,
+    reason: 'Remove campus registration',
+  };
+  input.application.fields.profileChange = { status: 'submitted', displayName: 'Unreviewed' };
+  input.linkRequest = { fields: { accountUid: 'uid-s1', registrationId: 'reg-s1', status: 'submitted' }, updateTime: 'link-v1' };
+  input.recoveryRequest = { fields: { accountUid: 'uid-s1', status: 'submitted', deviceRegistration: newQr.rawJson }, updateTime: 'recovery-v1' };
+  return { input, oldQr, newQr };
+}
+
+function committedDeletion(input, result) {
+  const snapshot = (collection) => ({
+    fields: result.writes.find((w) => w.collection === collection).fields,
+    updateTime: `${collection}-deleted`,
+  });
+  return {
+    ...input,
+    existingDirectory: snapshot('trustDirectory'),
+    application: snapshot('pilotApplications'),
+    registration: snapshot('campusRegistrations'),
+  };
+}
+
+test('delete_registration tombstones both records, cancels pending requests and signs only the bound phone revocation', () => {
+  const { input, oldQr } = deletionReview();
+  const bundle = JSON.parse(input.existingDirectory.bundle);
+  const unrelated = makeSignedQr('unrelated');
+  const entry = (id, qr, status) => ({ device_id: id, owner_name: id, role: 'civilian', status,
+    public_key: qr.publicKey, signing_public_key: qr.signingPublicKey, key_version: 1 });
+  input.existingDirectory.bundle = JSON.stringify(signTrustBundle({
+    version: 1, directoryProject: input.directoryProject,
+    publisherKeyPair: ed25519KeyPairFromSeed(input.publisherSeed), delegation: input.publisherDelegation,
+    approvedDevices: [...bundle.approved_devices, entry('unrelated', unrelated, 'approved')],
+    revokedDevices: [entry('retired', oldQr, 'revoked')], now: input.now,
+  }));
+  const result = applyDecisionAndBuildCommit(input);
+  assert.equal(result.status, 'published');
+  assert.equal(result.version, 2);
+  const signed = verifyTrustBundle(JSON.parse(result.bundle), { expectedProject: input.directoryProject, now: input.now });
+  assert.deepEqual(signed.approved_devices.map((d) => d.device_id), ['unrelated']);
+  assert.deepEqual(signed.revoked_devices.map((d) => d.device_id).sort(), ['phone-s1-a', 'retired']);
+  for (const collection of ['campusRegistrations', 'pilotApplications']) {
+    const write = result.writes.find((w) => w.collection === collection);
+    assert.equal(write.fields.status, 'deleted');
+    assert.equal(write.fields.revision, 2);
+    assert.equal(write.fields.deviceRegistration, oldQr.rawJson);
+    assert.equal(write.fields.deletedBy, input.reviewerUid);
+    assert.equal(write.fields.decisionOutcomes['delete-s1'].status, 'published');
+    assert.ok(write.updateTime);
+  }
+  const app = result.writes.find((w) => w.collection === 'pilotApplications').fields;
+  assert.equal(app.profileChange.status, 'deleted');
+  assert.equal(app.replacementRequest.status, 'deleted');
+  for (const collection of ['registrationLinkRequests', 'registrationRecoveryRequests']) {
+    const write = result.writes.find((w) => w.collection === collection);
+    assert.equal(write.fields.status, 'deleted');
+    assert.ok(write.updateTime);
+  }
+  assert.ok(result.writes.every((w) => ['campusRegistrations', 'pilotApplications', 'registrationLinkRequests', 'registrationRecoveryRequests', 'trustDirectory'].includes(w.collection)));
+});
+
+test('delete_registration retries acknowledge without writes and reject reused parameters', () => {
+  const { input } = deletionReview();
+  const result = applyDecisionAndBuildCommit(input);
+  const retry = committedDeletion(input, result);
+  assert.equal(applyDecisionAndBuildCommit(retry).idempotent, true);
+  assert.deepEqual(applyDecisionAndBuildCommit(retry).writes, []);
+  retry.payload = { ...retry.payload, reason: 'Different decision' };
+  assertReviewConflict(retry, 'decision_id_conflict');
+});
+
+test('delete_registration requires reviewed revision and rejects changed bindings or self deletion', () => {
+  for (const mutate of [
+    (i) => { i.payload.accountUid = 'other'; },
+    (i) => { i.payload.registrationId = 'other'; },
+    (i) => { i.application.fields.registrationId = 'other'; },
+    (i) => { i.registration.fields.accountUid = 'other'; },
+  ]) {
+    const { input } = deletionReview();
+    mutate(input);
+    assertReviewConflict(input, 'registration_binding_mismatch');
+  }
+  const { input } = deletionReview();
+  input.payload.expectedRevision = 0;
+  assertReviewConflict(input, 'stale_revision');
+  delete input.payload.expectedRevision;
+  assert.throws(() => applyDecisionAndBuildCommit(input), (e) => e.code === 'missing_expected_revision');
+  input.payload.expectedRevision = 1;
+  input.reviewerUid = 'uid-s1';
+  assert.throws(() => applyDecisionAndBuildCommit(input), (e) => e.code === 'self_review_forbidden');
+});
+
+test('delete_registration handles pending application without QR or campus record, without inventing phone keys', () => {
+  const { input } = deletionReview();
+  input.registration = null;
+  input.application.fields.status = 'submitted';
+  delete input.application.fields.deviceRegistration;
+  const result = applyDecisionAndBuildCommit(input);
+  for (const collection of ['campusRegistrations', 'pilotApplications']) {
+    const write = result.writes.find((w) => w.collection === collection);
+    assert.equal(write.fields.status, 'deleted');
+    assert.equal(write.fields.publicKey, undefined);
+    assert.equal(write.fields.deviceId, undefined);
+  }
+  assert.equal(result.writes.find((w) => w.collection === 'campusRegistrations').createOnly, true);
+  assert.deepEqual(JSON.parse(result.bundle).revoked_devices, []);
+});
+
+test('delete_registration accepts local-only signed approved phone, rejects missing or unrelated keys', () => {
+  const { input, oldQr } = deletionReview();
+  input.registration = null;
+  input.application = null;
+  input.linkRequest = null;
+  input.recoveryRequest = null;
+  delete input.payload.accountUid;
+  input.payload.expectedRevision = 0;
+  input.payload.deviceRegistration = oldQr.rawJson;
+  const result = applyDecisionAndBuildCommit(input);
+  assert.equal(result.writes.find((w) => w.collection === 'campusRegistrations').fields.status, 'deleted');
+  assert.equal(result.writes.some((w) => w.collection === 'pilotApplications'), false);
+  // A local manual registration can have revisions before its first cloud record.
+  input.payload.expectedRevision = 7;
+  const localRevision = applyDecisionAndBuildCommit(input);
+  assert.equal(localRevision.writes.find((w) => w.collection === 'campusRegistrations').fields.revision, 8);
+  input.payload.deviceRegistration = makeSignedQr('phone-s1-a').rawJson;
+  assertReviewConflict(input, 'phone_binding_mismatch');
+  delete input.payload.deviceRegistration;
+  assert.throws(() => applyDecisionAndBuildCommit(input), (e) => e.code === 'not_found');
+});
+
+test('delete_registration never revokes a roster entry whose keys differ from current binding', () => {
+  const { input } = deletionReview();
+  const other = makeSignedQr('phone-s1-a');
+  const phone = JSON.parse(other.rawJson);
+  Object.assign(input.registration.fields, { deviceRegistration: other.rawJson, publicKey: phone.public_key, signingPublicKey: phone.signing_public_key });
+  assertReviewConflict(input, 'phone_binding_mismatch');
+});
+
+test('deleted registration blocks every later publisher mutation, including stale recorded approvals', () => {
+  const { input } = deletionReview();
+  const result = applyDecisionAndBuildCommit(input);
+  const deleted = committedDeletion(input, result);
+  for (const action of ['approve_online', 'sync_offline_decision', 'approve_link', 'approve_replacement', 'approve_recovery', 'approve_profile_change', 'decline_profile_change', 'request_changes', 'reject']) {
+    for (const side of ['both', 'registration', 'application']) {
+      const attempt = structuredClone({ ...deleted, publisherSeed: undefined });
+      attempt.publisherSeed = input.publisherSeed;
+      attempt.action = action;
+      attempt.decisionId = 'later-decision';
+      if (side === 'registration') attempt.application.fields.status = 'submitted';
+      if (side === 'application') attempt.registration.fields.status = 'published';
+      assertReviewConflict(attempt, 'deleted_registration');
+    }
+  }
+  deleted.action = 'approve_online';
+  deleted.decisionId = 'dec-s1-initial';
+  deleted.payload = { registrationId: 'reg-s1' };
+  assertReviewConflict(deleted, 'deleted_registration');
+});
+
+test('delete_registration uses campus authority and does not clear unrelated request bindings', () => {
+  const { input } = deletionReview();
+  input.payload.deviceRegistration = makeSignedQr('unrelated-proposal').rawJson;
+  input.linkRequest.fields.accountUid = 'unrelated-account';
+  input.linkRequest.fields.registrationId = 'unrelated-registration';
+  input.recoveryRequest.fields.registrationId = 'unrelated-registration';
+  const result = applyDecisionAndBuildCommit(input);
+  assert.deepEqual(JSON.parse(result.bundle).revoked_devices.map((d) => d.device_id), ['phone-s1-a']);
+  assert.equal(result.writes.find((w) => w.collection === 'pilotApplications').docId, 'uid-s1');
+  assert.equal(result.writes.some((w) => w.collection === 'registrationLinkRequests' || w.collection === 'registrationRecoveryRequests'), false);
+});
+
+test('delete_registration clears loaded requests explicitly targeting an unlinked registration without claiming their accounts', () => {
+  const { input } = deletionReview();
+  delete input.registration.fields.accountUid;
+  input.registration.fields.revision = 1;
+  input.application = null;
+  delete input.payload.accountUid;
+  input.recoveryRequest.fields.registrationId = 'reg-s1';
+  const result = applyDecisionAndBuildCommit(input);
+  for (const collection of ['registrationLinkRequests', 'registrationRecoveryRequests']) {
+    assert.equal(result.writes.find((w) => w.collection === collection)?.fields.status, 'deleted');
+  }
+  assert.equal(result.writes.some((w) => w.collection === 'pilotApplications'), false);
+});
+
+test('hosted delete resolves omitted accountUid, enforces CAS retries and remote tombstones over stale local records', async () => {
+  const { default: handler, buildFirestoreCommitBody } = await import('../../api/publish-approval.mjs');
+  const { input } = deletionReview();
+  const env = {
+    FIREBASE_PROJECT_ID: input.directoryProject,
+    PUBLISHER_PRIVATE_KEY_SEED: input.publisherSeed,
+    PUBLISHER_DELEGATION_JSON: JSON.stringify(input.publisherDelegation),
+    FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
+    FIRESTORE_EMULATOR_HOST: '127.0.0.1:8080',
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  const oldFetch = globalThis.fetch;
+  const docs = new Map();
+  for (const [collection, docId, snap] of [
+    ['trustDirectory', 'current', { fields: { version: 1, bundle: input.existingDirectory.bundle } }],
+    ['campusRegistrations', 'reg-s1', input.registration],
+    ['pilotApplications', 'uid-s1', input.application],
+    ['registrationLinkRequests', 'uid-s1', input.linkRequest],
+    ['registrationRecoveryRequests', 'uid-s1', input.recoveryRequest],
+  ]) {
+    const update = buildFirestoreCommitBody(input.directoryProject, [{ collection, docId, fields: snap.fields }]).writes[0].update;
+    docs.set(`${collection}/${docId}`, { ...update, updateTime: `${collection}-v1` });
+  }
+  const b64 = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const token = `${b64({ alg: 'none' })}.${b64({ sub: input.reviewerUid, admin: true,
+    aud: input.directoryProject, iss: `https://securetoken.google.com/${input.directoryProject}`,
+    exp: Math.floor(Date.now() / 1000) + 3600 })}.`;
+  let commits = 0;
+  globalThis.fetch = async (url, options) => {
+    const path = String(url).split('/documents/')[1];
+    if (path) return docs.has(path)
+      ? new Response(JSON.stringify(docs.get(path)), { status: 200 })
+      : new Response('{}', { status: 404 });
+    assert.ok(String(url).endsWith('/documents:commit'), 'No Auth deletion or other network writes');
+    const { writes } = JSON.parse(options.body);
+    commits++;
+    if (commits === 1) {
+      docs.get('registrationRecoveryRequests/uid-s1').updateTime = 'recovery-newer';
+      return new Response('{}', { status: 409 });
+    }
+    for (const write of writes) {
+      const key = write.update.name.split('/documents/')[1];
+      const existing = docs.get(key);
+      assert.ok(write.currentDocument, `${key} must have a precondition`);
+      if (write.currentDocument.exists === false) assert.equal(existing, undefined);
+      else assert.equal(write.currentDocument.updateTime, existing.updateTime);
+    }
+    for (const write of writes) {
+      const key = write.update.name.split('/documents/')[1];
+      docs.set(key, { ...write.update, updateTime: `${key}-deleted` });
+    }
+    return new Response('{}', { status: 200 });
+  };
+  const invoke = async (body) => {
+    const result = {};
+    await handler({ method: 'POST', headers: { authorization: `Bearer ${token}` }, body }, {
+      setHeader() {}, status(code) { result.code = code; return this; },
+      json(value) { result.body = value; return this; }, end() {},
+    });
+    return result;
+  };
+  try {
+    Object.assign(process.env, env);
+    const { accountUid: _unused, ...payload } = input.payload;
+    const body = { ...payload, action: 'delete_registration', decisionId: input.decisionId };
+    const first = await invoke(body);
+    assert.equal(first.code, 200);
+    assert.equal(first.body.status, 'published');
+    assert.equal(commits, 2);
+    for (const collection of ['campusRegistrations', 'pilotApplications', 'registrationLinkRequests', 'registrationRecoveryRequests']) {
+      const id = collection === 'campusRegistrations' ? 'reg-s1' : 'uid-s1';
+      assert.equal(docs.get(`${collection}/${id}`).fields.status.stringValue, 'deleted');
+    }
+    const retry = await invoke(body);
+    assert.equal(retry.code, 200);
+    assert.equal(retry.body.idempotent, true);
+    assert.equal(commits, 2);
+    // Omitted registrationId must still discover the application's remote tombstone.
+    const staleApproval = await invoke({ action: 'approve_online', accountUid: 'uid-s1', decisionId: 'stale-online' });
+    assert.equal(staleApproval.code, 409);
+    assert.equal(staleApproval.body.code, 'deleted_registration');
+    const staleSync = await invoke({ action: 'sync_offline_decision', registrationId: 'reg-s1',
+      decisionId: 'stale-sync', registration: input.registration.fields });
+    assert.equal(staleSync.code, 409);
+    assert.equal(staleSync.body.code, 'deleted_registration');
+    const embeddedSync = await invoke({ action: 'sync_offline_decision',
+      decisionId: 'stale-embedded-sync', registration: input.registration.fields });
+    assert.equal(embeddedSync.code, 409);
+    assert.equal(embeddedSync.body.code, 'deleted_registration');
+  } finally {
+    globalThis.fetch = oldFetch;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 for (const action of ['approve_replacement', 'approve_recovery']) {
   test(`S1 ${action}: preserves an identical recorded decision from before review tokens existed`, () => {
     const legacyFingerprint = action === 'approve_replacement'

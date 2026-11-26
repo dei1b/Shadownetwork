@@ -299,6 +299,120 @@ class RegistrationReviewApi {
 
   String get documentPrefix => '$_databasePath/documents';
 
+  /// Removes registration access while retaining the Firebase Auth account.
+  /// Tombstones retain identity, keys and audit evidence; this is not a PII purge.
+  Future<void> deleteRegistration(
+    String token, {
+    required String reviewerUid,
+    required CampusRegistration registration,
+    required ReviewApplication? application,
+    required ReviewApplication? remoteRegistration,
+    required int version,
+    required String bundle,
+    required String? directoryUpdateTime,
+  }) async {
+    final id = registration.registrationId;
+    final uid = registration.accountUid;
+    final linked = uid != null && uid.isNotEmpty;
+    if (id.isEmpty ||
+        reviewerUid.trim().isEmpty ||
+        reviewerUid == uid ||
+        (remoteRegistration != null &&
+            (remoteRegistration.id != id ||
+                remoteRegistration.fields['accountUid'] != uid)) ||
+        (application != null &&
+            (!linked ||
+                application.id != uid ||
+                (application.fields['registrationId'] != null &&
+                    application.fields['registrationId'] != id)))) {
+      throw StateError(
+        'The registration changed. Refresh before trying again.',
+      );
+    }
+    var revision = registration.revision > 0 ? registration.revision : 1;
+    for (final snapshot in [application, remoteRegistration]) {
+      if (snapshot != null && snapshot.nextRevision > revision) {
+        revision = snapshot.nextRevision;
+      }
+    }
+    // Existing server records are authoritative. In particular, never apply a
+    // pending profile or replacement while recording deletion.
+    final base =
+        remoteRegistration?.fields ??
+        {
+          ..._campusRegistrationFields(registration),
+          'retiredKeys': registration.retiredKeys
+              .map((key) => key.toJson())
+              .toList(),
+        };
+    Map<String, dynamic> tombstone(Map<String, dynamic> fields) => {
+      ...fields,
+      'status': 'deleted',
+      'publicationStatus': 'deleted',
+      'deletedBy': reviewerUid,
+      'revision': revision,
+      for (final key in ['profileChange', 'replacementRequest'])
+        if (fields[key] is Map &&
+            [
+              'submitted',
+              'approved_pending_publication',
+            ].contains(fields[key]['status']))
+          key: {...fields[key] as Map, 'status': 'rejected'},
+    };
+    Map<String, dynamic> write(
+      String path,
+      Map<String, dynamic> fields,
+      ReviewApplication? snapshot,
+    ) => {
+      'update': {
+        'name': '$documentPrefix/$path',
+        'fields': tombstone(
+          fields,
+        ).map((key, value) => MapEntry(key, _encode(value))),
+      },
+      // Mask only changed fields on existing documents. Decoded timestamps in
+      // untouched identity/audit maps must retain their original Firestore type.
+      if (snapshot != null)
+        'updateMask': {
+          'fieldPaths': [
+            'status',
+            'publicationStatus',
+            'revision',
+            'deletedBy',
+            for (final key in ['profileChange', 'replacementRequest'])
+              if (fields[key] is Map &&
+                  [
+                    'submitted',
+                    'approved_pending_publication',
+                  ].contains(fields[key]['status']))
+                '$key.status',
+          ],
+        },
+      'updateTransforms': [
+        {'fieldPath': 'deletedAt', 'setToServerValue': 'REQUEST_TIME'},
+      ],
+      'currentDocument': snapshot == null
+          ? {'exists': false}
+          : {'updateTime': snapshot.updateTime},
+    };
+    await commitWrites(token, [
+      write('campusRegistrations/$id', base, remoteRegistration),
+      if (linked)
+        write(
+          'pilotApplications/$uid',
+          application?.fields ?? base,
+          application,
+        ),
+      directoryWrite(
+        registrationId: id,
+        applicationUid: linked ? uid : null,
+        version: version,
+        bundle: bundle,
+        directoryUpdateTime: directoryUpdateTime,
+      ),
+    ]);
+  }
+
   Map<String, dynamic> directoryWrite({
     String? applicationUid,
     String? registrationId,

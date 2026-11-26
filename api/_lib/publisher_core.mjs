@@ -502,10 +502,9 @@ function computeDecisionFingerprint({
   const accountUid =
     payload.accountUid ??
     payload.applicationUid ??
-    linkRequest?.accountUid ??
-    recoveryRequest?.accountUid ??
-    application?.uid ??
-    null;
+    (action === 'delete_registration' ? null : (
+      linkRequest?.accountUid ?? recoveryRequest?.accountUid ?? application?.uid ?? null
+    ));
   const targetRegistrationId = payload.registrationId ?? null;
   const normalizeJsonField = (raw) => {
     if (typeof raw !== 'string') return raw ?? null;
@@ -542,6 +541,9 @@ function computeDecisionFingerprint({
       ? [...payload.editedFields].map(String).sort()
       : null,
     registration: normalizedEmbeddedReg,
+    ...(action === 'delete_registration'
+      ? { expectedRevision: payload.expectedRevision ?? null }
+      : {}),
     ...((action === 'approve_replacement' || action === 'approve_recovery') &&
       ('expectedRequestUpdateTime' in payload || 'expectedOldPhone' in payload)
       ? {
@@ -852,6 +854,33 @@ export function applyDecisionAndBuildCommit({
   const linkRequest = linkSnap.fields;
   const recoveryRequest = recSnap.fields;
 
+  // A tombstone wins over old queued decisions, including previously completed approvals.
+  const isDeleted = registration?.status === 'deleted' || application?.status === 'deleted';
+  if (isDeleted && action !== 'delete_registration') {
+    throw new PublisherError(409, 'Deleted registrations require explicit re-enrollment.', 'deleted_registration');
+  }
+  if (action === 'delete_registration') {
+    if (typeof payload.registrationId !== 'string' || !payload.registrationId.trim()) {
+      throw new PublisherError(400, 'A registrationId is required.', 'missing_registration_id');
+    }
+    const ids = [registration?.registrationId, application?.registrationId].filter(Boolean);
+    const accounts = [payload.accountUid, payload.applicationUid, registration?.accountUid, application?.uid].filter(Boolean);
+    if (
+      ids.some((id) => id !== payload.registrationId) ||
+      accounts.some((uid) => uid !== accounts[0]) ||
+      (registration && application && !registration.accountUid && application.registrationId !== payload.registrationId) ||
+      (!registration && !application && accounts.length > 0)
+    ) {
+      throw new PublisherError(409, 'Registration and account bindings do not match.', 'registration_binding_mismatch');
+    }
+    if (accounts.includes(reviewerUid)) {
+      throw new PublisherError(403, 'Another reviewer must delete your registration.', 'self_review_forbidden');
+    }
+    if (!Number.isInteger(payload.expectedRevision) || payload.expectedRevision < 0) {
+      throw new PublisherError(400, 'A reviewed expectedRevision is required.', 'missing_expected_revision');
+    }
+  }
+
   const rosterIndependentAction =
     action === 'request_changes' ||
     action === 'reject' ||
@@ -894,6 +923,9 @@ export function applyDecisionAndBuildCommit({
   if (recorded) {
     return recorded;
   }
+  if (isDeleted) {
+    throw new PublisherError(409, 'Registration has already been deleted.', 'deleted_registration');
+  }
 
   let delegation = null;
   let publisherKeyPair = null;
@@ -908,20 +940,20 @@ export function applyDecisionAndBuildCommit({
     }
   }
 
-  const targetAccountUid =
-    application?.uid ??
-    linkRequest?.accountUid ??
-    recoveryRequest?.accountUid ??
-    registration?.accountUid ??
-    payload.accountUid ??
-    null;
+  const targetAccountUid = action === 'delete_registration'
+    ? (registration?.accountUid ?? application?.uid ?? payload.accountUid ?? payload.applicationUid ?? null)
+    : (application?.uid ?? linkRequest?.accountUid ?? recoveryRequest?.accountUid ??
+        registration?.accountUid ?? payload.accountUid ?? null);
   if (targetAccountUid && targetAccountUid === reviewerUid) {
     throw new PublisherError(403, 'Another reviewer must approve or update your own registration.', 'self_review_forbidden');
   }
 
   const role = payload.role === 'responder' ? 'responder' : 'civilian';
   const reason = String(payload.reason ?? '').trim();
-  const nextRevision = Number(application?.revision ?? registration?.revision ?? 0) + 1;
+  const nextRevision = action === 'delete_registration'
+    ? Math.max(Number(application?.revision ?? 0), Number(registration?.revision ?? 0),
+        !application && !registration ? payload.expectedRevision : 0) + 1
+    : Number(application?.revision ?? registration?.revision ?? 0) + 1;
   const historyEntry = {
     reviewerUid,
     action,
@@ -1058,7 +1090,105 @@ export function applyDecisionAndBuildCommit({
   let registrationId = existingRegistrationId ?? `reg-${crypto.randomUUID()}`;
   let directoryOwnerFields = {};
 
-  if (action === 'approve_online') {
+  if (action === 'delete_registration') {
+    if (registration || application) {
+      assertExpectedRevision(payload.expectedRevision, registration?.revision ?? application?.revision ?? 0);
+    }
+    let phone = null;
+    if (registration) {
+      // Never substitute caller keys or an application proposal for the campus binding.
+      if (registration.deviceRegistration ||
+          (registration.deviceId && registration.publicKey && registration.signingPublicKey)) {
+        phone = resolveRegistrationPhone(registration);
+      }
+    } else if (application?.deviceRegistration) {
+      phone = verifyDeviceRegistrationQr(application.deviceRegistration);
+    } else if (!application) {
+      if (!payload.deviceRegistration) {
+        throw new PublisherError(404, 'Registration record not found.', 'not_found');
+      }
+      phone = verifyDeviceRegistrationQr(payload.deviceRegistration);
+      if (!approved.has(phone.deviceId.toLowerCase())) {
+        throw new PublisherError(404, 'Local phone is not in the signed approved directory.', 'not_found');
+      }
+    }
+    if (phone) {
+      const keyLower = phone.deviceId.toLowerCase();
+      const strip = (value) => String(value ?? '').trim().replace(/=+$/, '');
+      const matches = (entry) => !entry || (
+        strip(entry.public_key) === strip(phone.publicKey) &&
+        strip(entry.signing_public_key) === strip(phone.signingPublicKey) &&
+        Number(entry.key_version) === phone.keyVersion
+      );
+      if (!matches(approved.get(keyLower)) || !matches(revoked.get(keyLower))) {
+        throw new PublisherError(409, 'Directory keys do not match the current phone binding.', 'phone_binding_mismatch');
+      }
+      const oldEntry = approved.get(keyLower) ?? revoked.get(keyLower);
+      approved.delete(keyLower);
+      // Keep existing revocations (including all retired phones) unchanged.
+      if (!revoked.has(keyLower)) {
+        revoked.set(keyLower, {
+          device_id: phone.deviceId,
+          owner_name: registration?.displayName ?? application?.displayName ?? oldEntry?.owner_name ?? 'Deleted registration',
+          role: registration?.role ?? oldEntry?.role ?? role,
+          status: 'revoked',
+          public_key: phone.publicKey,
+          signing_public_key: phone.signingPublicKey,
+          key_version: phone.keyVersion,
+          updated_at: nowIso,
+        });
+      }
+    }
+    const outcome = {
+      action, status: 'published', targetStatus: 'deleted', version: nextVersion,
+      registrationId, revision: nextRevision, expectedRevision: payload.expectedRevision,
+    };
+    const cancel = (request) => ({ ...request, status: 'deleted', reviewerUid, reason, updatedAt: nowIso });
+    const tombstone = (record) => ({
+      ...(record ?? {}), registrationId, status: 'deleted', publicationStatus: 'published',
+      revision: nextRevision, deletedAt: nowIso, deletedBy: reviewerUid, deletionReason: reason,
+      updatedAt: nowIso,
+      ...(record?.profileChange ? { profileChange: cancel(record.profileChange) } : {}),
+      ...(record?.replacementRequest ? { replacementRequest: cancel(record.replacementRequest) } : {}),
+      reviewHistory: [...(record?.reviewHistory ?? []), { ...historyEntry, targetStatus: 'deleted' }],
+      processedDecisionIds: [...(record?.processedDecisionIds ?? []), decisionId],
+      decisionOutcomes: recordOutcome(record, decisionId, outcome),
+    });
+    writes.push({
+      collection: 'campusRegistrations', docId: registrationId,
+      fields: {
+        ...tombstone(registration),
+        ...(targetAccountUid ? { accountUid: targetAccountUid } : {}),
+        ...(!registration && phone ? {
+          deviceId: phone.deviceId, publicKey: phone.publicKey, signingPublicKey: phone.signingPublicKey,
+          keyVersion: phone.keyVersion, deviceRegistration: application?.deviceRegistration ?? payload.deviceRegistration,
+        } : {}),
+      },
+      ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
+    });
+    if (targetAccountUid) {
+      writes.push({
+        collection: 'pilotApplications', docId: targetAccountUid,
+        fields: { ...tombstone(application), uid: targetAccountUid },
+        ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
+      });
+    }
+    for (const [collection, snap] of [
+      ['registrationLinkRequests', linkSnap], ['registrationRecoveryRequests', recSnap],
+    ]) {
+      const request = snap.fields;
+      if (request?.accountUid && (
+        request.registrationId === registrationId ||
+        (!request.registrationId && request.accountUid === targetAccountUid)
+      )) {
+        writes.push({
+          collection, docId: request.accountUid, fields: cancel(request),
+          ...(snap.updateTime ? { updateTime: snap.updateTime } : { createOnly: true }),
+        });
+      }
+    }
+    directoryOwnerFields = { registrationId, ...(targetAccountUid ? { applicationUid: targetAccountUid } : {}) };
+  } else if (action === 'approve_online') {
     if (!application) {
       throw new PublisherError(404, 'Application not found.', 'not_found');
     }

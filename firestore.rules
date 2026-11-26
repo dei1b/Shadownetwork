@@ -10,6 +10,84 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.get('admin', false) == true;
     }
 
+    function accountNotDeleted(uid) {
+      let app = /databases/$(database)/documents/pilotApplications/$(uid);
+      return !exists(app) || get(app).data.status != 'deleted';
+    }
+
+    function registrationNotDeleted(id) {
+      let reg = /databases/$(database)/documents/campusRegistrations/$(id);
+      return id == '' || !exists(reg) || get(reg).data.status != 'deleted';
+    }
+
+    function cancelledPendingMap(before, after, key) {
+      let old = before.get(key, {});
+      let next = after.get(key, {});
+      return old.get('status', '') in ['submitted', 'approved_pending_publication']
+        ? next.get('status', '') == 'rejected'
+          && next.diff(old).affectedKeys().hasOnly(['status'])
+        : next == old;
+    }
+
+    function deletionFields(before, after) {
+      return before.status != 'deleted' && after.status == 'deleted'
+        && after.publicationStatus == 'deleted'
+        && after.revision is int && after.revision > before.get('revision', 0)
+        && after.deletedAt == request.time
+        && after.deletedBy == request.auth.uid
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'publicationStatus', 'revision', 'deletedAt', 'deletedBy',
+          'profileChange', 'replacementRequest'
+        ])
+        && cancelledPendingMap(before, after, 'profileChange')
+        && cancelledPendingMap(before, after, 'replacementRequest');
+    }
+
+    function deletionDirectoryMatches(id, uid) {
+      let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
+      return snapshot.get('registrationId', '') == id
+        && snapshot.get('applicationUid', '') == uid
+        && snapshot.publishedAt == request.time;
+    }
+
+    function deleteRegistration(id, after) {
+      let uid = after.get('accountUid', '');
+      let app = /databases/$(database)/documents/pilotApplications/$(uid);
+      let reg = /databases/$(database)/documents/campusRegistrations/$(id);
+      return reviewer() && request.auth.uid != uid
+        && after.registrationId == id
+        && after.status == 'deleted' && after.publicationStatus == 'deleted'
+        && after.revision is int && after.revision > 0
+        && after.deletedAt == request.time
+        && after.deletedBy == request.auth.uid
+        && (!exists(reg) || (
+          request.auth.uid != get(reg).data.get('accountUid', '')
+          && deletionFields(get(reg).data, after)))
+        && (uid == '' || (getAfter(app).data.status == 'deleted'
+          && getAfter(app).data.revision == after.revision
+          && (!exists(app) || (
+            get(app).data.get('registrationId', id) == id
+            && after.revision > get(app).data.get('revision', 0)))))
+        && deletionDirectoryMatches(id, uid);
+    }
+
+    function deleteApplication(uid, after) {
+      let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
+      let id = snapshot.registrationId;
+      let reg = getAfter(/databases/$(database)/documents/campusRegistrations/$(id)).data;
+      let app = /databases/$(database)/documents/pilotApplications/$(uid);
+      return reviewer() && request.auth.uid != uid
+        && reg.get('accountUid', '') == uid && reg.status == 'deleted'
+        && reg.deletedAt == request.time && after.revision == reg.revision
+        && after.status == 'deleted' && after.publicationStatus == 'deleted'
+        && after.deletedAt == request.time
+        && after.deletedBy == request.auth.uid
+        && (!exists(app) ? after == reg : (
+          get(app).data.get('registrationId', id) == id
+          && deletionFields(get(app).data, after)))
+        && deletionDirectoryMatches(id, uid);
+    }
+
     function validAffiliationFields(data) {
       let affiliation = data.get('affiliation', 'student');
       return (affiliation == 'student'
@@ -264,6 +342,8 @@ service cloud.firestore {
       let link = /databases/$(database)/documents/registrationLinkRequests/$(uid);
       let rec = /databases/$(database)/documents/registrationRecoveryRequests/$(uid);
       return reviewer() && request.auth.uid != uid
+        && accountNotDeleted(uid)
+        && registrationNotDeleted(after.get('registrationId', ''))
         && after.status == 'published'
         && after.publicationStatus == 'published'
         && validAffiliationFields(after)
@@ -291,20 +371,24 @@ service cloud.firestore {
     function directoryWriteMatchesApplication(uid) {
       let application = /databases/$(database)/documents/pilotApplications/$(uid);
       let rec = /databases/$(database)/documents/registrationRecoveryRequests/$(uid);
-      return getAfter(application).data.status == 'published'
+      return (getAfter(application).data.status == 'deleted'
+          && deleteApplication(uid, getAfter(application).data))
+        || (getAfter(application).data.status == 'published'
         && ((exists(application) && (
             get(application).data.status == 'approved_pending_publication'
             || (get(application).data.status == 'published' && (
               (get(application).data.get('profileChange', {}).get('status', '') in ['submitted', 'approved_pending_publication']
                && getAfter(application).data.get('profileChange', {}).get('status', '') == 'published')
               || get(application).data.get('replacementRequest', {}).get('status', '') in ['submitted', 'approved_pending_publication']))))
-          || (exists(rec) && get(rec).data.status == 'submitted' && getAfter(rec).data.status == 'published'));
+          || (exists(rec) && get(rec).data.status == 'submitted' && getAfter(rec).data.status == 'published')));
     }
 
     function directoryWriteMatchesRegistration(regId) {
       let reg = /databases/$(database)/documents/campusRegistrations/$(regId);
       return getAfter(reg).data.get('accountUid', '') != request.auth.uid
-        && getAfter(reg).data.status in ['published', 'revoked'];
+        && (getAfter(reg).data.status in ['published', 'revoked']
+          || (getAfter(reg).data.get('accountUid', '') == ''
+            && deleteRegistration(regId, getAfter(reg).data)));
     }
 
     match /trustDirectory/current {
@@ -328,12 +412,14 @@ service cloud.firestore {
         && validText(request.resource.data.get('address', ''), 200, false)
         && validText(request.resource.data.deviceRegistration, 4096, true)
         && request.resource.data.status == 'submitted')
-        || reviewerReconcileApplication(uid, request.resource.data);
+        || reviewerReconcileApplication(uid, request.resource.data)
+        || deleteApplication(uid, request.resource.data);
       allow get: if request.auth != null
         && (request.auth.uid == uid
           || reviewer());
       allow list: if reviewer();
-      allow update: if review(uid, resource.data, request.resource.data)
+      allow update: if (resource.data.status != 'deleted' && (
+        review(uid, resource.data, request.resource.data)
         || correct(uid, resource.data, request.resource.data)
         || published(uid, resource.data, request.resource.data)
         || updateContact(uid, resource.data, request.resource.data)
@@ -343,12 +429,16 @@ service cloud.firestore {
         || requestPhoneReplacement(uid, resource.data, request.resource.data)
         || reviewPhoneReplacement(uid, resource.data, request.resource.data)
         || publishPhoneReplacement(uid, resource.data, request.resource.data)
-        || reviewerReconcileApplication(uid, request.resource.data);
+        || reviewerReconcileApplication(uid, request.resource.data)))
+        || deleteApplication(uid, request.resource.data);
     }
 
     match /campusRegistrations/{registrationId} {
       allow get, list: if reviewer();
-      allow create, update: if reviewer()
+      allow create, update: if (reviewer()
+        && (resource == null || resource.data.status != 'deleted')
+        && (request.resource.data.get('accountUid', '') == ''
+          || accountNotDeleted(request.resource.data.accountUid))
         && request.auth.uid != request.resource.data.get('accountUid', '')
         && validText(request.resource.data.registrationId, 100, true)
         && request.resource.data.registrationId == registrationId
@@ -357,13 +447,16 @@ service cloud.firestore {
           'submitted', 'approved_local', 'approved_pending_publication',
           'published', 'changes_requested', 'rejected', 'revoked', 'conflict'
         ]
-        && validAffiliationFields(request.resource.data);
+        && validAffiliationFields(request.resource.data))
+        || deleteRegistration(registrationId, request.resource.data);
     }
 
     match /registrationLinkRequests/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || reviewer());
       allow list: if reviewer();
-      allow create: if request.auth != null
+      allow create: if accountNotDeleted(uid)
+          && registrationNotDeleted(request.resource.data.get('registrationId', ''))
+          && request.auth != null
           && request.auth.uid == uid
           && request.resource.data.accountUid == uid
           && request.resource.data.status == 'pending'
@@ -376,7 +469,9 @@ service cloud.firestore {
           && request.resource.data.keyVersion > 0
           && validText(request.resource.data.proofSignature, 256, true)
           && validText(request.resource.data.issuedAt, 64, true);
-      allow update: if (request.auth != null
+      allow update: if accountNotDeleted(uid)
+        && registrationNotDeleted(request.resource.data.get('registrationId', ''))
+        && ((request.auth != null
           && request.auth.uid == uid
           && resource.data.status == 'pending'
           && request.resource.data.accountUid == uid
@@ -393,13 +488,15 @@ service cloud.firestore {
         || (reviewer() && request.auth.uid != uid
           && resource != null
           && request.resource.data.status in ['linked', 'replacement_required', 'rejected']
-          && request.resource.data.reviewerUid == request.auth.uid);
+          && request.resource.data.reviewerUid == request.auth.uid));
     }
 
     match /registrationRecoveryRequests/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || reviewer());
       allow list: if reviewer();
-      allow create, update: if (request.auth != null
+      allow create, update: if accountNotDeleted(uid)
+        && registrationNotDeleted(request.resource.data.get('registrationId', ''))
+        && ((request.auth != null
           && request.auth.uid == uid
           && request.resource.data.accountUid == uid
           && request.resource.data.status == 'submitted'
@@ -417,7 +514,7 @@ service cloud.firestore {
           && (!('verificationMethod' in request.resource.data) ||
             request.resource.data.verificationMethod in [
               'campus_email_match', 'mailbox_code', 'desk_id_check'
-            ]));
+            ])));
     }
   }
 }

@@ -311,11 +311,11 @@ export default async function handler(req, res) {
     const accessToken = await getFirestoreAccessToken();
     const origin = firestoreOrigin();
 
-    const accountUid = body.accountUid ?? body.applicationUid ?? null;
-    const registrationId = body.registrationId ?? null;
+    const accountUid = body.accountUid ?? body.applicationUid ?? body.registration?.accountUid ?? null;
+    const registrationId = body.registrationId ?? body.registration?.registrationId ?? null;
     const result = await executeDecisionWithRetry({
       readState: async () => {
-        const [
+        let [
           existingDirectory,
           application,
           registration,
@@ -325,17 +325,32 @@ export default async function handler(req, res) {
           getDoc(origin, accessToken, projectId, 'trustDirectory', 'current'),
           getDoc(origin, accessToken, projectId, 'pilotApplications', accountUid, 'uid'),
           getDoc(origin, accessToken, projectId, 'campusRegistrations', registrationId, 'registrationId'),
-          body.action === 'approve_link'
+          body.action === 'approve_link' || body.action === 'delete_registration'
             ? getDoc(origin, accessToken, projectId, 'registrationLinkRequests', accountUid, 'accountUid')
             : null,
-          body.action === 'approve_recovery'
+          body.action === 'approve_recovery' || body.action === 'delete_registration'
             ? getDoc(origin, accessToken, projectId, 'registrationRecoveryRequests', accountUid, 'accountUid')
             : null,
         ]);
+        // Follow persisted bindings before considering a caller's offline snapshot.
+        // Otherwise omitted IDs can hide tombstones or leave pending requests active.
+        if (!registrationId && application?.fields?.registrationId) {
+          registration = await getDoc(origin, accessToken, projectId, 'campusRegistrations', application.fields.registrationId, 'registrationId');
+        }
+        const boundAccountUid = registration?.fields?.accountUid;
+        if (!accountUid && boundAccountUid) {
+          [application, linkRequest, recoveryRequest] = await Promise.all([
+            getDoc(origin, accessToken, projectId, 'pilotApplications', boundAccountUid, 'uid'),
+            body.action === 'delete_registration' || body.action === 'approve_link'
+              ? getDoc(origin, accessToken, projectId, 'registrationLinkRequests', boundAccountUid, 'accountUid') : null,
+            body.action === 'delete_registration' || body.action === 'approve_recovery'
+              ? getDoc(origin, accessToken, projectId, 'registrationRecoveryRequests', boundAccountUid, 'accountUid') : null,
+          ]);
+        }
         return {
           existingDirectory,
           application,
-          registration: registration ?? (body.registration ?? null),
+          registration: registration ?? (body.action === 'delete_registration' ? null : (body.registration ?? null)),
           linkRequest,
           recoveryRequest,
         };

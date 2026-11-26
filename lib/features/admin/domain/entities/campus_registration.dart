@@ -31,6 +31,7 @@ enum CampusRegistrationStatus {
   changesRequested,
   rejected,
   revoked,
+  deleted,
   conflict;
 
   String get code => switch (this) {
@@ -42,6 +43,7 @@ enum CampusRegistrationStatus {
     CampusRegistrationStatus.changesRequested => 'changes_requested',
     CampusRegistrationStatus.rejected => 'rejected',
     CampusRegistrationStatus.revoked => 'revoked',
+    CampusRegistrationStatus.deleted => 'deleted',
     CampusRegistrationStatus.conflict => 'conflict',
   };
 
@@ -54,6 +56,7 @@ enum CampusRegistrationStatus {
     CampusRegistrationStatus.changesRequested => 'Changes requested',
     CampusRegistrationStatus.rejected => 'Rejected',
     CampusRegistrationStatus.revoked => 'Revoked',
+    CampusRegistrationStatus.deleted => 'Deleted',
     CampusRegistrationStatus.conflict => 'Needs resolution',
   };
 
@@ -66,6 +69,7 @@ enum CampusRegistrationStatus {
       'changes_requested' => CampusRegistrationStatus.changesRequested,
       'rejected' => CampusRegistrationStatus.rejected,
       'revoked' => CampusRegistrationStatus.revoked,
+      'deleted' => CampusRegistrationStatus.deleted,
       'conflict' => CampusRegistrationStatus.conflict,
       _ => CampusRegistrationStatus.submitted,
     };
@@ -309,10 +313,11 @@ class ReviewerProfile {
 
   Map<String, Object?> toJson() => {'uid': uid, 'email': email};
 
-  factory ReviewerProfile.fromJson(Map<String, Object?> json) => ReviewerProfile(
-    uid: (json['uid'] as String? ?? '').trim(),
-    email: (json['email'] as String? ?? '').trim(),
-  );
+  factory ReviewerProfile.fromJson(Map<String, Object?> json) =>
+      ReviewerProfile(
+        uid: (json['uid'] as String? ?? '').trim(),
+        email: (json['email'] as String? ?? '').trim(),
+      );
 }
 
 class CampusRegistration {
@@ -365,7 +370,8 @@ class CampusRegistration {
       CampusRegistrationStatus.approvedLocal ||
       CampusRegistrationStatus.approvedPendingPublication ||
       CampusRegistrationStatus.published => RegisteredDeviceStatus.approved,
-      CampusRegistrationStatus.revoked => RegisteredDeviceStatus.revoked,
+      CampusRegistrationStatus.revoked ||
+      CampusRegistrationStatus.deleted => RegisteredDeviceStatus.revoked,
       _ => RegisteredDeviceStatus.pending,
     };
     final label = switch (status) {
@@ -375,7 +381,8 @@ class CampusRegistration {
             : 'Approved locally - share updated trust bundle',
       CampusRegistrationStatus.published => 'Published',
       CampusRegistrationStatus.revoked => 'Revoked by admin',
-      CampusRegistrationStatus.conflict => conflictReason ?? 'Conflict detected',
+      CampusRegistrationStatus.conflict =>
+        conflictReason ?? 'Conflict detected',
       _ => status.label,
     };
     return RegisteredDevice(
@@ -531,8 +538,8 @@ class CampusRegistration {
       status: CampusRegistrationStatus.fromCode(json['status'] as String?),
       syncState: CampusSyncState.fromCode(json['sync_state'] as String?),
       conflictReason: json['conflict_reason'] as String?,
-      resolvedConflictVersion:
-          (json['resolved_conflict_version'] as num?)?.toInt(),
+      resolvedConflictVersion: (json['resolved_conflict_version'] as num?)
+          ?.toInt(),
       accountUid: json['account_uid'] as String?,
       accountEmail: json['account_email'] as String?,
       identity: json['identity'] is Map
@@ -553,9 +560,7 @@ class CampusRegistration {
           : const RegistrationPhoneBinding(deviceId: ''),
       retiredKeys: (json['retired_keys'] as List? ?? const [])
           .whereType<Map>()
-          .map(
-            (e) => RetiredKeyRecord.fromJson(Map<String, Object?>.from(e)),
-          )
+          .map((e) => RetiredKeyRecord.fromJson(Map<String, Object?>.from(e)))
           .toList(),
       reviewHistory: (json['review_history'] as List? ?? const [])
           .whereType<Map>()

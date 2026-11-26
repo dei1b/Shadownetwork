@@ -72,6 +72,7 @@ class _UnifiedRegistrationsWorkspaceState
   List<ReviewApplication> _remoteRegistrations = [];
   List<ReviewApplication> _linkRequests = [];
   List<ReviewApplication> _recoveryRequests = [];
+  final Set<String> _deletedRegistrationIds = {};
 
   static String _decisionKey(
     String registrationId,
@@ -221,6 +222,22 @@ class _UnifiedRegistrationsWorkspaceState
       );
     } on StateError {
       // Optional collections remain gracefully empty if project rules are older.
+    }
+    if (widget.registry != null) {
+      for (final remote in remoteRegs.where((r) => r.status == 'deleted')) {
+        final local = _localRegistrations
+            .where((r) => r.registrationId == remote.id)
+            .firstOrNull;
+        if (local != null) {
+          await widget.registry!.saveRegistration(
+            local.copyWith(
+              status: CampusRegistrationStatus.deleted,
+              syncState: CampusSyncState.synced,
+            ),
+            removePendingForRegistration: true,
+          );
+        }
+      }
     }
     if (reconcile && widget.registry != null) {
       final directory = await _api.readDirectory(session.token);
@@ -401,6 +418,13 @@ class _UnifiedRegistrationsWorkspaceState
   }
 
   List<_UnifiedQueueItem> _buildUnifiedQueue() {
+    final deletedAccountUids = <String>{
+      for (final app in _onlineApplications)
+        if (app.status == 'deleted') app.id,
+      for (final remote in _remoteRegistrations)
+        if (remote.status == 'deleted' && remote.fields['accountUid'] is String)
+          remote.fields['accountUid'] as String,
+    };
     final byRegId = <String, _UnifiedQueueItem>{};
     final byAccountUid = <String, String>{};
     final byDeviceId = <String, String>{};
@@ -589,6 +613,7 @@ class _UnifiedRegistrationsWorkspaceState
     }
 
     for (final link in _linkRequests) {
+      if (deletedAccountUids.contains(link.id)) continue;
       if (link.fields['status'] != 'pending') continue;
       final regId = (link.fields['registrationId'] as String? ?? '').trim();
       final item = byRegId[regId];
@@ -598,6 +623,7 @@ class _UnifiedRegistrationsWorkspaceState
     }
 
     for (final rec in _recoveryRequests) {
+      if (deletedAccountUids.contains(rec.id)) continue;
       if (rec.fields['status'] != 'submitted') continue;
       final schoolId = (rec.fields['schoolId'] as String? ?? '')
           .trim()
@@ -692,6 +718,19 @@ class _UnifiedRegistrationsWorkspaceState
     final query = _search.text.trim().toLowerCase();
     return byRegId.values.where((item) {
       final r = item.registration;
+      if (r.status == CampusRegistrationStatus.deleted ||
+          _deletedRegistrationIds.contains(r.registrationId) ||
+          _onlineApplications.any(
+            (app) => app.status == 'deleted' && app.id == r.accountUid,
+          ) ||
+          _remoteRegistrations.any(
+            (remote) =>
+                remote.status == 'deleted' &&
+                (remote.id == r.registrationId ||
+                    remote.fields['accountUid'] == r.accountUid &&
+                        r.accountUid != null),
+          ))
+        return false;
       if (_roleFilter != 'all' && r.role.name != _roleFilter) return false;
       final statusMatches = switch (_statusFilter) {
         'needs_review' =>
@@ -796,6 +835,7 @@ class _UnifiedRegistrationsWorkspaceState
       'published' => CampusRegistrationStatus.published,
       'changes_requested' => CampusRegistrationStatus.changesRequested,
       'rejected' => CampusRegistrationStatus.rejected,
+      'deleted' => CampusRegistrationStatus.deleted,
       _ => CampusRegistrationStatus.submitted,
     };
     final now = DateTime.now().toUtc();
@@ -860,7 +900,9 @@ class _UnifiedRegistrationsWorkspaceState
         final reg = _localRegistrations
             .where((r) => r.registrationId == op.registrationId)
             .firstOrNull;
-        if (reg == null || reg.status == CampusRegistrationStatus.conflict) {
+        if (reg == null ||
+            reg.status == CampusRegistrationStatus.conflict ||
+            reg.status == CampusRegistrationStatus.deleted) {
           continue;
         }
         final opPayload = _decodePendingPayload(op.payloadJson);
@@ -970,7 +1012,9 @@ class _UnifiedRegistrationsWorkspaceState
         final reg = _localRegistrations
             .where((r) => r.registrationId == op.registrationId)
             .firstOrNull;
-        if (reg == null || reg.status == CampusRegistrationStatus.conflict) {
+        if (reg == null ||
+            reg.status == CampusRegistrationStatus.conflict ||
+            reg.status == CampusRegistrationStatus.deleted) {
           continue;
         }
         final opPayload = _decodePendingPayload(op.payloadJson);
@@ -1175,6 +1219,13 @@ class _UnifiedRegistrationsWorkspaceState
   });
 
   Future<void> _openUnifiedEditor(_UnifiedQueueItem item) async {
+    if (item.registration.status == CampusRegistrationStatus.deleted) {
+      _notify(
+        'This registration was deleted. Its old phone approval cannot be reused.',
+        kind: FeedbackKind.error,
+      );
+      return;
+    }
     final result = await showDialog<_EditorOutcome>(
       context: context,
       builder: (_) => _UnifiedRegistrationEditorDialog(
@@ -1185,12 +1236,145 @@ class _UnifiedRegistrationsWorkspaceState
       ),
     );
     if (result == null || !mounted) return;
+    if (result.action == _EditorAction.deleteUser) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Delete this user?'),
+          content: const Text(
+            'Remove this user from active registrations and revoke their phone access. The login account will be kept. Revocation and audit records are retained. Offline phones apply this change when they next sync.',
+          ),
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete user and revoke access'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
 
     ({String title, String packageJson})? approvalQr;
     await _runBusy(() async {
       final registry = widget.registry;
       final registration = item.registration;
       switch (result.action) {
+        case _EditorAction.deleteUser:
+          final session = _session;
+          if (session == null)
+            throw StateError('Sign in as a reviewer to delete a user online.');
+          if (registration.accountUid == session.uid ||
+              item.onlineApplication?.id == session.uid) {
+            throw StateError('Another reviewer must delete your registration.');
+          }
+          const action = 'delete_registration';
+          final discriminator =
+              '${registration.revision}|${registration.activePhone.deviceId}';
+          final decisionId = _decisionIdFor(
+            registration.registrationId,
+            action: action,
+            discriminator: discriminator,
+          );
+          final deleted = registration.copyWith(
+            status: CampusRegistrationStatus.deleted,
+            syncState: CampusSyncState.synced,
+            updatedAt: DateTime.now().toUtc(),
+          );
+          String source;
+          if (_publisher.isConfigured) {
+            final response = await _publisher.publishDecision(
+              token: session.token,
+              payload: {
+                'action': action,
+                'decisionId': decisionId,
+                'registrationId': registration.registrationId,
+                if (registration.accountUid != null)
+                  'accountUid': registration.accountUid,
+                'expectedRevision': registration.revision,
+                'reason': 'User registration removed by administrator',
+                'deviceRegistration':
+                    registration.activePhone.deviceRegistrationJson,
+              },
+            );
+            if ((deleted.activePhone.publicKey ?? '').isNotEmpty &&
+                (deleted.activePhone.signingPublicKey ?? '').isNotEmpty) {
+              _assertBundleReflectsSync(
+                bundleJson: response.bundle,
+                publishedRegistration: deleted,
+                decisionId: decisionId,
+              );
+            } else if (response.bundle == null) {
+              throw StateError(
+                'Publisher did not return the updated directory.',
+              );
+            }
+            source = response.bundle!;
+          } else {
+            if (registry == null)
+              throw StateError('Hosted publisher or local registry required.');
+            final directory = await _api.readDirectory(session.token);
+            final remote = await _api.getDocument(
+              session.token,
+              'campusRegistrations',
+              registration.registrationId,
+            );
+            final application = registration.accountUid == null
+                ? null
+                : await _api.get(session.token, registration.accountUid!);
+            if (remote != null &&
+                remote.fields['revision'] != registration.revision)
+              throw StateError(
+                'Registration changed. Refresh and review it again.',
+              );
+            source = await registry.buildMergedTrustBundleJson(
+              publishedBundle: directory == null
+                  ? null
+                  : TrustBundle.fromJsonString(directory.bundle),
+              localChanges: [
+                if ((deleted.activePhone.publicKey ?? '').isNotEmpty &&
+                    (deleted.activePhone.signingPublicKey ?? '').isNotEmpty)
+                  deleted.toRegisteredDevice(),
+              ],
+              directoryProject: reviewProject,
+              minimumPreviousVersion: directory?.version ?? 0,
+            );
+            await _api.deleteRegistration(
+              session.token,
+              reviewerUid: session.uid,
+              registration: deleted,
+              application: application,
+              remoteRegistration: remote,
+              version: TrustBundle.fromJsonString(source).bundleVersion,
+              bundle: source,
+              directoryUpdateTime: directory?.updateTime,
+            );
+          }
+          if (registry != null) {
+            await registry.saveLastPublishedRoster(
+              TrustBundle.fromJsonString(source),
+              source,
+            );
+            await registry.saveRegistration(
+              deleted,
+              removePendingForRegistration: true,
+            );
+          }
+          _deletedRegistrationIds.add(registration.registrationId);
+          _clearDecisionId(
+            registration.registrationId,
+            action: action,
+            discriminator: discriminator,
+          );
+          await _refreshOnline();
+          widget.onRegistryChanged?.call();
+          _notify('User deleted and access revoked. Login account kept.');
+          break;
         case _EditorAction.approveOffline:
           if (registry == null) return;
           final reviewer = await _ensureReviewerProfile();
@@ -2103,7 +2287,8 @@ class _UnifiedRegistrationsWorkspaceState
     final phone = publishedRegistration.activePhone;
     final deviceIdLower = phone.deviceId.trim().toLowerCase();
     final isRevoke =
-        publishedRegistration.status == CampusRegistrationStatus.revoked;
+        publishedRegistration.status == CampusRegistrationStatus.revoked ||
+        publishedRegistration.status == CampusRegistrationStatus.deleted;
     bool matchesEntry(TrustedDevice d) {
       if (d.deviceId.trim().toLowerCase() != deviceIdLower) return false;
       if (phone.publicKey != null && d.publicKey != phone.publicKey) {
@@ -2664,6 +2849,7 @@ class _UnifiedQueueCard extends StatelessWidget {
 }
 
 enum _EditorAction {
+  deleteUser,
   approveOffline,
   approveAndPublishOnline,
   requestChanges,
@@ -3356,6 +3542,14 @@ class _UnifiedRegistrationEditorDialogState
           TextButton(
             onPressed: selfBlocked ? null : () => _submit(_EditorAction.revoke),
             child: const Text('Revoke'),
+          ),
+        if (!widget.item.isUnresolvedRecovery &&
+            reg.status != CampusRegistrationStatus.deleted)
+          TextButton(
+            onPressed: selfBlocked || !widget.hasOnlineSession
+                ? null
+                : () => _submit(_EditorAction.deleteUser),
+            child: const Text('Delete user'),
           ),
         if (widget.hasLocalRegistry && !widget.item.isUnresolvedRecovery)
           OutlinedButton(

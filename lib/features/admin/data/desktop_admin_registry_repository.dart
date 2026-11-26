@@ -347,11 +347,15 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
           now: published.issuedAt ?? published.generatedAt,
         );
       } on FormatException {
-        throw StateError('The published campus directory could not be verified.');
+        throw StateError(
+          'The published campus directory could not be verified.',
+        );
       }
       if (published.publisherDelegation!.publisher.publicKey !=
           published.issuer?.publicKey) {
-        throw StateError('The published campus directory could not be verified.');
+        throw StateError(
+          'The published campus directory could not be verified.',
+        );
       }
     }
     final verified = await Ed25519().verify(
@@ -376,14 +380,15 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     }
   }
 
-  TrustBundleIssuer _issuerFromPublicBytes(List<int> publicBytes) =>
-      TrustBundleIssuer(
-        issuerId: 'shadow-network-admin',
-        signingKeyId:
-            'ed25519-${sha256.convert(publicBytes).toString().substring(0, 16)}',
-        signatureAlgorithm: 'ed25519',
-        publicKey: base64UrlEncode(publicBytes),
-      );
+  TrustBundleIssuer _issuerFromPublicBytes(
+    List<int> publicBytes,
+  ) => TrustBundleIssuer(
+    issuerId: 'shadow-network-admin',
+    signingKeyId:
+        'ed25519-${sha256.convert(publicBytes).toString().substring(0, 16)}',
+    signatureAlgorithm: 'ed25519',
+    publicKey: base64UrlEncode(publicBytes),
+  );
 
   Future<({int version, String bundleJson, String syncedAt})?>
   _loadLastPublishedRoster([DatabaseExecutor? executor]) async {
@@ -856,7 +861,10 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       _serialized(_loadReviewerProfile);
 
   Future<ReviewerProfile?> _loadReviewerProfile() async {
-    final rows = await database.query('admin_reviewer_profile', where: 'id = 1');
+    final rows = await database.query(
+      'admin_reviewer_profile',
+      where: 'id = 1',
+    );
     if (rows.isEmpty) return null;
     final row = rows.single;
     return ReviewerProfile(
@@ -1036,7 +1044,9 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     int baseVersion = 0;
     if (cachedRoster != null) {
       try {
-        final parsedCached = TrustBundle.fromJsonString(cachedRoster.bundleJson);
+        final parsedCached = TrustBundle.fromJsonString(
+          cachedRoster.bundleJson,
+        );
         await _verifyPublishedBundleForAdmin(
           parsedCached,
           identity,
@@ -1132,11 +1142,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     String project,
   ) => _serialized(() async {
     final identity = await _requireIdentity();
-    await _verifyPublishedBundleForAdmin(
-      published,
-      identity,
-      project: project,
-    );
+    await _verifyPublishedBundleForAdmin(published, identity, project: project);
 
     final revokedMap = {
       for (final r in published.revokedDevices) r.deviceId.toLowerCase(): r,
@@ -1168,6 +1174,10 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final accountOwners = <String, String>{};
 
     for (final reg in registrations) {
+      if (reg.status == CampusRegistrationStatus.deleted) {
+        updated.add(reg);
+        continue;
+      }
       final sid = reg.identity.schoolId.toLowerCase();
       if (sid.isNotEmpty) {
         final prior = schoolIdOwners[sid];
@@ -1190,7 +1200,8 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
             reg.copyWith(
               status: CampusRegistrationStatus.conflict,
               syncState: CampusSyncState.conflict,
-              conflictReason: 'Conflicting registration shares the same account.',
+              conflictReason:
+                  'Conflicting registration shares the same account.',
             ),
           );
           continue;
@@ -1329,7 +1340,9 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     if (oldDeviceId == null || oldDeviceId != devKey) {
       return false;
     }
-    if (newDeviceId != null && newDeviceId.isNotEmpty && newDeviceId != devKey) {
+    if (newDeviceId != null &&
+        newDeviceId.isNotEmpty &&
+        newDeviceId != devKey) {
       return false;
     }
     final oldPublicKey = pendingOp['old_public_key'] as String?;
@@ -1519,9 +1532,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
   }) => _serialized(() async {
     if (registration.accountUid != null &&
         registration.accountUid == reviewer.uid) {
-      throw StateError(
-        'Another reviewer must approve your phone replacement.',
-      );
+      throw StateError('Another reviewer must approve your phone replacement.');
     }
     final identity = await _requireIdentity();
     if (publishedBundle != null) {
@@ -1763,9 +1774,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       if (item is! Map) {
         throw const FormatException('Invalid pending sync entry in backup.');
       }
-      final op = PendingSyncOperation.fromJson(
-        Map<String, Object?>.from(item),
-      );
+      final op = PendingSyncOperation.fromJson(Map<String, Object?>.from(item));
       if (op.decisionId.isEmpty || op.registrationId.isEmpty) {
         throw const FormatException('Invalid pending sync entry in backup.');
       }

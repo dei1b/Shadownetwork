@@ -101,7 +101,10 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   final _requiredFocusNodes = {
     'email': FocusNode(),
     'password': FocusNode(),
-    for (final key in {..._studentRequiredLabels.keys, ..._staffRequiredLabels.keys})
+    for (final key in {
+      ..._studentRequiredLabels.keys,
+      ..._staffRequiredLabels.keys,
+    })
       key: FocusNode(),
   };
   CampusAffiliation _affiliation = CampusAffiliation.student;
@@ -411,6 +414,18 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     }
     _correction = null;
     _submitted = true;
+    if (application.status == 'deleted') {
+      _message =
+          'Your registration was removed by the campus administrator. Your login account is still available. Contact the administrator about campus access.';
+      if (syncApproval) {
+        try {
+          await ref.read(trustDirectorySyncProvider).refresh();
+        } catch (_) {
+          // Offline phones retain their last signed directory until sync succeeds.
+        }
+      }
+      return;
+    }
     if (application.status == 'published') {
       _message = 'Access published. Checking this phone…';
       final binding = application.fields['deviceRegistration'];
@@ -626,7 +641,10 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       _message = 'Link request is already pending campus admin approval.';
       return;
     }
-    final nonceBytes = List<int>.generate(12, (_) => Random.secure().nextInt(256));
+    final nonceBytes = List<int>.generate(
+      12,
+      (_) => Random.secure().nextInt(256),
+    );
     final proof = await AccountLinkProof.createSigned(
       registrationId: receipt.registrationId,
       accountUid: user.uid,
@@ -1063,7 +1081,10 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           ),
         ),
         const SizedBox(height: 10),
-        const Text('Campus access review', style: MobileUiTokens.sectionHeading),
+        const Text(
+          'Campus access review',
+          style: MobileUiTokens.sectionHeading,
+        ),
         const SizedBox(height: 4),
         const Text(
           'Refresh when online to check approval updates or sync phone access.',
@@ -1122,10 +1143,7 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
               value: CampusAffiliation.student,
               label: Text('Student'),
             ),
-            ButtonSegment(
-              value: CampusAffiliation.staff,
-              label: Text('Staff'),
-            ),
+            ButtonSegment(value: CampusAffiliation.staff, label: Text('Staff')),
           ],
           selected: {_affiliation},
           onSelectionChanged: _busy || _locked
@@ -1241,7 +1259,9 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
             onPressed: _busy ? null : _linkLocalPhone,
             icon: const Icon(Icons.link_rounded, size: 18),
             label: Text(
-              waiting ? 'Waiting for campus sync · Retry' : 'Link this phone to my account',
+              waiting
+                  ? 'Waiting for campus sync · Retry'
+                  : 'Link this phone to my account',
             ),
           ),
         ],
