@@ -612,10 +612,13 @@ class RelayRuntimeController extends Notifier<RelayRuntimeState> {
         final isSecureSos = SecureSosMessagePayload.supportsVersion(
           payload['schema_version'],
         );
+        final security = payload['security'];
+        final isEncrypted =
+            isSecureSos && security is Map && security['encrypted'] == true;
         final allowBroadcastStudent =
             sosAccess == SosInboxAccess.broadcastOnly &&
             targetPeerId == null &&
-            !isSecureSos;
+            !isEncrypted;
         if (sosAccess != SosInboxAccess.allowed && !allowBroadcastStudent) {
           // Keep the forwarding copy so a rescuer can receive it later.
           await scfService.discardPendingMessage(envelope.messageHash);

@@ -902,7 +902,7 @@ void main() {
       ),
       findsOneWidget,
     );
-    expect(find.text('Broadcast to campus responders'), findsOneWidget);
+    expect(find.text('Broadcast to verified campus phones'), findsOneWidget);
     expect(find.text('No location yet. You can still send.'), findsOneWidget);
 
     final details = find.byType(TextField);
