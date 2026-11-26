@@ -811,6 +811,8 @@ class _UnifiedRegistrationsWorkspaceState
                 'decisionId': decisionId,
                 'registrationId': registration.registrationId,
                 if (onlineApp != null) 'accountUid': onlineApp.id,
+                if (onlineApp != null)
+                  'expectedRevision': onlineApp.fields['revision'] as int? ?? 0,
                 'role': result.role.name,
                 'reason': result.reason,
                 'reviewedFields': result.identity.toFirestoreFields(),
@@ -959,6 +961,7 @@ class _UnifiedRegistrationsWorkspaceState
                       : 'reject',
                   'decisionId': decisionId,
                   'accountUid': onlineApp.id,
+                  'expectedRevision': onlineApp.fields['revision'] as int? ?? 0,
                   'reason': result.reason,
                 },
               );
@@ -2074,8 +2077,10 @@ class _UnifiedRegistrationEditorDialogState
                 : () => _submit(_EditorAction.resolveConflict),
             child: const Text('Issue signed correction'),
           ),
-        if (widget.item.onlineApplication != null ||
-            reg.source == CampusRegistrationSource.online) ...[
+        if ((widget.item.onlineApplication != null ||
+                reg.source == CampusRegistrationSource.online) &&
+            (reg.status == CampusRegistrationStatus.submitted ||
+                reg.status == CampusRegistrationStatus.approvedPendingPublication)) ...[
           OutlinedButton(
             onPressed: selfBlocked
                 ? null

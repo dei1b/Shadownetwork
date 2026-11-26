@@ -388,6 +388,80 @@ function hasDecisionId(doc, decisionId) {
   return history.some((entry) => entry && entry.decisionId === decisionId);
 }
 
+function findRecordedDecision(decisionId, { existingDirectory, application, registration, parsedBundle, payload }) {
+  const fromOutcome =
+    application?.decisionOutcomes?.[decisionId] ??
+    registration?.decisionOutcomes?.[decisionId];
+  if (fromOutcome && typeof fromOutcome === 'object') {
+    const status = fromOutcome.status ?? 'published';
+    const isPublished = status === 'published';
+    return {
+      status,
+      idempotent: true,
+      version: isPublished
+        ? Number(existingDirectory?.version ?? parsedBundle?.bundle_version ?? fromOutcome.version ?? 0)
+        : Number(existingDirectory?.version ?? fromOutcome.version ?? 0),
+      bundle: existingDirectory?.bundle ?? null,
+      registrationId: fromOutcome.registrationId ?? registration?.registrationId ?? application?.registrationId ?? payload.registrationId ?? null,
+      decisionId,
+      writes: [],
+    };
+  }
+  const appHistory = Array.isArray(application?.reviewHistory)
+    ? application.reviewHistory.find((entry) => entry && entry.decisionId === decisionId)
+    : null;
+  const regHistory = Array.isArray(registration?.reviewHistory)
+    ? registration.reviewHistory.find((entry) => entry && entry.decisionId === decisionId)
+    : null;
+  const matchedHistory = appHistory ?? regHistory;
+  if (matchedHistory) {
+    return {
+      status: matchedHistory.status ?? 'published',
+      idempotent: true,
+      version: Number(existingDirectory?.version ?? parsedBundle?.bundle_version ?? 0),
+      bundle: existingDirectory?.bundle ?? null,
+      registrationId: registration?.registrationId ?? application?.registrationId ?? payload.registrationId ?? null,
+      decisionId,
+      writes: [],
+    };
+  }
+  if (
+    existingDirectory &&
+    (existingDirectory.lastDecisionId === decisionId ||
+      hasDecisionId(application, decisionId) ||
+      hasDecisionId(registration, decisionId))
+  ) {
+    return {
+      status: 'published',
+      idempotent: true,
+      version: Number(existingDirectory.version ?? parsedBundle?.bundle_version ?? 0),
+      bundle: existingDirectory.bundle,
+      registrationId: registration?.registrationId ?? application?.registrationId ?? payload.registrationId ?? null,
+      decisionId,
+      writes: [],
+    };
+  }
+  return null;
+}
+
+function recordOutcome(doc, decisionId, outcome) {
+  return {
+    ...(doc?.decisionOutcomes && typeof doc.decisionOutcomes === 'object' ? doc.decisionOutcomes : {}),
+    [decisionId]: outcome,
+  };
+}
+
+function assertExpectedRevision(expectedRevision, currentRevision) {
+  if (expectedRevision === undefined || expectedRevision === null) return;
+  if (Number(expectedRevision) !== Number(currentRevision ?? 0)) {
+    throw new PublisherError(
+      409,
+      'This registration changed while you were reviewing it. Refresh and try again.',
+      'stale_revision',
+    );
+  }
+}
+
 function unwrapSnapshot(doc, idFieldName) {
   if (!doc) return { exists: false, updateTime: null, fields: null };
   const isWrapped =
@@ -460,22 +534,16 @@ export function applyDecisionAndBuildCommit({
     });
   }
 
-  // Idempotent retry check for same decisionId.
-  if (
-    existingDirectory &&
-    (existingDirectory.lastDecisionId === decisionId ||
-      hasDecisionId(application, decisionId) ||
-      hasDecisionId(registration, decisionId))
-  ) {
-    return {
-      status: 'published',
-      idempotent: true,
-      version: Number(existingDirectory.version ?? parsedBundle?.bundle_version ?? 0),
-      bundle: existingDirectory.bundle,
-      registrationId: registration?.registrationId ?? application?.registrationId ?? payload.registrationId ?? null,
-      decisionId,
-      writes: [],
-    };
+  // Idempotent retry check for same decisionId (before directory existence check).
+  const recorded = findRecordedDecision(decisionId, {
+    existingDirectory,
+    application,
+    registration,
+    parsedBundle,
+    payload,
+  });
+  if (recorded) {
+    return recorded;
   }
 
   const targetAccountUid =
@@ -508,6 +576,14 @@ export function applyDecisionAndBuildCommit({
     if (!application) {
       throw new PublisherError(404, 'Online application not found.', 'not_found');
     }
+    if (application.status !== 'submitted') {
+      throw new PublisherError(
+        409,
+        `Cannot ${action === 'reject' ? 'reject' : 'request changes for'} an application in state ${application.status}.`,
+        'invalid_transition',
+      );
+    }
+    assertExpectedRevision(payload.expectedRevision, application.revision);
     if (!reason) {
       throw new PublisherError(400, 'Enter a reason for this decision.', 'missing_reason');
     }
@@ -519,6 +595,13 @@ export function applyDecisionAndBuildCommit({
       revision: nextRevision,
       reviewHistory: [...(application.reviewHistory ?? []), { ...historyEntry, status: targetStatus }],
       processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
+      decisionOutcomes: recordOutcome(application, decisionId, {
+        action,
+        status: targetStatus,
+        version: Number(existingDirectory?.version ?? 0),
+        registrationId: application.registrationId ?? null,
+        revision: nextRevision,
+      }),
     };
     return {
       status: targetStatus,
@@ -549,6 +632,17 @@ export function applyDecisionAndBuildCommit({
     if (!application) {
       throw new PublisherError(404, 'Application not found.', 'not_found');
     }
+    if (
+      application.status !== 'submitted' &&
+      application.status !== 'approved_pending_publication'
+    ) {
+      throw new PublisherError(
+        409,
+        `Cannot publish online approval from application state ${application.status}.`,
+        'invalid_transition',
+      );
+    }
+    assertExpectedRevision(payload.expectedRevision, application.revision);
     const reviewed = buildIdentityFieldsPayload(payload.reviewedFields ?? application);
     const verifiedPhone = verifyDeviceRegistrationQr(application.deviceRegistration);
     const keyLower = verifiedPhone.deviceId.toLowerCase();
@@ -567,6 +661,13 @@ export function applyDecisionAndBuildCommit({
       updated_at: nowIso,
     });
     directoryOwnerFields = { applicationUid: application.uid, registrationId };
+    const publishedOutcome = {
+      action,
+      status: 'published',
+      version: nextVersion,
+      registrationId,
+      revision: nextRevision,
+    };
     const nextApp = {
       ...application,
       ...reviewed,
@@ -576,6 +677,7 @@ export function applyDecisionAndBuildCommit({
       revision: nextRevision,
       reviewHistory: [...(application.reviewHistory ?? []), historyEntry],
       processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
+      decisionOutcomes: recordOutcome(application, decisionId, publishedOutcome),
     };
     writes.push({
       collection: 'pilotApplications',
@@ -599,6 +701,7 @@ export function applyDecisionAndBuildCommit({
         signingPublicKey: verifiedPhone.signingPublicKey,
         keyVersion: verifiedPhone.keyVersion,
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(registration, decisionId, publishedOutcome),
         updatedAt: nowIso,
       },
       ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
@@ -607,6 +710,7 @@ export function applyDecisionAndBuildCommit({
     if (!registration) {
       throw new PublisherError(400, 'Registration record is required.', 'missing_registration');
     }
+    assertExpectedRevision(payload.expectedRevision, registration.revision);
     const reviewed = buildIdentityFieldsPayload(payload.reviewedFields ?? registration);
     const verifiedPhone = verifyDeviceRegistrationQr(
       registration.deviceRegistration ?? payload.deviceRegistration,
@@ -658,6 +762,13 @@ export function applyDecisionAndBuildCommit({
         keyVersion: verifiedPhone.keyVersion,
         reviewHistory: [...(registration.reviewHistory ?? []), historyEntry],
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(registration, decisionId, {
+          action,
+          status: 'published',
+          version: nextVersion,
+          registrationId,
+          revision: nextRevision,
+        }),
         updatedAt: nowIso,
       },
       ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
@@ -697,6 +808,13 @@ export function applyDecisionAndBuildCommit({
       fields: { ...linkRequest, status: 'linked', reviewerUid },
       ...(linkSnap.updateTime ? { updateTime: linkSnap.updateTime } : {}),
     });
+    const linkOutcome = {
+      action,
+      status: 'published',
+      version: nextVersion,
+      registrationId,
+      revision: nextRevision,
+    };
     writes.push({
       collection: 'campusRegistrations',
       docId: registrationId,
@@ -706,6 +824,7 @@ export function applyDecisionAndBuildCommit({
         accountUid: linkRequest.accountUid,
         status: 'published',
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(registration, decisionId, linkOutcome),
         updatedAt: nowIso,
       },
       ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
@@ -722,6 +841,7 @@ export function applyDecisionAndBuildCommit({
         deviceRegistration: registration.deviceRegistration ?? '',
         reviewHistory: [...(application?.reviewHistory ?? []), historyEntry],
         processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(application, decisionId, linkOutcome),
       },
       ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
     });
@@ -780,6 +900,13 @@ export function applyDecisionAndBuildCommit({
       retired_at: nowIso,
       reason: reason || (action === 'approve_recovery' ? 'Approved lost-phone recovery' : 'Approved phone replacement'),
     };
+    const replaceOutcome = {
+      action,
+      status: 'published',
+      version: nextVersion,
+      registrationId,
+      revision: nextRevision,
+    };
     writes.push({
       collection: 'campusRegistrations',
       docId: registrationId,
@@ -797,6 +924,7 @@ export function applyDecisionAndBuildCommit({
         keyVersion: nextKeyVersion,
         retiredKeys: [...(registration?.retiredKeys ?? []), retiredRecord],
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
+        decisionOutcomes: recordOutcome(registration, decisionId, replaceOutcome),
         updatedAt: nowIso,
       },
       ...(regSnap.updateTime ? { updateTime: regSnap.updateTime } : { createOnly: true }),
@@ -817,6 +945,7 @@ export function applyDecisionAndBuildCommit({
             ? { replacementRequest: { ...application.replacementRequest, status: 'published', reviewerUid } }
             : {}),
           processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
+          decisionOutcomes: recordOutcome(application, decisionId, replaceOutcome),
         },
         ...(appSnap.updateTime ? { updateTime: appSnap.updateTime } : { createOnly: true }),
       });

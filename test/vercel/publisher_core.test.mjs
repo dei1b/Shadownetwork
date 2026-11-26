@@ -346,3 +346,144 @@ test('verifyDeviceRegistrationQr validates real Dart-generated v2 and v3 fixture
     (err) => err instanceof PublisherError && err.code === 'invalid_qr',
   );
 });
+
+test('decision retries preserve request_changes and reject outcomes and enforce transitions and expectedRevision', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qr = makeSignedQr('phone-review-retry').rawJson;
+
+  const submittedApp = {
+    uid: 'uid-retry-app',
+    affiliation: 'student',
+    displayName: 'Retry Student',
+    studentNumber: '2026-2222',
+    course: 'BSIT',
+    yearLevel: '3',
+    sectionSet: 'D',
+    status: 'submitted',
+    revision: 0,
+    deviceRegistration: qr,
+    updateTime: '2026-11-26T11:50:00Z',
+  };
+
+  // Retrying request_changes when no trustDirectory/current exists must return changes_requested idempotently.
+  const reqChanges = applyDecisionAndBuildCommit({
+    action: 'request_changes',
+    decisionId: 'dec-req-changes-1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: null,
+    application: submittedApp,
+    payload: { reason: 'Blur photo / check number', expectedRevision: 0 },
+    now,
+  });
+  assert.equal(reqChanges.status, 'changes_requested');
+  assert.equal(reqChanges.idempotent, false);
+
+  const reqChangesRetry = applyDecisionAndBuildCommit({
+    action: 'request_changes',
+    decisionId: 'dec-req-changes-1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: null,
+    application: { uid: 'uid-retry-app', ...reqChanges.writes[0].fields },
+    payload: { reason: 'Blur photo / check number', expectedRevision: 0 },
+    now,
+  });
+  assert.equal(reqChangesRetry.status, 'changes_requested');
+  assert.equal(reqChangesRetry.idempotent, true);
+  assert.equal(reqChangesRetry.writes.length, 0);
+
+  // Stale expectedRevision is rejected with 409.
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'request_changes',
+        decisionId: 'dec-req-stale',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        application: submittedApp,
+        payload: { reason: 'Check ID', expectedRevision: 99 },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'stale_revision',
+  );
+
+  // Retrying reject when an unrelated directory exists returns rejected, NOT published.
+  const otherApp = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-other-app',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: {
+      ...submittedApp,
+      uid: 'uid-other',
+      deviceRegistration: makeSignedQr('phone-other-1').rawJson,
+    },
+    payload: { registrationId: 'reg-other', role: 'civilian' },
+    now,
+  });
+
+  const rejected = applyDecisionAndBuildCommit({
+    action: 'reject',
+    decisionId: 'dec-reject-1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: otherApp.bundle, lastDecisionId: 'dec-other-app' },
+    application: { ...submittedApp, uid: 'uid-reject-target' },
+    payload: { reason: 'Not enrolled', expectedRevision: 0 },
+    now,
+  });
+  assert.equal(rejected.status, 'rejected');
+
+  const rejectRetry = applyDecisionAndBuildCommit({
+    action: 'reject',
+    decisionId: 'dec-reject-1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: otherApp.bundle, lastDecisionId: 'dec-other-app' },
+    application: { uid: 'uid-reject-target', ...rejected.writes[0].fields },
+    payload: { reason: 'Not enrolled' },
+    now,
+  });
+  assert.equal(rejectRetry.status, 'rejected');
+  assert.equal(rejectRetry.idempotent, true);
+  assert.equal(rejectRetry.writes.length, 0);
+
+  // Cannot request_changes or reject an already published application.
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'request_changes',
+        decisionId: 'dec-after-pub',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        existingDirectory: { version: 1, bundle: otherApp.bundle },
+        application: {
+          ...submittedApp,
+          uid: 'uid-other',
+          status: 'published',
+          revision: 1,
+        },
+        payload: { reason: 'Too late' },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'invalid_transition',
+  );
+});
