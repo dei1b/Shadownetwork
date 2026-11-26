@@ -241,7 +241,10 @@ export function verifyAccountLinkProof(proof, { expectedRegistrationId, expected
   }
 }
 
-export function verifyPublisherDelegation(delegation, { expectedProject, now = new Date() } = {}) {
+export function verifyPublisherDelegation(
+  delegation,
+  { expectedProject, now = new Date(), verifyAt = null } = {},
+) {
   if (!delegation || typeof delegation !== 'object' || delegation.delegation_type !== 'shadow_network_publisher_delegation') {
     throw new PublisherError(500, 'Publisher delegation is missing or invalid.', 'invalid_delegation');
   }
@@ -250,7 +253,15 @@ export function verifyPublisherDelegation(delegation, { expectedProject, now = n
   }
   const issuedAt = new Date(delegation.issued_at);
   const expiresAt = new Date(delegation.expires_at);
-  if (Number.isNaN(issuedAt.getTime()) || Number.isNaN(expiresAt.getTime()) || expiresAt <= now) {
+  const checkTime = verifyAt ?? now;
+  if (
+    Number.isNaN(issuedAt.getTime()) ||
+    Number.isNaN(expiresAt.getTime()) ||
+    issuedAt.getTime() > checkTime.getTime() + 5 * 60_000
+  ) {
+    throw new PublisherError(500, 'Publisher delegation timestamps are invalid.', 'invalid_delegation');
+  }
+  if (expiresAt <= checkTime) {
     throw new PublisherError(500, 'Publisher delegation is expired.', 'expired_delegation');
   }
   if (expectedProject && delegation.directory_project && delegation.directory_project !== expectedProject) {
@@ -264,18 +275,39 @@ export function verifyPublisherDelegation(delegation, { expectedProject, now = n
   return delegation;
 }
 
-export function verifyTrustBundle(bundle, { expectedProject, now = new Date() } = {}) {
+export function verifyTrustBundle(
+  bundle,
+  { expectedProject, expectedRootPublicKey = null, now = new Date() } = {},
+) {
   if (!bundle || typeof bundle !== 'object' || bundle.bundle_type !== 'shadow_network_device_trust_bundle') {
     throw new PublisherError(409, 'Existing directory bundle is invalid.', 'invalid_directory');
   }
   if (expectedProject && bundle.directory_project && bundle.directory_project !== expectedProject) {
     throw new PublisherError(409, 'Existing directory belongs to another project.', 'project_mismatch');
   }
+  const bundleIssuedAt = new Date(bundle.issued_at);
+  if (Number.isNaN(bundleIssuedAt.getTime())) {
+    throw new PublisherError(409, 'Existing directory issue timestamp is invalid.', 'invalid_directory');
+  }
   if (bundle.publisher_delegation) {
-    verifyPublisherDelegation(bundle.publisher_delegation, { expectedProject, now });
+    verifyPublisherDelegation(bundle.publisher_delegation, {
+      expectedProject,
+      verifyAt: bundleIssuedAt,
+    });
     if (bundle.publisher_delegation.publisher?.public_key !== bundle.issuer?.public_key) {
       throw new PublisherError(409, 'Directory issuer does not match delegation.', 'invalid_directory');
     }
+  }
+  const bundleRootPublicKey =
+    bundle.publisher_delegation?.root_issuer?.public_key ??
+    bundle.issuer?.public_key ??
+    null;
+  if (expectedRootPublicKey && bundleRootPublicKey !== expectedRootPublicKey) {
+    throw new PublisherError(
+      409,
+      'Existing directory was signed by a different campus root authority.',
+      'root_authority_mismatch',
+    );
   }
   const { signature, ...unsigned } = bundle;
   if (!ed25519Verify(canonicalJsonEncode(unsigned), signature, bundle.issuer?.public_key, 'trust bundle')) {
@@ -505,15 +537,6 @@ export function applyDecisionAndBuildCommit({
   if (!decisionId || typeof decisionId !== 'string') {
     throw new PublisherError(400, 'A unique decisionId is required.', 'missing_decision_id');
   }
-  const delegation = verifyPublisherDelegation(
-    typeof publisherDelegation === 'string' ? JSON.parse(publisherDelegation) : publisherDelegation,
-    { expectedProject: directoryProject, now },
-  );
-  const publisherKeyPair = ed25519KeyPairFromSeed(publisherSeed);
-  if (publisherKeyPair.publicKeyBase64Url !== delegation.publisher.public_key) {
-    throw new PublisherError(500, 'Publisher seed does not match delegation public key.', 'server_key_mismatch');
-  }
-
   const dirSnap = unwrapSnapshot(existingDirectoryInput);
   const appSnap = unwrapSnapshot(applicationInput, 'uid');
   const regSnap = unwrapSnapshot(registrationInput, 'registrationId');
@@ -526,10 +549,21 @@ export function applyDecisionAndBuildCommit({
   const linkRequest = linkSnap.fields;
   const recoveryRequest = recSnap.fields;
 
+  const rosterIndependentAction =
+    action === 'request_changes' || action === 'reject';
+  const rawDelegation = publisherDelegation
+    ? typeof publisherDelegation === 'string'
+      ? JSON.parse(publisherDelegation)
+      : publisherDelegation
+    : null;
+  const configuredRootPublicKey =
+    rawDelegation?.root_issuer?.public_key ?? null;
+
   let parsedBundle = null;
   if (existingDirectory?.bundle) {
     parsedBundle = verifyTrustBundle(JSON.parse(existingDirectory.bundle), {
       expectedProject: directoryProject,
+      expectedRootPublicKey: configuredRootPublicKey,
       now,
     });
   }
@@ -544,6 +578,19 @@ export function applyDecisionAndBuildCommit({
   });
   if (recorded) {
     return recorded;
+  }
+
+  let delegation = null;
+  let publisherKeyPair = null;
+  if (!rosterIndependentAction) {
+    delegation = verifyPublisherDelegation(rawDelegation, {
+      expectedProject: directoryProject,
+      now,
+    });
+    publisherKeyPair = ed25519KeyPairFromSeed(publisherSeed);
+    if (publisherKeyPair.publicKeyBase64Url !== delegation.publisher.public_key) {
+      throw new PublisherError(500, 'Publisher seed does not match delegation public key.', 'server_key_mismatch');
+    }
   }
 
   const targetAccountUid =

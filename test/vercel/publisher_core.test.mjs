@@ -48,9 +48,15 @@ function makeSignedQr(deviceId, userInformation = null) {
   };
 }
 
-function makeDelegation(root, publisher, project = 'dnsc-pilot') {
-  const now = new Date('2026-11-26T00:00:00.000Z');
-  const exp = new Date('2027-11-26T00:00:00.000Z');
+function makeDelegation(
+  root,
+  publisher,
+  project = 'dnsc-pilot',
+  {
+    issuedAt = '2026-11-26T00:00:00.000Z',
+    expiresAt = '2027-11-26T00:00:00.000Z',
+  } = {},
+) {
   const unsigned = {
     delegation_type: 'shadow_network_publisher_delegation',
     schema_version: 1,
@@ -68,8 +74,8 @@ function makeDelegation(root, publisher, project = 'dnsc-pilot') {
       public_key: publisher.publicKeyBase64Url,
     },
     directory_project: project,
-    issued_at: now.toISOString(),
-    expires_at: exp.toISOString(),
+    issued_at: issuedAt,
+    expires_at: expiresAt,
   };
   const signature = ed25519Sign(
     `shadow-network-publisher-delegation-v1\n${canonicalJsonEncode(unsigned)}`,
@@ -485,5 +491,137 @@ test('decision retries preserve request_changes and reject outcomes and enforce 
         now,
       }),
     (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'invalid_transition',
+  );
+});
+
+test('renewing expired publisher delegation continues directory chain, blocks alien root, and allows roster-independent corrections', () => {
+  const campusRoot = makeEd25519();
+  const alienRoot = makeEd25519();
+  const publisher1 = makeEd25519();
+  const publisher2 = makeEd25519();
+
+  const delegation1 = makeDelegation(campusRoot, publisher1, 'dnsc-pilot', {
+    issuedAt: '2026-10-01T00:00:00.000Z',
+    expiresAt: '2026-11-01T00:00:00.000Z',
+  });
+  const t1 = new Date('2026-10-15T12:00:00.000Z');
+  const firstQr = makeSignedQr('phone-del-1').rawJson;
+  const v1 = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-del-v1',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher1.seed,
+    publisherDelegation: delegation1,
+    application: {
+      uid: 'uid-del-1',
+      affiliation: 'student',
+      displayName: 'Del Student 1',
+      studentNumber: '2026-7001',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'A',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: firstQr,
+    },
+    payload: { role: 'civilian', registrationId: 'reg-del-1' },
+    now: t1,
+  });
+  assert.equal(v1.version, 1);
+
+  // Move clock past delegation1 expiry and renew with publisher2 signed by SAME campusRoot.
+  const t2 = new Date('2026-12-15T12:00:00.000Z');
+  const delegation2 = makeDelegation(campusRoot, publisher2, 'dnsc-pilot', {
+    issuedAt: '2026-12-01T00:00:00.000Z',
+    expiresAt: '2027-12-01T00:00:00.000Z',
+  });
+  const secondQr = makeSignedQr('phone-del-2').rawJson;
+  const v2 = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-del-v2',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher2.seed,
+    publisherDelegation: delegation2,
+    existingDirectory: { version: 1, bundle: v1.bundle, updateTime: '2026-10-15T12:00:01Z' },
+    application: {
+      uid: 'uid-del-2',
+      affiliation: 'student',
+      displayName: 'Del Student 2',
+      studentNumber: '2026-7002',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'B',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: secondQr,
+    },
+    payload: { role: 'responder', registrationId: 'reg-del-2' },
+    now: t2,
+  });
+  assert.equal(v2.version, 2);
+  const parsedV2 = JSON.parse(v2.bundle);
+  assert.deepEqual(
+    parsedV2.approved_devices.map((d) => d.device_id).sort(),
+    ['phone-del-1', 'phone-del-2'],
+  );
+
+  // Roster-independent request_changes still succeeds even if delegation1 is expired.
+  const correctionWithExpiredDel = applyDecisionAndBuildCommit({
+    action: 'request_changes',
+    decisionId: 'dec-expired-del-corr',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher1.seed,
+    publisherDelegation: delegation1,
+    existingDirectory: { version: 1, bundle: v1.bundle },
+    application: {
+      uid: 'uid-del-3',
+      affiliation: 'student',
+      displayName: 'Del Student 3',
+      studentNumber: '2026-7003',
+      course: 'BSIT',
+      yearLevel: '4',
+      sectionSet: 'C',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: makeSignedQr('phone-del-3').rawJson,
+    },
+    payload: { reason: 'Retake photo' },
+    now: t2,
+  });
+  assert.equal(correctionWithExpiredDel.status, 'changes_requested');
+
+  // An existing directory signed under an unrelated campus root must be rejected cleanly.
+  const alienDelegation = makeDelegation(alienRoot, publisher2, 'dnsc-pilot', {
+    issuedAt: '2026-12-01T00:00:00.000Z',
+    expiresAt: '2027-12-01T00:00:00.000Z',
+  });
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'approve_online',
+        decisionId: 'dec-alien-root',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher2.seed,
+        publisherDelegation: alienDelegation,
+        existingDirectory: { version: 1, bundle: v1.bundle },
+        application: {
+          uid: 'uid-del-4',
+          affiliation: 'student',
+          displayName: 'Del Student 4',
+          studentNumber: '2026-7004',
+          course: 'BSIT',
+          yearLevel: '4',
+          sectionSet: 'D',
+          status: 'submitted',
+          revision: 0,
+          deviceRegistration: makeSignedQr('phone-del-4').rawJson,
+        },
+        now: t2,
+      }),
+    (err) => err instanceof PublisherError && err.statusCode === 409 && err.code === 'root_authority_mismatch',
   );
 });
