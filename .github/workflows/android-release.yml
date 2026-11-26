@@ -61,6 +61,16 @@ jobs:
           java -version
           javac -version
 
+      - name: Cache Gradle dependency downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-downloads-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-downloads-
+
       - name: Resolve dependencies
         run: flutter pub get
 
@@ -69,6 +79,10 @@ jobs:
 
       - name: Run tests
         run: flutter test --no-pub
+
+      - name: Test release download retry handling
+        shell: bash
+        run: bash test/ci/retry_gradle_downloads_test.sh
 
       - name: Read app version
         id: app_version
@@ -106,7 +120,7 @@ jobs:
             exit 1
           fi
           DNSC_FIREBASE_PROJECT="$(jq -er '.project_info.project_id | select(type == "string" and length > 0)' android/app/google-services.json)"
-          flutter build apk --release \
+          bash tools/ci/retry_gradle_downloads.sh flutter build apk --release \
             --build-name "${{ steps.app_version.outputs.version_name }}" \
             --build-number "${{ steps.app_version.outputs.build_number }}" \
             --dart-define="DNSC_FIREBASE_PROJECT=${DNSC_FIREBASE_PROJECT}" \
