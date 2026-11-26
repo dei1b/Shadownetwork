@@ -84,6 +84,11 @@ export function ed25519Sign(message, privateKey) {
   return toBase64UrlPadded(crypto.sign(null, Buffer.from(message, 'utf8'), privateKey));
 }
 
+export function keyIdForX25519PublicKey(publicBytes) {
+  const digest = crypto.createHash('sha256').update(publicBytes).digest('hex');
+  return `x25519-${digest.slice(0, 16)}`;
+}
+
 export function verifyDeviceRegistrationQr(rawJson) {
   let parsed;
   try {
@@ -91,20 +96,90 @@ export function verifyDeviceRegistrationQr(rawJson) {
   } catch {
     throw new PublisherError(400, 'Device registration JSON is malformed.', 'invalid_qr');
   }
-  if (!parsed || typeof parsed !== 'object' || parsed.registration_type !== 'shadow_network_device_registration') {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.registration_type !== 'shadow_network_device_registration') {
     throw new PublisherError(400, 'Unsupported device registration payload.', 'invalid_qr');
   }
-  const deviceId = String(parsed.device_id ?? '').trim();
-  const publicKey = String(parsed.public_key ?? '').trim();
-  const signingPublicKey = String(parsed.signing_public_key ?? '').trim();
-  const keyId = String(parsed.key_id ?? '').trim();
-  const keyVersion = Number(parsed.key_version ?? 0);
+  if (Object.hasOwn(parsed, 'private_key') || Object.hasOwn(parsed, 'signing_private_key')) {
+    throw new PublisherError(400, 'Registration QR must never contain a private key.', 'invalid_qr');
+  }
+  const schemaVersion = parsed.schema_version;
+  if (schemaVersion !== 2 && schemaVersion !== 3) {
+    throw new PublisherError(400, 'Unsupported device registration schema version.', 'invalid_qr');
+  }
+  const allowedTopKeys = new Set([
+    'registration_type',
+    'schema_version',
+    'device_id',
+    'public_key',
+    'key_id',
+    'key_version',
+    'signing_public_key',
+    'registration_signature',
+    ...(schemaVersion === 3 ? ['user_information'] : []),
+  ]);
+  for (const key of Object.keys(parsed)) {
+    if (!allowedTopKeys.has(key)) {
+      throw new PublisherError(400, `Unexpected device registration field: ${key}.`, 'invalid_qr');
+    }
+  }
+
+  let userInformation = null;
+  if (schemaVersion === 3) {
+    const info = parsed.user_information;
+    if (!info || typeof info !== 'object' || Array.isArray(info)) {
+      throw new PublisherError(400, 'Registration is missing user information.', 'invalid_qr');
+    }
+    if (Object.hasOwn(info, 'private_key') || Object.hasOwn(info, 'signing_private_key')) {
+      throw new PublisherError(400, 'Registration QR must never contain a private key.', 'invalid_qr');
+    }
+    const allowedInfoKeys = new Set(['full_name', 'phone_number', 'address']);
+    for (const key of Object.keys(info)) {
+      if (!allowedInfoKeys.has(key)) {
+        throw new PublisherError(400, `Unexpected user information field: ${key}.`, 'invalid_qr');
+      }
+    }
+    const readInfoField = (key, maxLen) => {
+      const value = info[key];
+      if (typeof value !== 'string' || !value.trim() || value.length > maxLen) {
+        throw new PublisherError(400, 'Registration user information is invalid.', 'invalid_qr');
+      }
+      return value.trim();
+    };
+    userInformation = {
+      full_name: readInfoField('full_name', 100),
+      phone_number: readInfoField('phone_number', 50),
+      address: readInfoField('address', 300),
+    };
+  }
+
+  const deviceId = typeof parsed.device_id === 'string' ? parsed.device_id.trim() : '';
+  const publicKey = typeof parsed.public_key === 'string' ? parsed.public_key.trim() : '';
+  const signingPublicKey = typeof parsed.signing_public_key === 'string' ? parsed.signing_public_key.trim() : '';
+  const keyId = typeof parsed.key_id === 'string' ? parsed.key_id.trim() : '';
+  const keyVersion = parsed.key_version;
   const signature = parsed.registration_signature;
-  if (!deviceId || !publicKey || !signingPublicKey || !keyId || !Number.isInteger(keyVersion) || keyVersion <= 0 || !signature) {
+  if (!deviceId || !publicKey || !signingPublicKey || !keyId || !Number.isInteger(keyVersion) || keyVersion <= 0 || typeof signature !== 'string' || !signature.trim()) {
     throw new PublisherError(400, 'Signed device registration keys are missing.', 'invalid_qr');
   }
-  const { registration_signature: _sig, ...unsigned } = parsed;
-  const signingData = `shadow-network-device-registration-v1\n${canonicalJsonEncode(unsigned)}`;
+  const pubBytes = fromBase64Url(publicKey, 'registration public key');
+  if (pubBytes.length !== 32) {
+    throw new PublisherError(400, 'Registration QR public key must contain 32 bytes.', 'invalid_qr');
+  }
+  if (keyIdForX25519PublicKey(pubBytes) !== keyId) {
+    throw new PublisherError(400, 'Registration QR key ID does not match.', 'invalid_qr');
+  }
+
+  const canonicalUnsigned = {
+    registration_type: 'shadow_network_device_registration',
+    schema_version: schemaVersion,
+    device_id: deviceId,
+    public_key: publicKey,
+    key_id: keyId,
+    key_version: keyVersion,
+    ...(schemaVersion === 3 ? { user_information: userInformation } : {}),
+    signing_public_key: signingPublicKey,
+  };
+  const signingData = `shadow-network-registration-v${schemaVersion}\n${canonicalJsonEncode(canonicalUnsigned)}`;
   if (!ed25519Verify(signingData, signature, signingPublicKey, 'device registration signature')) {
     throw new PublisherError(400, 'Phone registration signature failed verification.', 'invalid_qr_signature');
   }
@@ -114,6 +189,8 @@ export function verifyDeviceRegistrationQr(rawJson) {
     signingPublicKey,
     keyId,
     keyVersion,
+    schemaVersion,
+    ...(userInformation ? { userInformation } : {}),
   };
 }
 

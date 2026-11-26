@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import {
   applyDecisionAndBuildCommit,
   canonicalJsonEncode,
   ed25519KeyPairFromSeed,
   ed25519Sign,
+  keyIdForX25519PublicKey,
   PublisherError,
   toBase64UrlPadded,
+  verifyDeviceRegistrationQr,
   verifyTrustBundle,
 } from '../../api/_lib/publisher_core.mjs';
 
@@ -17,20 +20,23 @@ function makeEd25519() {
   return { seed, ...pair };
 }
 
-function makeSignedQr(deviceId) {
-  const encPub = toBase64UrlPadded(crypto.randomBytes(32));
+function makeSignedQr(deviceId, userInformation = null) {
+  const encBytes = crypto.randomBytes(32);
+  const encPub = toBase64UrlPadded(encBytes);
   const sigPair = makeEd25519();
+  const schemaVersion = userInformation ? 3 : 2;
   const unsigned = {
-    schema_version: 1,
     registration_type: 'shadow_network_device_registration',
+    schema_version: schemaVersion,
     device_id: deviceId,
     public_key: encPub,
-    key_id: 'key-1',
+    key_id: keyIdForX25519PublicKey(encBytes),
     key_version: 1,
+    ...(userInformation ? { user_information: userInformation } : {}),
     signing_public_key: sigPair.publicKeyBase64Url,
   };
   const signature = ed25519Sign(
-    `shadow-network-device-registration-v1\n${canonicalJsonEncode(unsigned)}`,
+    `shadow-network-registration-v${schemaVersion}\n${canonicalJsonEncode(unsigned)}`,
     sigPair.privateKey,
   );
   return {
@@ -283,4 +289,60 @@ test('rejects self-review, revoked conflict on offline sync, and retires old pho
   const bundle2 = JSON.parse(replaced.bundle);
   assert.deepEqual(bundle2.approved_devices.map((d) => d.device_id), ['phone-new-2']);
   assert.deepEqual(bundle2.revoked_devices.map((d) => d.device_id), ['phone-old-1']);
+});
+
+test('verifyDeviceRegistrationQr validates real Dart-generated v2 and v3 fixtures and rejects tampered or legacy inputs', () => {
+  const v2Raw = fs.readFileSync(
+    new URL('./fixtures/dart_registration_qr_v2.json', import.meta.url),
+    'utf8',
+  );
+  const v3Raw = fs.readFileSync(
+    new URL('./fixtures/dart_registration_qr_v3.json', import.meta.url),
+    'utf8',
+  );
+
+  const v2 = verifyDeviceRegistrationQr(v2Raw);
+  assert.equal(v2.deviceId, 'android-fixture-v2');
+  assert.equal(v2.schemaVersion, 2);
+  assert.equal(v2.keyVersion, 1);
+
+  const v3 = verifyDeviceRegistrationQr(v3Raw);
+  assert.equal(v3.deviceId, 'android-fixture-v3');
+  assert.equal(v3.schemaVersion, 3);
+  assert.equal(v3.userInformation.full_name, 'Maria Santos');
+
+  const tamperedV3 = JSON.parse(v3Raw);
+  tamperedV3.user_information.full_name = 'Tampered Name';
+  assert.throws(
+    () => verifyDeviceRegistrationQr(tamperedV3),
+    (err) => err instanceof PublisherError && err.code === 'invalid_qr_signature',
+  );
+
+  const wrongKeyId = JSON.parse(v2Raw);
+  wrongKeyId.key_id = 'x25519-0000000000000000';
+  assert.throws(
+    () => verifyDeviceRegistrationQr(wrongKeyId),
+    (err) => err instanceof PublisherError && err.code === 'invalid_qr',
+  );
+
+  const withPrivateKey = JSON.parse(v2Raw);
+  withPrivateKey.private_key = 'must-never-be-present';
+  assert.throws(
+    () => verifyDeviceRegistrationQr(withPrivateKey),
+    (err) => err instanceof PublisherError && err.code === 'invalid_qr',
+  );
+
+  const legacyV1 = JSON.parse(v2Raw);
+  legacyV1.schema_version = 1;
+  assert.throws(
+    () => verifyDeviceRegistrationQr(legacyV1),
+    (err) => err instanceof PublisherError && err.code === 'invalid_qr',
+  );
+
+  const missingUserInfo = JSON.parse(v3Raw);
+  delete missingUserInfo.user_information;
+  assert.throws(
+    () => verifyDeviceRegistrationQr(missingUserInfo),
+    (err) => err instanceof PublisherError && err.code === 'invalid_qr',
+  );
 });

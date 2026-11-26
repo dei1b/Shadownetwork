@@ -1,0 +1,10 @@
+{
+  "registration_type": "shadow_network_device_registration",
+  "schema_version": 2,
+  "device_id": "android-fixture-v2",
+  "public_key": "B6N8vBQgk8i3VdwbEOhstCY3StFqqFPtC9_AsrhtHHw=",
+  "key_id": "x25519-aaa8fff703b50b22",
+  "key_version": 1,
+  "signing_public_key": "x6pKbOT15oQrPeyb950xibaASCpCLZ2oNf6b_6Z_LvE=",
+  "registration_signature": "NZonqGmap3AJP7ZhIv9PtjCVs1r65-Gxqc4W65uhm3636RRbQfSpfEJv-d9fM6YzE_-4z1HUJvJ32ZR_dLHzCg=="
+}
