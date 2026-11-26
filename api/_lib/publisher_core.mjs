@@ -491,10 +491,165 @@ function hasDecisionId(doc, decisionId) {
   return history.some((entry) => entry && entry.decisionId === decisionId);
 }
 
-function findRecordedDecision(decisionId, { existingDirectory, application, registration, parsedBundle, payload }) {
-  const fromOutcome =
-    application?.decisionOutcomes?.[decisionId] ??
-    registration?.decisionOutcomes?.[decisionId];
+function computeDecisionFingerprint({
+  action,
+  payload,
+  application,
+  registration,
+  linkRequest,
+  recoveryRequest,
+}) {
+  const accountUid =
+    payload.accountUid ??
+    payload.applicationUid ??
+    linkRequest?.accountUid ??
+    recoveryRequest?.accountUid ??
+    application?.uid ??
+    null;
+  const targetRegistrationId = payload.registrationId ?? null;
+  const normalizeJsonField = (raw) => {
+    if (typeof raw !== 'string') return raw ?? null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw.trim();
+    }
+  };
+  let normalizedEmbeddedReg = payload.registration ?? null;
+  if (normalizedEmbeddedReg && typeof normalizedEmbeddedReg === 'object') {
+    normalizedEmbeddedReg = {
+      registrationId: normalizedEmbeddedReg.registrationId ?? null,
+      source: normalizedEmbeddedReg.source ?? null,
+      status: normalizedEmbeddedReg.status ?? null,
+      accountUid: normalizedEmbeddedReg.accountUid ?? null,
+      deviceRegistration: normalizeJsonField(
+        normalizedEmbeddedReg.deviceRegistration,
+      ),
+    };
+  }
+  const canonical = canonicalJsonEncode({
+    action: action ?? null,
+    accountUid,
+    registrationId: targetRegistrationId,
+    role: payload.role ?? null,
+    targetStatus: payload.targetStatus ?? null,
+    reason: String(payload.reason ?? '').trim(),
+    overrideConflict: Boolean(payload.overrideConflict),
+    verificationMethod: payload.verificationMethod ?? null,
+    deviceRegistration: normalizeJsonField(payload.deviceRegistration),
+    reviewedFields: payload.reviewedFields ?? null,
+    editedFields: Array.isArray(payload.editedFields)
+      ? [...payload.editedFields].map(String).sort()
+      : null,
+    registration: normalizedEmbeddedReg,
+  });
+  return crypto.createHash('sha256').update(canonical).digest('hex');
+}
+
+function assertMatchingRecordedDecision({
+  recordedAction,
+  recordedFingerprint,
+  recordedStatus,
+  recordedExpectedRevision,
+  payloadExpectedRevision,
+  action,
+  requestFingerprint,
+}) {
+  if (recordedAction && action && recordedAction !== action) {
+    throw new PublisherError(
+      409,
+      'This decisionId was already used for a different decision action.',
+      'decision_id_conflict',
+    );
+  }
+  if (
+    recordedFingerprint &&
+    requestFingerprint &&
+    recordedFingerprint !== requestFingerprint
+  ) {
+    throw new PublisherError(
+      409,
+      'This decisionId was already used for different decision parameters.',
+      'decision_id_conflict',
+    );
+  }
+  if (
+    recordedExpectedRevision !== undefined &&
+    recordedExpectedRevision !== null &&
+    payloadExpectedRevision !== undefined &&
+    payloadExpectedRevision !== null &&
+    Number(recordedExpectedRevision) !== Number(payloadExpectedRevision)
+  ) {
+    throw new PublisherError(
+      409,
+      'This decisionId was already used for a different base revision.',
+      'decision_id_conflict',
+    );
+  }
+  if (!recordedAction && recordedStatus && action) {
+    const isNegativeOutcome =
+      recordedStatus === 'changes_requested' || recordedStatus === 'rejected';
+    const isNegativeAction =
+      action === 'request_changes' ||
+      action === 'reject' ||
+      action === 'decline_profile_change';
+    if (isNegativeOutcome !== isNegativeAction) {
+      throw new PublisherError(
+        409,
+        'This decisionId was already used for a different decision outcome.',
+        'decision_id_conflict',
+      );
+    }
+    if (
+      recordedStatus === 'changes_requested' &&
+      action !== 'request_changes'
+    ) {
+      throw new PublisherError(
+        409,
+        'This decisionId was already used for a different decision action.',
+        'decision_id_conflict',
+      );
+    }
+  }
+}
+
+function findRecordedDecision(
+  decisionId,
+  {
+    action,
+    requestFingerprint,
+    existingDirectory,
+    application,
+    registration,
+    parsedBundle,
+    payload,
+  },
+) {
+  const appOutcome = application?.decisionOutcomes?.[decisionId];
+  const regOutcome = registration?.decisionOutcomes?.[decisionId];
+  if (appOutcome && typeof appOutcome === 'object') {
+    assertMatchingRecordedDecision({
+      recordedAction: appOutcome.action,
+      recordedFingerprint: appOutcome.requestFingerprint,
+      recordedStatus: appOutcome.status,
+      recordedExpectedRevision: appOutcome.expectedRevision,
+      payloadExpectedRevision: payload.expectedRevision,
+      action,
+      requestFingerprint,
+    });
+  }
+  if (regOutcome && typeof regOutcome === 'object') {
+    assertMatchingRecordedDecision({
+      recordedAction: regOutcome.action,
+      recordedFingerprint: regOutcome.requestFingerprint,
+      recordedStatus: regOutcome.status,
+      recordedExpectedRevision: regOutcome.expectedRevision,
+      payloadExpectedRevision: payload.expectedRevision,
+      action,
+      requestFingerprint,
+    });
+  }
+  const fromOutcome = appOutcome ?? regOutcome;
   if (fromOutcome && typeof fromOutcome === 'object') {
     const status = fromOutcome.status ?? 'published';
     const isPublished = status === 'published';
@@ -518,6 +673,13 @@ function findRecordedDecision(decisionId, { existingDirectory, application, regi
     : null;
   const matchedHistory = appHistory ?? regHistory;
   if (matchedHistory) {
+    assertMatchingRecordedDecision({
+      recordedAction: matchedHistory.action,
+      recordedFingerprint: matchedHistory.requestFingerprint,
+      recordedStatus: matchedHistory.status,
+      action,
+      requestFingerprint,
+    });
     return {
       status: matchedHistory.status ?? 'published',
       idempotent: true,
@@ -534,6 +696,14 @@ function findRecordedDecision(decisionId, { existingDirectory, application, regi
       hasDecisionId(application, decisionId) ||
       hasDecisionId(registration, decisionId))
   ) {
+    if (existingDirectory.lastDecisionId === decisionId) {
+      assertMatchingRecordedDecision({
+        recordedAction: existingDirectory.lastDecisionAction,
+        recordedFingerprint: existingDirectory.lastDecisionFingerprint,
+        action,
+        requestFingerprint,
+      });
+    }
     return {
       status: 'published',
       idempotent: true,
@@ -642,7 +812,17 @@ export function applyDecisionAndBuildCommit({
   }
 
   // Idempotent retry check for same decisionId (before directory existence check).
+  const requestFingerprint = computeDecisionFingerprint({
+    action,
+    payload,
+    application,
+    registration,
+    linkRequest,
+    recoveryRequest,
+  });
   const recorded = findRecordedDecision(decisionId, {
+    action,
+    requestFingerprint,
     existingDirectory,
     application,
     registration,
@@ -682,6 +862,8 @@ export function applyDecisionAndBuildCommit({
   const nextRevision = Number(application?.revision ?? registration?.revision ?? 0) + 1;
   const historyEntry = {
     reviewerUid,
+    action,
+    requestFingerprint,
     status: 'published',
     reason,
     revision: nextRevision,
@@ -717,6 +899,7 @@ export function applyDecisionAndBuildCommit({
       processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
       decisionOutcomes: recordOutcome(application, decisionId, {
         action,
+        requestFingerprint,
         status: targetStatus,
         version: Number(existingDirectory?.version ?? 0),
         registrationId: application.registrationId ?? null,
@@ -775,6 +958,7 @@ export function applyDecisionAndBuildCommit({
       processedDecisionIds: [...(application.processedDecisionIds ?? []), decisionId],
       decisionOutcomes: recordOutcome(application, decisionId, {
         action,
+        requestFingerprint,
         status: 'rejected',
         version: Number(existingDirectory?.version ?? 0),
         registrationId: application.registrationId ?? registrationId ?? null,
@@ -1332,6 +1516,24 @@ export function applyDecisionAndBuildCommit({
     throw new PublisherError(400, `Unsupported publisher action: ${action}`, 'unsupported_action');
   }
 
+  for (const w of writes) {
+    const outcomes = w.fields?.decisionOutcomes;
+    if (outcomes && typeof outcomes === 'object' && outcomes[decisionId]) {
+      outcomes[decisionId] = {
+        ...outcomes[decisionId],
+        action: outcomes[decisionId].action ?? action,
+        requestFingerprint,
+      };
+    }
+    if (Array.isArray(w.fields?.reviewHistory)) {
+      w.fields.reviewHistory = w.fields.reviewHistory.map((entry) =>
+        entry && entry.decisionId === decisionId
+          ? { action, requestFingerprint, ...entry }
+          : entry,
+      );
+    }
+  }
+
   const nextBundle = signTrustBundle({
     version: nextVersion,
     directoryProject,
@@ -1351,6 +1553,8 @@ export function applyDecisionAndBuildCommit({
       version: nextVersion,
       bundle: nextBundleJson,
       lastDecisionId: decisionId,
+      lastDecisionAction: action,
+      lastDecisionFingerprint: requestFingerprint,
       publishedAt: nowIso,
     },
     ...(dirSnap.updateTime

@@ -10,6 +10,7 @@ import '../../../registration/domain/campus_identity_fields.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
 import '../../../trust/domain/entities/approval_receipt.dart';
 import '../../../trust/domain/entities/trust_bundle.dart';
+import '../../../trust/domain/services/canonical_json.dart';
 import '../../data/desktop_admin_registry_repository.dart';
 import '../../domain/entities/campus_registration.dart';
 import '../../domain/entities/registered_device.dart';
@@ -72,13 +73,28 @@ class _UnifiedRegistrationsWorkspaceState
   List<ReviewApplication> _linkRequests = [];
   List<ReviewApplication> _recoveryRequests = [];
 
-  String _decisionIdFor(String registrationId) => _pendingDecisionIds.putIfAbsent(
-    registrationId,
+  static String _decisionKey(
+    String registrationId,
+    String action, {
+    String? discriminator,
+  }) => '$registrationId::$action::${discriminator ?? ''}';
+
+  String _decisionIdFor(
+    String registrationId, {
+    required String action,
+    String? discriminator,
+  }) => _pendingDecisionIds.putIfAbsent(
+    _decisionKey(registrationId, action, discriminator: discriminator),
     CampusRegistration.newDecisionId,
   );
 
-  void _clearDecisionId(String registrationId) =>
-      _pendingDecisionIds.remove(registrationId);
+  void _clearDecisionId(
+    String registrationId, {
+    required String action,
+    String? discriminator,
+  }) => _pendingDecisionIds.remove(
+    _decisionKey(registrationId, action, discriminator: discriminator),
+  );
 
   @override
   void initState() {
@@ -1024,14 +1040,21 @@ class _UnifiedRegistrationsWorkspaceState
           }
           final snapshot = registration.submittedSnapshot ?? registration.identity;
           final edited = result.identity.diffKeysFrom(snapshot);
-          final decisionId = _decisionIdFor(registration.registrationId);
+          final decisionAction = onlineApp != null
+              ? 'approve_online'
+              : 'sync_offline_decision';
+          final decisionDisc =
+              'approve|${onlineApp?.fields['revision'] ?? registration.revision}|${result.role.name}|${registration.activePhone.deviceId}|${canonicalJsonEncode(result.identity.toFirestoreFields())}|${result.reason.trim()}';
+          final decisionId = _decisionIdFor(
+            registration.registrationId,
+            action: decisionAction,
+            discriminator: decisionDisc,
+          );
           if (_publisher.isConfigured) {
             final res = await _publisher.publishDecision(
               token: session.token,
               payload: {
-                'action': onlineApp != null
-                    ? 'approve_online'
-                    : 'sync_offline_decision',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'registrationId': registration.registrationId,
                 if (onlineApp != null) 'accountUid': onlineApp.id,
@@ -1054,7 +1077,11 @@ class _UnifiedRegistrationsWorkspaceState
                   },
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (registry != null) {
               if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
                 await registry.saveLastPublishedRoster(
@@ -1177,7 +1204,11 @@ class _UnifiedRegistrationsWorkspaceState
               removePendingForRegistration: true,
             );
           }
-          _clearDecisionId(registration.registrationId);
+          _clearDecisionId(
+            registration.registrationId,
+            action: decisionAction,
+            discriminator: decisionDisc,
+          );
           await _refreshOnline();
           widget.onRegistryChanged?.call();
           _notify('Approval published');
@@ -1186,14 +1217,21 @@ class _UnifiedRegistrationsWorkspaceState
         case _EditorAction.reject:
           final onlineApp = item.onlineApplication;
           if (onlineApp != null && _session != null) {
-            final decisionId = _decisionIdFor(registration.registrationId);
+            final decisionAction = result.action == _EditorAction.requestChanges
+                ? 'request_changes'
+                : 'reject';
+            final decisionDisc =
+                '${onlineApp.fields['revision'] ?? 0}|${result.reason.trim()}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (_publisher.isConfigured) {
               await _publisher.publishDecision(
                 token: _session!.token,
                 payload: {
-                  'action': result.action == _EditorAction.requestChanges
-                      ? 'request_changes'
-                      : 'reject',
+                  'action': decisionAction,
                   'decisionId': decisionId,
                   'accountUid': onlineApp.id,
                   'expectedRevision': onlineApp.fields['revision'] as int? ?? 0,
@@ -1212,7 +1250,11 @@ class _UnifiedRegistrationsWorkspaceState
                 decisionId: decisionId,
               );
             }
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             await _refreshOnline();
           } else if (registry != null) {
             final next = registration.copyWith(
@@ -1247,11 +1289,18 @@ class _UnifiedRegistrationsWorkspaceState
             widget.onRegistryChanged?.call();
             _notify('Registration revoked locally. Share or sync updated directory.');
           } else if (_session != null) {
-            final decisionId = _decisionIdFor(registration.registrationId);
+            const decisionAction = 'sync_offline_decision';
+            final decisionDisc =
+                'revoked|${registration.revision}|${result.role.name}|${registration.activePhone.deviceId}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             final res = await _publisher.publishDecision(
               token: _session!.token,
               payload: {
-                'action': 'sync_offline_decision',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'registrationId': registration.registrationId,
                 if (registration.accountUid != null)
@@ -1273,7 +1322,11 @@ class _UnifiedRegistrationsWorkspaceState
                 },
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (registry != null && res.bundle != null) {
               await registry.saveLastPublishedRoster(
                 TrustBundle.fromJsonString(res.bundle!),
@@ -1316,11 +1369,18 @@ class _UnifiedRegistrationsWorkspaceState
           final session = _session!;
           final link = item.linkRequest!;
           if (_publisher.isConfigured) {
-            final decisionId = _decisionIdFor(registration.registrationId);
+            const decisionAction = 'approve_link';
+            final decisionDisc =
+                '${link.id}|${registration.activePhone.deviceId}|${result.role.name}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             final res = await _publisher.publishDecision(
               token: session.token,
               payload: {
-                'action': 'approve_link',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'registrationId': registration.registrationId,
                 'accountUid': link.id,
@@ -1328,7 +1388,11 @@ class _UnifiedRegistrationsWorkspaceState
                 'reviewedFields': result.identity.toFirestoreFields(),
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (registry != null) {
               if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
                 await registry.saveLastPublishedRoster(
@@ -1420,15 +1484,23 @@ class _UnifiedRegistrationsWorkspaceState
             return;
           }
           if (_publisher.isConfigured && _session != null) {
-            final decisionId = _decisionIdFor(registration.registrationId);
             final isRecovery = item.recoveryRequest != null;
+            final decisionAction =
+                isRecovery ? 'approve_recovery' : 'approve_replacement';
+            final decisionDisc =
+                '${item.pendingNewPhone?.deviceId ?? ''}|${item.pendingNewPhone?.publicKey ?? ''}|${result.role.name}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             final accUid = isRecovery
                 ? item.recoveryRequest!.id
                 : (item.onlineApplication?.id ?? registration.accountUid);
             final res = await _publisher.publishDecision(
               token: _session!.token,
               payload: {
-                'action': isRecovery ? 'approve_recovery' : 'approve_replacement',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'registrationId': registration.registrationId,
                 'accountUid': ?accUid,
@@ -1443,7 +1515,11 @@ class _UnifiedRegistrationsWorkspaceState
                 'reviewedFields': result.identity.toFirestoreFields(),
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (registry != null && item.pendingNewPhone != null) {
               if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
                 await registry.saveLastPublishedRoster(
@@ -1620,11 +1696,18 @@ class _UnifiedRegistrationsWorkspaceState
           final declineApp = item.onlineApplication;
           if (declineApp == null || _session == null) return;
           if (_publisher.isConfigured) {
-            final decisionId = _decisionIdFor(registration.registrationId);
+            const decisionAction = 'decline_profile_change';
+            final decisionDisc =
+                '${declineApp.fields['revision'] ?? 0}|${result.reason.trim()}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             await _publisher.publishDecision(
               token: _session!.token,
               payload: {
-                'action': 'decline_profile_change',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'accountUid': declineApp.id,
                 'registrationId': registration.registrationId,
@@ -1632,7 +1715,11 @@ class _UnifiedRegistrationsWorkspaceState
                 'reason': result.reason,
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
           } else {
             await _api.reviewProfileChange(
               _session!.token,
@@ -1650,11 +1737,18 @@ class _UnifiedRegistrationsWorkspaceState
           final changeApp = item.onlineApplication;
           if (changeApp == null || _session == null) return;
           if (_publisher.isConfigured) {
-            final decisionId = _decisionIdFor(registration.registrationId);
+            const decisionAction = 'approve_profile_change';
+            final decisionDisc =
+                '${changeApp.fields['revision'] ?? 0}|${result.role.name}|${result.reason.trim()}|${canonicalJsonEncode(result.identity.toFirestoreFields())}';
+            final decisionId = _decisionIdFor(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             final res = await _publisher.publishDecision(
               token: _session!.token,
               payload: {
-                'action': 'approve_profile_change',
+                'action': decisionAction,
                 'decisionId': decisionId,
                 'accountUid': changeApp.id,
                 'registrationId': registration.registrationId,
@@ -1664,7 +1758,11 @@ class _UnifiedRegistrationsWorkspaceState
                 'reviewedFields': result.identity.toFirestoreFields(),
               },
             );
-            _clearDecisionId(registration.registrationId);
+            _clearDecisionId(
+              registration.registrationId,
+              action: decisionAction,
+              discriminator: decisionDisc,
+            );
             if (registry != null) {
               if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
                 await registry.saveLastPublishedRoster(

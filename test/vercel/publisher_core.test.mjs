@@ -1441,3 +1441,134 @@ test('R4: sync_offline_decision honors explicit published targetStatus over revo
     (err) => err instanceof PublisherError && err.code === 'stale_conflict_resolution',
   );
 });
+
+test('R6: reusing a decisionId across different actions or canonical payloads throws 409 decision_id_conflict while identical retries remain idempotent', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qr = makeSignedQr('phone-r6-1');
+
+  const initialApp = {
+    uid: 'uid-r6-1',
+    affiliation: 'student',
+    displayName: 'Carlos Replay',
+    studentNumber: '2026-6601',
+    course: 'BSIT',
+    yearLevel: '3',
+    sectionSet: 'A',
+    status: 'submitted',
+    revision: 0,
+    deviceRegistration: qr.rawJson,
+  };
+  const approvePayload = { role: 'civilian', expectedRevision: 0 };
+
+  const approved = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-r6-approve',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: initialApp,
+    payload: approvePayload,
+    now,
+  });
+  const appAfter = approved.writes.find((w) => w.collection === 'pilotApplications').fields;
+  const regAfter = approved.writes.find((w) => w.collection === 'campusRegistrations').fields;
+
+  // Identical retry remains idempotent with zero writes and version unchanged.
+  const idempotentRetry = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-r6-approve',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: {
+      version: 1,
+      bundle: approved.bundle,
+      lastDecisionId: 'dec-r6-approve',
+    },
+    application: appAfter,
+    registration: regAfter,
+    payload: approvePayload,
+    now,
+  });
+  assert.equal(idempotentRetry.idempotent, true);
+  assert.equal(idempotentRetry.writes.length, 0);
+  assert.equal(idempotentRetry.version, 1);
+
+  // Reusing the approval decisionId to revoke must fail with 409 decision_id_conflict.
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'sync_offline_decision',
+        decisionId: 'dec-r6-approve',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        existingDirectory: {
+          version: 1,
+          bundle: approved.bundle,
+          lastDecisionId: 'dec-r6-approve',
+        },
+        application: appAfter,
+        registration: regAfter,
+        payload: {
+          registrationId: regAfter.registrationId,
+          role: 'civilian',
+          targetStatus: 'revoked',
+          overrideConflict: true,
+          reason: 'Lost phone',
+        },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.code === 'decision_id_conflict',
+  );
+
+  // Reusing a reject decisionId with a different action or reason must fail.
+  const rejected = applyDecisionAndBuildCommit({
+    action: 'reject',
+    decisionId: 'dec-r6-reject',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: initialApp,
+    payload: { expectedRevision: 0, reason: 'Unreadable ID' },
+    now,
+  });
+  const rejectedApp = rejected.writes.find((w) => w.collection === 'pilotApplications').fields;
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'request_changes',
+        decisionId: 'dec-r6-reject',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        application: rejectedApp,
+        payload: { expectedRevision: 0, reason: 'Please resubmit' },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.code === 'decision_id_conflict',
+  );
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'reject',
+        decisionId: 'dec-r6-reject',
+        reviewerUid: 'admin-1',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        application: rejectedApp,
+        payload: { expectedRevision: 0, reason: 'Different reason' },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.code === 'decision_id_conflict',
+  );
+});
