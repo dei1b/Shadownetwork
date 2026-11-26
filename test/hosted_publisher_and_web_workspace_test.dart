@@ -196,6 +196,12 @@ void main() {
     expect(find.textContaining('Temporary mobile connection drop'), findsOneWidget);
 
     // Retry must send the EXACT same decisionId and show Approval published.
+    // Error feedback stays visible until dismissed and can cover this row on
+    // a phone-sized viewport after the session status card changes its height.
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Elena Mobile'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Elena Mobile'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Approve & publish'));
