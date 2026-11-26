@@ -918,29 +918,37 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     }
 
     final cachedRoster = await _loadLastPublishedRoster();
-    final String bundleJson;
-    final TrustBundleIssuer receiptIssuer;
-    final DateTime receiptIssuedAt;
-    final DateTime receiptExpiresAt;
-    final int baseVersion;
+    String bundleJson = '';
+    int baseVersion = 0;
     if (cachedRoster != null) {
-      bundleJson = cachedRoster.bundleJson;
-      receiptIssuer = _issuerFromPublicBytes(identity.publicBytes);
-      receiptIssuedAt = now;
-      receiptExpiresAt = now.add(const Duration(days: 30));
-      baseVersion = cachedRoster.version;
-    } else {
-      bundleJson = await _buildTrustBundleJson(
-        devices,
-        directoryProject,
-        0,
-      );
-      final bundle = TrustBundle.fromJsonString(bundleJson);
-      receiptIssuer = bundle.issuer!;
-      receiptIssuedAt = bundle.issuedAt ?? now;
-      receiptExpiresAt = bundle.expiresAt ?? now.add(const Duration(days: 30));
-      baseVersion = 0;
+      try {
+        final parsedCached = TrustBundle.fromJsonString(cachedRoster.bundleJson);
+        await _verifyPublishedBundleForAdmin(
+          parsedCached,
+          identity,
+          project: directoryProject,
+        );
+        if (!parsedCached.isExpiredAt(now)) {
+          if (parsedCached.publisherDelegation != null) {
+            await parsedCached.publisherDelegation!.verify(
+              now: now,
+              expectedProject: directoryProject,
+            );
+          }
+          bundleJson = cachedRoster.bundleJson;
+          baseVersion = parsedCached.bundleVersion;
+        }
+      } on FormatException {
+        bundleJson = '';
+        baseVersion = 0;
+      } on StateError {
+        bundleJson = '';
+        baseVersion = 0;
+      }
     }
+    final receiptIssuer = _issuerFromPublicBytes(identity.publicBytes);
+    final receiptIssuedAt = now;
+    final receiptExpiresAt = now.add(const Duration(days: 30));
     final phone = updatedRegistration.activePhone;
     if (phone.publicKey == null || phone.signingPublicKey == null) {
       throw StateError('Phone encryption and signing keys are required.');

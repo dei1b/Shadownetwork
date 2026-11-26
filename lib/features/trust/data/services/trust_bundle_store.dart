@@ -175,13 +175,11 @@ class TrustBundleStore {
         if (receipt == null) rethrow;
         final existing = await loadBundle();
         final candidate = TrustBundle.fromJsonString(package.bundleJson);
-        final sameAuthority =
-            existing?.rootAuthorityIssuer?.publicKey != null &&
-            existing?.rootAuthorityIssuer?.publicKey ==
-                candidate.rootAuthorityIssuer?.publicKey;
-        if (!sameAuthority ||
-            (existing != null &&
-                candidate.bundleVersion >= existing.bundleVersion)) {
+        final matchesReceiptAuthority =
+            candidate.rootAuthorityIssuer?.publicKey != null &&
+            candidate.rootAuthorityIssuer?.publicKey ==
+                receipt.issuer.publicKey;
+        if (!matchesReceiptAuthority) {
           rethrow;
         }
         bundle = existing;
