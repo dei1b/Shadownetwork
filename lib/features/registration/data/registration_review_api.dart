@@ -54,8 +54,10 @@ class ReviewApplication {
 }
 
 class RegistrationReviewApi {
-  RegistrationReviewApi(this.collection);
+  RegistrationReviewApi(this.collection, {http.Client? client})
+    : _client = client;
   final Uri collection;
+  final http.Client? _client;
   static const timeout = Duration(seconds: 20);
 
   static bool isConfiguredFor({
@@ -664,6 +666,7 @@ class RegistrationReviewApi {
     int version,
     String bundle, {
     required String? directoryUpdateTime,
+    String? reviewerUid,
   }) async {
     final change = application.profileChange;
     const identityKeys = [
@@ -677,6 +680,13 @@ class RegistrationReviewApi {
       'employeeId',
       'unit',
     ];
+    final existingReviewerUid = change?['reviewerUid'] as String?;
+    final effectiveReviewerUid =
+        change?['status'] == 'approved_pending_publication' &&
+                existingReviewerUid != null &&
+                existingReviewerUid.trim().isNotEmpty
+            ? existingReviewerUid
+            : reviewerUid;
     final changes =
         application.status == 'published' &&
             change != null &&
@@ -686,52 +696,59 @@ class RegistrationReviewApi {
             for (final key in identityKeys)
               if (change.containsKey(key) && change[key] != null)
                 key: change[key],
-            'profileChange': {...change, 'status': 'published'},
+            'profileChange': {
+              ...change,
+              'status': 'published',
+              if (effectiveReviewerUid != null &&
+                  effectiveReviewerUid.trim().isNotEmpty)
+                'reviewerUid': effectiveReviewerUid,
+            },
           }
         : <String, dynamic>{
             'status': 'published',
             'publicationStatus': 'published',
           };
     final path = '$_databasePath/documents';
-    final response = await http
-        .post(
-          collection.replace(path: '/v1/$path:commit'),
-          headers: _headers(token),
-          body: jsonEncode({
-            'writes': [
-              {
-                'update': {
-                  'name': '$path/pilotApplications/${application.id}',
-                  'fields': changes.map(
-                    (key, value) => MapEntry(key, _encode(value)),
-                  ),
-                },
-                'updateMask': {'fieldPaths': changes.keys.toList()},
-                'currentDocument': {'updateTime': application.updateTime},
-              },
-              {
-                'update': {
-                  'name': '$path/trustDirectory/current',
-                  'fields': {
-                    'applicationUid': _encode(application.id),
-                    'version': _encode(version),
-                    'bundle': _encode(bundle),
-                  },
-                },
-                'updateTransforms': [
-                  {
-                    'fieldPath': 'publishedAt',
-                    'setToServerValue': 'REQUEST_TIME',
-                  },
-                ],
-                'currentDocument': directoryUpdateTime == null
-                    ? {'exists': false}
-                    : {'updateTime': directoryUpdateTime},
-              },
-            ],
-          }),
-        )
-        .timeout(timeout);
+    final uri = collection.replace(path: '/v1/$path:commit');
+    final headers = _headers(token);
+    final body = jsonEncode({
+      'writes': [
+        {
+          'update': {
+            'name': '$path/pilotApplications/${application.id}',
+            'fields': changes.map(
+              (key, value) => MapEntry(key, _encode(value)),
+            ),
+          },
+          'updateMask': {'fieldPaths': changes.keys.toList()},
+          'currentDocument': {'updateTime': application.updateTime},
+        },
+        {
+          'update': {
+            'name': '$path/trustDirectory/current',
+            'fields': {
+              'applicationUid': _encode(application.id),
+              'version': _encode(version),
+              'bundle': _encode(bundle),
+            },
+          },
+          'updateTransforms': [
+            {
+              'fieldPath': 'publishedAt',
+              'setToServerValue': 'REQUEST_TIME',
+            },
+          ],
+          'currentDocument': directoryUpdateTime == null
+              ? {'exists': false}
+              : {'updateTime': directoryUpdateTime},
+        },
+      ],
+    });
+    final response =
+        await (_client != null
+                ? _client.post(uri, headers: headers, body: body)
+                : http.post(uri, headers: headers, body: body))
+            .timeout(timeout);
     _check(response);
   }
 

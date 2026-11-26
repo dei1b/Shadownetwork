@@ -131,6 +131,12 @@ service cloud.firestore {
         ])
         && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
         && after.profileChange.status == 'published'
+        && ((before.profileChange.status == 'submitted'
+             && after.profileChange.get('reviewerUid', '') == request.auth.uid)
+            || (before.profileChange.status == 'approved_pending_publication'
+                && (before.profileChange.get('reviewerUid', '') == ''
+                    ? after.profileChange.get('reviewerUid', '') == request.auth.uid
+                    : after.profileChange.get('reviewerUid', '') == before.profileChange.get('reviewerUid', ''))))
         && after.displayName == before.profileChange.displayName
         && after.get('affiliation', '') == before.profileChange.get('affiliation', '')
         && after.get('studentNumber', '') == before.profileChange.get('studentNumber', '')
@@ -218,7 +224,8 @@ service cloud.firestore {
         && ((exists(application) && (
             get(application).data.status == 'approved_pending_publication'
             || (get(application).data.status == 'published' && (
-              get(application).data.get('profileChange', {}).get('status', '') == 'approved_pending_publication'
+              (get(application).data.get('profileChange', {}).get('status', '') in ['submitted', 'approved_pending_publication']
+               && getAfter(application).data.get('profileChange', {}).get('status', '') == 'published')
               || get(application).data.get('replacementRequest', {}).get('status', '') in ['submitted', 'approved_pending_publication']))))
           || (exists(rec) && get(rec).data.status == 'submitted' && getAfter(rec).data.status == 'published'));
     }

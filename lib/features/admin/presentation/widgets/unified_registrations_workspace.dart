@@ -1810,6 +1810,7 @@ class _UnifiedRegistrationsWorkspaceState
               parsed.bundleVersion,
               mergedJson,
               directoryUpdateTime: dir?.updateTime,
+              reviewerUid: _session!.uid,
             );
             await registry.saveLastPublishedRoster(parsed, mergedJson);
             await registry.saveRegistration(
