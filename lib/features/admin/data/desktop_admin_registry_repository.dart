@@ -1030,6 +1030,12 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final approvedMap = {
       for (final a in published.approvedDevices) a.deviceId.toLowerCase(): a,
     };
+    final pendingOps = await _loadPendingSync();
+    final pendingCorrectionRegIds = {
+      for (final op in pendingOps)
+        if (op.kind == PendingSyncKind.publishRevocationCorrection)
+          op.registrationId,
+    };
     final registrations = await _loadRegistrations();
     final updated = <CampusRegistration>[];
     final schoolIdOwners = <String, String>{};
@@ -1072,6 +1078,13 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
 
       if (remoteRevoked != null &&
           reg.status == CampusRegistrationStatus.approvedLocal) {
+        final examinedVersion = reg.resolvedConflictVersion;
+        if (pendingCorrectionRegIds.contains(reg.registrationId) &&
+            examinedVersion != null &&
+            examinedVersion >= published.bundleVersion) {
+          updated.add(reg);
+          continue;
+        }
         updated.add(
           reg.copyWith(
             status: CampusRegistrationStatus.conflict,
@@ -1134,6 +1147,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       status: nextStatus,
       syncState: CampusSyncState.waitingToSync,
       conflictReason: null,
+      resolvedConflictVersion: remoteVersion,
       revision: registration.revision + 1,
       updatedAt: now,
       pendingDecisionId: decisionId,
@@ -1176,11 +1190,19 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
         'sync_state': corrected.syncState.code,
         'record_json': jsonEncode(corrected.toJson()),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await transaction.delete(
+        'admin_pending_sync',
+        where: 'registration_id = ?',
+        whereArgs: [corrected.registrationId],
+      );
       await transaction.insert('admin_pending_sync', {
         'decision_id': decisionId,
         'registration_id': corrected.registrationId,
         'kind': PendingSyncKind.publishRevocationCorrection.name,
-        'payload_json': jsonEncode({'decision_id': decisionId}),
+        'payload_json': jsonEncode({
+          'decision_id': decisionId,
+          'resolved_conflict_version': remoteVersion,
+        }),
         'created_at': now.toUtc().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
     });

@@ -626,6 +626,7 @@ class _UnifiedRegistrationsWorkspaceState
               ? CampusRegistrationStatus.revoked
               : CampusRegistrationStatus.published,
           syncState: CampusSyncState.synced,
+          resolvedConflictVersion: null,
           updatedAt: DateTime.now().toUtc(),
         );
         final res = await _publisher.publishDecision(
@@ -689,6 +690,7 @@ class _UnifiedRegistrationsWorkspaceState
               ? CampusRegistrationStatus.revoked
               : CampusRegistrationStatus.published,
           syncState: CampusSyncState.synced,
+          resolvedConflictVersion: null,
           updatedAt: DateTime.now().toUtc(),
         );
         final bundleJson = await registry.buildMergedTrustBundleJson(

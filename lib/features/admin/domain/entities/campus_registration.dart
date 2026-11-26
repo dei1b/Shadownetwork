@@ -333,6 +333,7 @@ class CampusRegistration {
     this.reviewHistory = const [],
     this.revision = 0,
     this.conflictReason,
+    this.resolvedConflictVersion,
     this.remoteUpdateTime,
     this.pendingDecisionId,
   });
@@ -342,6 +343,7 @@ class CampusRegistration {
   final CampusRegistrationStatus status;
   final CampusSyncState syncState;
   final String? conflictReason;
+  final int? resolvedConflictVersion;
   final String? accountUid;
   final String? accountEmail;
   final CampusIdentityFields identity;
@@ -400,6 +402,7 @@ class CampusRegistration {
     CampusRegistrationStatus? status,
     CampusSyncState? syncState,
     Object? conflictReason = _sentinel,
+    Object? resolvedConflictVersion = _sentinel,
     Object? accountUid = _sentinel,
     Object? accountEmail = _sentinel,
     CampusIdentityFields? identity,
@@ -422,6 +425,9 @@ class CampusRegistration {
       conflictReason: identical(conflictReason, _sentinel)
           ? this.conflictReason
           : conflictReason as String?,
+      resolvedConflictVersion: identical(resolvedConflictVersion, _sentinel)
+          ? this.resolvedConflictVersion
+          : resolvedConflictVersion as int?,
       accountUid: identical(accountUid, _sentinel)
           ? this.accountUid
           : accountUid as String?,
@@ -498,6 +504,8 @@ class CampusRegistration {
     'status': status.code,
     'sync_state': syncState.code,
     if (conflictReason != null) 'conflict_reason': conflictReason,
+    if (resolvedConflictVersion != null)
+      'resolved_conflict_version': resolvedConflictVersion,
     if (accountUid != null) 'account_uid': accountUid,
     if (accountEmail != null) 'account_email': accountEmail,
     'identity': identity.toJson(),
@@ -523,6 +531,8 @@ class CampusRegistration {
       status: CampusRegistrationStatus.fromCode(json['status'] as String?),
       syncState: CampusSyncState.fromCode(json['sync_state'] as String?),
       conflictReason: json['conflict_reason'] as String?,
+      resolvedConflictVersion:
+          (json['resolved_conflict_version'] as num?)?.toInt(),
       accountUid: json['account_uid'] as String?,
       accountEmail: json['account_email'] as String?,
       identity: json['identity'] is Map
