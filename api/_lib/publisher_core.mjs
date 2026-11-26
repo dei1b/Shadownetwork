@@ -894,7 +894,42 @@ export function applyDecisionAndBuildCommit({
       registration.deviceRegistration ?? payload.deviceRegistration,
     );
     const keyLower = verifiedPhone.deviceId.toLowerCase();
-    const targetRevoke = payload.targetStatus === 'revoked' || registration.status === 'revoked';
+    let targetRevoke;
+    if (payload.targetStatus === 'revoked') {
+      targetRevoke = true;
+    } else if (
+      payload.targetStatus === 'published' ||
+      payload.targetStatus === 'approved' ||
+      payload.targetStatus === 'approved_local'
+    ) {
+      targetRevoke = false;
+    } else if (
+      payload.targetStatus !== undefined &&
+      payload.targetStatus !== null &&
+      payload.targetStatus !== ''
+    ) {
+      throw new PublisherError(
+        400,
+        `Unsupported target status: ${payload.targetStatus}`,
+        'invalid_target_status',
+      );
+    } else {
+      targetRevoke = registration.status === 'revoked';
+    }
+    const currentDirectoryVersion = Number(
+      existingDirectory?.version ?? parsedBundle?.bundle_version ?? 0,
+    );
+    if (
+      payload.expectedConflictVersion !== undefined &&
+      payload.expectedConflictVersion !== null &&
+      Number(payload.expectedConflictVersion) < currentDirectoryVersion
+    ) {
+      throw new PublisherError(
+        409,
+        'A newer published directory version exists since this conflict was reviewed.',
+        'stale_conflict_resolution',
+      );
+    }
     if (!targetRevoke && revoked.has(keyLower) && payload.overrideConflict !== true) {
       throw new PublisherError(409, 'A newer revocation exists in the published directory. Review and issue a signed correction.', 'revocation_conflict');
     }
@@ -943,6 +978,7 @@ export function applyDecisionAndBuildCommit({
         decisionOutcomes: recordOutcome(registration, decisionId, {
           action,
           status: 'published',
+          targetStatus: targetRevoke ? 'revoked' : 'published',
           version: nextVersion,
           registrationId,
           revision: nextRevision,

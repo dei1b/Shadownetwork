@@ -51,10 +51,11 @@ class _NoopReviewApi extends RegistrationReviewApi {
 }
 
 class _CapturingPublisher extends HostedPublisherClient {
-  _CapturingPublisher(this.signer)
+  _CapturingPublisher(this.signer, {this.approvedDevices = const []})
     : super(endpoint: Uri.parse('https://admin.test/api/publish-approval'));
 
   final TestTrustBundleSigner signer;
+  final List<TrustedDevice> approvedDevices;
   final List<Map<String, Object?>> payloads = [];
 
   @override
@@ -66,6 +67,7 @@ class _CapturingPublisher extends HostedPublisherClient {
     final bundleJson = await signer.sign(
       bundleVersion: 2,
       issuedAt: DateTime.utc(2026, 11, 26, 12),
+      approvedDevices: approvedDevices,
     );
     return HostedPublishResult(
       status: 'published',
@@ -274,7 +276,21 @@ void main() {
         createdAt: DateTime.utc(2026, 11, 26),
       );
       final registry = _InMemorySyncRegistry([reg], [pendingOp]);
-      final publisher = _CapturingPublisher(signer);
+      final publisher = _CapturingPublisher(
+        signer,
+        approvedDevices: [
+          TrustedDevice(
+            deviceId: reg.activePhone.deviceId,
+            ownerName: reg.identity.displayName,
+            role: reg.role.name,
+            status: 'approved',
+            publicKey: reg.activePhone.publicKey,
+            signingPublicKey: reg.activePhone.signingPublicKey,
+            keyVersion: reg.activePhone.keyVersion,
+            updatedAt: DateTime.utc(2026, 11, 26, 12),
+          ),
+        ],
+      );
 
       await tester.binding.setSurfaceSize(const Size(1280, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -561,7 +577,21 @@ void main() {
         createdAt: DateTime.utc(2026, 11, 26),
       );
       final registry = _InMemorySyncRegistry([reg], [pendingOp]);
-      final publisher = _CapturingPublisher(signer);
+      final publisher = _CapturingPublisher(
+        signer,
+        approvedDevices: [
+          TrustedDevice(
+            deviceId: reg.activePhone.deviceId,
+            ownerName: reg.identity.displayName,
+            role: reg.role.name,
+            status: 'approved',
+            publicKey: reg.activePhone.publicKey,
+            signingPublicKey: reg.activePhone.signingPublicKey,
+            keyVersion: reg.activePhone.keyVersion,
+            updatedAt: DateTime.utc(2026, 11, 26, 12),
+          ),
+        ],
+      );
 
       await tester.binding.setSurfaceSize(const Size(1280, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));

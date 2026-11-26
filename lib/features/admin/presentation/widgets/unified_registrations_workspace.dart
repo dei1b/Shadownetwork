@@ -792,6 +792,13 @@ class _UnifiedRegistrationsWorkspaceState
                   'targetStatus': publishedReg.status.code,
                   'overrideConflict':
                       op.kind == PendingSyncKind.publishRevocationCorrection,
+                  if (op.kind == PendingSyncKind.publishRevocationCorrection &&
+                      (opPayload['resolved_conflict_version'] ??
+                              reg.resolvedConflictVersion) !=
+                          null)
+                    'expectedConflictVersion':
+                        opPayload['resolved_conflict_version'] ??
+                        reg.resolvedConflictVersion,
                   'reviewedFields': publishedReg.identity.toFirestoreFields(),
                   'registration': {
                     'registrationId': publishedReg.registrationId,
@@ -805,12 +812,12 @@ class _UnifiedRegistrationsWorkspaceState
                   },
                 },
         );
-        if (res.bundle != null && res.bundle!.trim().isNotEmpty) {
-          await registry.saveLastPublishedRoster(
-            TrustBundle.fromJsonString(res.bundle!),
-            res.bundle!,
-          );
-        }
+        final verifiedBundle = _assertBundleReflectsSync(
+          bundleJson: res.bundle,
+          publishedRegistration: publishedReg,
+          decisionId: op.decisionId,
+        );
+        await registry.saveLastPublishedRoster(verifiedBundle, res.bundle!);
         await registry.saveRegistration(
           publishedReg,
           removePendingForRegistration: true,
@@ -1736,6 +1743,57 @@ class _UnifiedRegistrationsWorkspaceState
       if (decoded is Map) return Map<String, dynamic>.from(decoded);
     } catch (_) {}
     return const {};
+  }
+
+  static TrustBundle _assertBundleReflectsSync({
+    required String? bundleJson,
+    required CampusRegistration publishedRegistration,
+    required String decisionId,
+  }) {
+    if (bundleJson == null || bundleJson.trim().isEmpty) {
+      throw StateError(
+        'Hosted publisher returned no trust bundle for decision $decisionId.',
+      );
+    }
+    final bundle = TrustBundle.fromJsonString(bundleJson);
+    final phone = publishedRegistration.activePhone;
+    final deviceIdLower = phone.deviceId.trim().toLowerCase();
+    final isRevoke =
+        publishedRegistration.status == CampusRegistrationStatus.revoked;
+    bool matchesEntry(TrustedDevice d) {
+      if (d.deviceId.trim().toLowerCase() != deviceIdLower) return false;
+      if (phone.publicKey != null && d.publicKey != phone.publicKey) {
+        return false;
+      }
+      if (phone.signingPublicKey != null &&
+          d.signingPublicKey != phone.signingPublicKey) {
+        return false;
+      }
+      return d.keyVersion == phone.keyVersion;
+    }
+
+    if (isRevoke) {
+      final confirmedRevoked = bundle.revokedDevices.any(matchesEntry);
+      final stillApproved = bundle.approvedDevices.any(
+        (d) => d.deviceId.trim().toLowerCase() == deviceIdLower,
+      );
+      if (!confirmedRevoked || stillApproved) {
+        throw StateError(
+          'Published trust bundle did not confirm revocation of ${phone.deviceId}.',
+        );
+      }
+    } else {
+      final confirmedApproved = bundle.approvedDevices.any(matchesEntry);
+      final stillRevoked = bundle.revokedDevices.any(
+        (d) => d.deviceId.trim().toLowerCase() == deviceIdLower,
+      );
+      if (!confirmedApproved || stillRevoked) {
+        throw StateError(
+          'Published trust bundle did not confirm approval of ${phone.deviceId}.',
+        );
+      }
+    }
+    return bundle;
   }
 
   @override

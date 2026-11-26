@@ -1297,3 +1297,147 @@ test('R2: legacy campusRegistrations with only deviceRegistration retires old ph
   );
   assert.equal(bundle.revoked_devices[0].public_key, oldQr.publicKey);
 });
+
+test('R4: sync_offline_decision honors explicit published targetStatus over revoked registration and rejects stale expectedConflictVersion', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const qr = makeSignedQr('phone-reinstate-1');
+  const unrelatedRevokedQr = makeSignedQr('phone-unrelated-revoked');
+
+  const baseRevoked = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-r4-unrelated-revoke',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    registration: {
+      registrationId: 'reg-r4-unrelated',
+      affiliation: 'student',
+      displayName: 'Other Revoked',
+      studentNumber: '2026-4400',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'A',
+      status: 'revoked',
+      revision: 1,
+      deviceRegistration: unrelatedRevokedQr.rawJson,
+    },
+    payload: { registrationId: 'reg-r4-unrelated', role: 'civilian', targetStatus: 'revoked' },
+    now,
+  });
+
+  const initial = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-r4-revoke',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: baseRevoked.bundle },
+    registration: {
+      registrationId: 'reg-r4-1',
+      affiliation: 'student',
+      displayName: 'Reinstate Student',
+      studentNumber: '2026-4401',
+      course: 'BSIT',
+      yearLevel: '3',
+      sectionSet: 'A',
+      status: 'revoked',
+      revision: 1,
+      deviceRegistration: qr.rawJson,
+    },
+    payload: { registrationId: 'reg-r4-1', role: 'civilian', targetStatus: 'revoked' },
+    now,
+  });
+
+  // Remote registration still says status: 'revoked', while signed correction sets targetStatus: 'published'.
+  const reinstated = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-r4-reinstate',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 2, bundle: initial.bundle },
+    registration: {
+      registrationId: 'reg-r4-1',
+      affiliation: 'student',
+      displayName: 'Reinstate Student',
+      studentNumber: '2026-4401',
+      course: 'BSIT',
+      yearLevel: '3',
+      sectionSet: 'A',
+      status: 'revoked',
+      revision: 2,
+      deviceRegistration: qr.rawJson,
+    },
+    payload: {
+      registrationId: 'reg-r4-1',
+      role: 'civilian',
+      targetStatus: 'published',
+      overrideConflict: true,
+      expectedConflictVersion: 2,
+    },
+    now,
+  });
+
+  const bundle = verifyTrustBundle(JSON.parse(reinstated.bundle), {
+    expectedProject: 'dnsc-pilot',
+    expectedRootPublicKey: root.publicKeyBase64Url,
+    now,
+  });
+  assert.deepEqual(bundle.approved_devices.map((d) => d.device_id), ['phone-reinstate-1']);
+  assert.deepEqual(bundle.revoked_devices.map((d) => d.device_id), ['phone-unrelated-revoked']);
+  const regWrite = reinstated.writes.find((w) => w.collection === 'campusRegistrations');
+  assert.equal(regWrite.fields.status, 'published');
+  assert.equal(regWrite.fields.decisionOutcomes['dec-r4-reinstate'].targetStatus, 'published');
+
+  // Idempotent retry of the identical reinstatement produces zero writes.
+  const retrySame = applyDecisionAndBuildCommit({
+    action: 'sync_offline_decision',
+    decisionId: 'dec-r4-reinstate',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 3, bundle: reinstated.bundle },
+    registration: regWrite.fields,
+    payload: {
+      registrationId: 'reg-r4-1',
+      role: 'civilian',
+      targetStatus: 'published',
+      overrideConflict: true,
+      expectedConflictVersion: 2,
+    },
+    now,
+  });
+  assert.equal(retrySame.idempotent, true);
+  assert.equal(retrySame.writes.length, 0);
+  assert.equal(retrySame.version, 3);
+
+  assert.throws(
+    () =>
+      applyDecisionAndBuildCommit({
+        action: 'sync_offline_decision',
+        decisionId: 'dec-r4-stale',
+        reviewerUid: 'admin-3',
+        directoryProject: 'dnsc-pilot',
+        publisherSeed: publisher.seed,
+        publisherDelegation: delegation,
+        existingDirectory: { version: 3, bundle: reinstated.bundle },
+        registration: regWrite.fields,
+        payload: {
+          registrationId: 'reg-r4-1',
+          role: 'civilian',
+          targetStatus: 'published',
+          overrideConflict: true,
+          expectedConflictVersion: 2,
+        },
+        now,
+      }),
+    (err) => err instanceof PublisherError && err.code === 'stale_conflict_resolution',
+  );
+});
