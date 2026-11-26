@@ -1276,6 +1276,77 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     return (bundleJson: bundleJson, registration: corrected);
   });
 
+  static List<RegisteredDevice> replacementLocalChanges({
+    required CampusRegistration publishedRegistration,
+    CampusRegistration? previousRegistration,
+    Map<String, dynamic>? opPayload,
+    TrustBundle? publishedBundle,
+    DateTime? now,
+  }) {
+    final newDevice = publishedRegistration.toRegisteredDevice();
+    final newIdLower = newDevice.deviceId.trim().toLowerCase();
+    final ts = (now ?? DateTime.now()).toUtc();
+    RegisteredDevice? retiredOld;
+
+    if (previousRegistration != null) {
+      final prevId = previousRegistration.activePhone.deviceId.trim();
+      if (prevId.isNotEmpty && prevId.toLowerCase() != newIdLower) {
+        retiredOld = previousRegistration
+            .copyWith(status: CampusRegistrationStatus.revoked, updatedAt: ts)
+            .toRegisteredDevice()
+            .copyWith(
+              status: RegisteredDeviceStatus.revoked,
+              updatedAt: ts,
+              lastSeenLabel: 'Replaced by ${newDevice.deviceId}',
+            );
+      }
+    } else if (opPayload != null) {
+      final oldId = (opPayload['old_device_id'] as String? ?? '').trim();
+      if (oldId.isNotEmpty && oldId.toLowerCase() != newIdLower) {
+        final fromBundle = publishedBundle?.approvedDevices
+            .where((d) => d.deviceId.toLowerCase() == oldId.toLowerCase())
+            .firstOrNull;
+        final ownerName =
+            (opPayload['old_owner_name'] as String?) ??
+            fromBundle?.ownerName ??
+            (publishedRegistration.identity.displayName.trim().isEmpty
+                ? 'Replaced phone'
+                : publishedRegistration.identity.displayName.trim());
+        retiredOld = RegisteredDevice(
+          deviceId: oldId,
+          ownerName: ownerName,
+          phoneNumber: '',
+          address: '',
+          role: RegisteredDeviceRole.fromCode(
+            (opPayload['old_role'] as String?) ??
+                fromBundle?.role ??
+                publishedRegistration.role.name,
+          ),
+          status: RegisteredDeviceStatus.revoked,
+          registeredAt: publishedRegistration.createdAt,
+          updatedAt: ts,
+          lastSeenLabel: 'Replaced by ${newDevice.deviceId}',
+          publicKey:
+              (opPayload['old_public_key'] as String?) ?? fromBundle?.publicKey,
+          signingPublicKey:
+              (opPayload['old_signing_public_key'] as String?) ??
+              fromBundle?.signingPublicKey,
+          keyVersion:
+              (opPayload['old_key_version'] as int?) ??
+              fromBundle?.keyVersion ??
+              1,
+        );
+      }
+    }
+
+    return [
+      if (retiredOld != null &&
+          retiredOld.deviceId.trim().toLowerCase() != newIdLower)
+        retiredOld,
+      newDevice,
+    ];
+  }
+
   Future<({String bundleJson, CampusRegistration registration})>
   stagePhoneReplacement({
     required CampusRegistration registration,
@@ -1357,6 +1428,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
     final devices = await _loadDevices();
     final nextDevices = <RegisteredDevice>[];
     var addedNew = false;
+    var revokedOld = false;
     for (final existing in devices) {
       if (existing.deviceId.toLowerCase() == oldPhone.deviceId.toLowerCase()) {
         if (sameId) {
@@ -1370,6 +1442,7 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
               lastSeenLabel: 'Replaced by ${resolvedPhone.deviceId}',
             ),
           );
+          revokedOld = true;
         }
       } else if (existing.deviceId.toLowerCase() ==
           resolvedPhone.deviceId.toLowerCase()) {
@@ -1378,6 +1451,26 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       } else {
         nextDevices.add(existing);
       }
+    }
+    if (!sameId && !revokedOld && oldPhone.deviceId.trim().isNotEmpty) {
+      nextDevices.add(
+        RegisteredDevice(
+          deviceId: oldPhone.deviceId,
+          ownerName: registration.identity.displayName.trim().isEmpty
+              ? 'Replaced phone'
+              : registration.identity.displayName.trim(),
+          phoneNumber: registration.identity.phone.trim(),
+          address: registration.identity.address.trim(),
+          role: registration.role,
+          status: RegisteredDeviceStatus.revoked,
+          registeredAt: registration.createdAt,
+          updatedAt: now,
+          lastSeenLabel: 'Replaced by ${resolvedPhone.deviceId}',
+          publicKey: oldPhone.publicKey,
+          signingPublicKey: oldPhone.signingPublicKey,
+          keyVersion: oldPhone.keyVersion,
+        ),
+      );
     }
     if (!addedNew) {
       nextDevices.add(updatedRegistration.toRegisteredDevice());
@@ -1396,6 +1489,15 @@ class DesktopAdminRegistryRepository implements AdminRegistryRepository {
       payloadJson: jsonEncode({
         'decision_id': decisionId,
         'old_device_id': oldPhone.deviceId,
+        if (oldPhone.publicKey != null) 'old_public_key': oldPhone.publicKey,
+        if (oldPhone.signingPublicKey != null)
+          'old_signing_public_key': oldPhone.signingPublicKey,
+        'old_key_version': oldPhone.keyVersion,
+        'old_owner_name': registration.identity.displayName.trim().isEmpty
+            ? 'Replaced phone'
+            : registration.identity.displayName.trim(),
+        'old_role': registration.role.name,
+        'expected_bundle_version': previousVersion,
         'new_device_id': resolvedPhone.deviceId,
         if (resolvedPhone.deviceRegistrationJson != null)
           'new_device_registration': resolvedPhone.deviceRegistrationJson,

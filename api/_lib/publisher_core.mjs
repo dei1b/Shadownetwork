@@ -1049,7 +1049,17 @@ export function applyDecisionAndBuildCommit({
       throw new PublisherError(400, 'Signed replacement phone QR is missing.', 'missing_qr');
     }
     const newPhone = verifyDeviceRegistrationQr(newQrRaw);
-    const oldPhone = registration ?? (application?.deviceRegistration ? verifyDeviceRegistrationQr(application.deviceRegistration) : null);
+    let oldPhone = null;
+    if (registration) {
+      const fallbackQr = registration.deviceRegistration ?? application?.deviceRegistration;
+      oldPhone = resolveRegistrationPhone(
+        fallbackQr && !registration.deviceRegistration
+          ? { ...registration, deviceRegistration: fallbackQr }
+          : registration,
+      );
+    } else if (application?.deviceRegistration) {
+      oldPhone = verifyDeviceRegistrationQr(application.deviceRegistration);
+    }
     if (!oldPhone) {
       throw new PublisherError(404, 'Existing registration phone record not found.', 'not_found');
     }

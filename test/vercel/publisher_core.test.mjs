@@ -1186,3 +1186,114 @@ test('R1: returning to an earlier phone removes superseded revocation and signTr
     (err) => err instanceof PublisherError && err.code === 'duplicate_device_id',
   );
 });
+
+test('R2: legacy campusRegistrations with only deviceRegistration retires old phone on replacement and recovery', () => {
+  const root = makeEd25519();
+  const publisher = makeEd25519();
+  const delegation = makeDelegation(root, publisher);
+  const now = new Date('2026-11-26T12:00:00.000Z');
+  const oldQr = makeSignedQr('phone-legacy-old');
+  const newQr = makeSignedQr('phone-legacy-new');
+  const unrelatedQr = makeSignedQr('phone-legacy-other');
+
+  const baseDir = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-r2-init',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    application: {
+      uid: 'uid-r2-other',
+      affiliation: 'student',
+      displayName: 'Other User',
+      studentNumber: '2026-1000',
+      course: 'BSIT',
+      yearLevel: '1',
+      sectionSet: 'A',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: unrelatedQr.rawJson,
+    },
+    payload: { registrationId: 'reg-r2-other', role: 'civilian' },
+    now,
+  });
+
+  const withOld = applyDecisionAndBuildCommit({
+    action: 'approve_online',
+    decisionId: 'dec-r2-old',
+    reviewerUid: 'admin-1',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 1, bundle: baseDir.bundle },
+    application: {
+      uid: 'uid-r2-owner',
+      affiliation: 'student',
+      displayName: 'Legacy Replacement Owner',
+      studentNumber: '2026-2000',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'A',
+      status: 'submitted',
+      revision: 0,
+      deviceRegistration: oldQr.rawJson,
+    },
+    payload: { registrationId: 'reg-r2-owner', role: 'civilian' },
+    now,
+  });
+
+  // Strip flat top-level deviceId/publicKey/signingPublicKey/keyVersion to simulate legacy record.
+  const replaced = applyDecisionAndBuildCommit({
+    action: 'approve_replacement',
+    decisionId: 'dec-r2-rep',
+    reviewerUid: 'admin-2',
+    directoryProject: 'dnsc-pilot',
+    publisherSeed: publisher.seed,
+    publisherDelegation: delegation,
+    existingDirectory: { version: 2, bundle: withOld.bundle },
+    application: {
+      uid: 'uid-r2-owner',
+      affiliation: 'student',
+      displayName: 'Legacy Replacement Owner',
+      studentNumber: '2026-2000',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'A',
+      registrationId: 'reg-r2-owner',
+      status: 'published',
+      revision: 1,
+      deviceRegistration: oldQr.rawJson,
+      replacementRequest: { status: 'submitted', deviceRegistration: newQr.rawJson },
+    },
+    registration: {
+      registrationId: 'reg-r2-owner',
+      accountUid: 'uid-r2-owner',
+      affiliation: 'student',
+      displayName: 'Legacy Replacement Owner',
+      studentNumber: '2026-2000',
+      course: 'BSIT',
+      yearLevel: '2',
+      sectionSet: 'A',
+      deviceRegistration: oldQr.rawJson,
+      revision: 1,
+    },
+    payload: { registrationId: 'reg-r2-owner', accountUid: 'uid-r2-owner', role: 'civilian', reason: 'New handset' },
+    now,
+  });
+
+  const bundle = verifyTrustBundle(JSON.parse(replaced.bundle), {
+    expectedProject: 'dnsc-pilot',
+    expectedRootPublicKey: root.publicKeyBase64Url,
+    now,
+  });
+  assert.deepEqual(
+    bundle.approved_devices.map((d) => d.device_id).sort(),
+    ['phone-legacy-new', 'phone-legacy-other'],
+  );
+  assert.deepEqual(
+    bundle.revoked_devices.map((d) => d.device_id),
+    ['phone-legacy-old'],
+  );
+  assert.equal(bundle.revoked_devices[0].public_key, oldQr.publicKey);
+});

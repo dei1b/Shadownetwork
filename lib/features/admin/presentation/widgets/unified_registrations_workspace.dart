@@ -850,9 +850,19 @@ class _UnifiedRegistrationsWorkspaceState
           resolvedConflictVersion: null,
           updatedAt: DateTime.now().toUtc(),
         );
+        final isReplacementOrRecovery =
+            op.kind == PendingSyncKind.publishReplacement ||
+            op.kind == PendingSyncKind.publishRecovery;
+        final localChanges = isReplacementOrRecovery
+            ? DesktopAdminRegistryRepository.replacementLocalChanges(
+                publishedRegistration: publishedReg,
+                opPayload: opPayload,
+                publishedBundle: currentBundle,
+              )
+            : <RegisteredDevice>[publishedReg.toRegisteredDevice()];
         final bundleJson = await registry.buildMergedTrustBundleJson(
           publishedBundle: currentBundle,
-          localChanges: [publishedReg.toRegisteredDevice()],
+          localChanges: localChanges,
           directoryProject: reviewProject,
           minimumPreviousVersion: currentVersion,
         );
@@ -1474,6 +1484,15 @@ class _UnifiedRegistrationsWorkspaceState
                 item.onlineApplication?.id ??
                 registration.accountUid,
           );
+          final remoteBundle = dir == null
+              ? null
+              : TrustBundle.fromJsonString(dir.bundle);
+          final replacementChanges =
+              DesktopAdminRegistryRepository.replacementLocalChanges(
+                publishedRegistration: staged.registration,
+                previousRegistration: registration,
+                publishedBundle: remoteBundle,
+              );
           if (_session != null && item.recoveryRequest != null) {
             final publishedReg = staged.registration.copyWith(
               accountUid: item.recoveryRequest!.id,
@@ -1481,10 +1500,14 @@ class _UnifiedRegistrationsWorkspaceState
               syncState: CampusSyncState.synced,
             );
             final mergedJson = await registry.buildMergedTrustBundleJson(
-              publishedBundle: dir == null
-                  ? null
-                  : TrustBundle.fromJsonString(dir.bundle),
-              localChanges: [publishedReg.toRegisteredDevice()],
+              publishedBundle: remoteBundle,
+              localChanges: [
+                for (final d in replacementChanges)
+                  d.deviceId.toLowerCase() ==
+                          publishedReg.activePhone.deviceId.toLowerCase()
+                      ? publishedReg.toRegisteredDevice()
+                      : d,
+              ],
               directoryProject: reviewProject,
               minimumPreviousVersion: dir?.version ?? 0,
             );
@@ -1523,10 +1546,8 @@ class _UnifiedRegistrationsWorkspaceState
               syncState: CampusSyncState.synced,
             );
             final mergedJson = await registry.buildMergedTrustBundleJson(
-              publishedBundle: dir == null
-                  ? null
-                  : TrustBundle.fromJsonString(dir.bundle),
-              localChanges: [publishedReg.toRegisteredDevice()],
+              publishedBundle: remoteBundle,
+              localChanges: replacementChanges,
               directoryProject: reviewProject,
               minimumPreviousVersion: dir?.version ?? 0,
             );
@@ -1558,10 +1579,8 @@ class _UnifiedRegistrationsWorkspaceState
               syncState: CampusSyncState.synced,
             );
             final mergedJson = await registry.buildMergedTrustBundleJson(
-              publishedBundle: dir == null
-                  ? null
-                  : TrustBundle.fromJsonString(dir.bundle),
-              localChanges: [publishedReg.toRegisteredDevice()],
+              publishedBundle: remoteBundle,
+              localChanges: replacementChanges,
               directoryProject: reviewProject,
               minimumPreviousVersion: dir?.version ?? 0,
             );
