@@ -6,6 +6,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import '../../trust/domain/entities/approval_receipt.dart';
+import '../domain/campus_identity_fields.dart';
 import 'registration_review_api.dart';
 
 const pilotRegistrationHost = String.fromEnvironment('DNSC_EMULATOR_HOST');
@@ -210,6 +212,94 @@ class PilotRegistration {
     }
     throw StateError(
       'Submission could not be confirmed. Retry from the saved draft.',
+    );
+  }
+
+  Future<ReviewApplication?> readLinkRequest(User user) async {
+    final token = await user.getIdToken();
+    if (token == null) throw StateError('Sign in again to check link status.');
+    return RegistrationReviewApi(
+      _collection,
+    ).getDocument(token, 'registrationLinkRequests', user.uid);
+  }
+
+  Future<void> submitLinkRequest(User user, AccountLinkProof proof) async {
+    final token = await user.getIdToken();
+    if (token == null) throw StateError('Sign in again before linking.');
+    await RegistrationReviewApi(_collection).upsertDocument(
+      token,
+      'registrationLinkRequests',
+      user.uid,
+      {
+        'accountUid': proof.accountUid,
+        'registrationId': proof.registrationId,
+        'nonce': proof.nonce,
+        'deviceId': proof.deviceId,
+        'publicKey': proof.publicKey,
+        'signingPublicKey': proof.signingPublicKey,
+        'keyVersion': proof.keyVersion,
+        'proofSignature': proof.signature ?? '',
+        'issuedAt': proof.issuedAt.toUtc().toIso8601String(),
+        if (proof.directoryProject != null)
+          'directoryProject': proof.directoryProject!,
+        'status': 'pending',
+      },
+    );
+  }
+
+  Future<void> submitPhoneReplacement(
+    User user,
+    ReviewApplication application,
+    String deviceRegistrationJson, {
+    String reason = 'Phone data cleared or replaced',
+  }) async {
+    final token = await user.getIdToken();
+    if (token == null) {
+      throw StateError('Sign in again before requesting replacement.');
+    }
+    await RegistrationReviewApi(_collection).update(token, application, {
+      'replacementRequest': {
+        'deviceRegistration': deviceRegistrationJson,
+        'reason': reason,
+        'status': 'submitted',
+      },
+    });
+  }
+
+  Future<ReviewApplication?> readRecoveryRequest(User user) async {
+    final token = await user.getIdToken();
+    if (token == null) {
+      throw StateError('Sign in again to check recovery status.');
+    }
+    return RegistrationReviewApi(
+      _collection,
+    ).getDocument(token, 'registrationRecoveryRequests', user.uid);
+  }
+
+  Future<void> submitRecoveryRequest(
+    User user, {
+    required CampusAffiliation affiliation,
+    required String schoolId,
+    required String displayName,
+    required String deviceRegistrationJson,
+  }) async {
+    final token = await user.getIdToken();
+    if (token == null) {
+      throw StateError('Sign in again before submitting recovery.');
+    }
+    await RegistrationReviewApi(_collection).upsertDocument(
+      token,
+      'registrationRecoveryRequests',
+      user.uid,
+      {
+        'accountUid': user.uid,
+        'affiliation': affiliation.name,
+        'schoolId': schoolId.trim(),
+        'displayName': displayName.trim(),
+        'email': user.email ?? '',
+        'deviceRegistration': deviceRegistrationJson,
+        'status': 'submitted',
+      },
     );
   }
 }

@@ -1,8 +1,10 @@
 import '../theme/admin_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../registration/data/registration_review_api.dart';
 import '../providers/admin_recovery_provider.dart';
 
 class AdminRecoveryPanel extends ConsumerStatefulWidget {
@@ -111,6 +113,66 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
     return 'Administrator backup restored. Review your devices before publishing a new trust bundle.';
   });
 
+  Future<void> _authorizePublisher({required bool disposable}) =>
+      _perform(() async {
+        final result = await ref
+            .read(adminRecoveryProvider.notifier)
+            .createPublisherDelegation(
+              directoryProject: reviewProject,
+              disposable: disposable,
+            );
+        if (!mounted) return null;
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(
+              disposable
+                  ? 'Disposable test publisher key'
+                  : 'Authorized online publisher key',
+            ),
+            content: SizedBox(
+              width: 560,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      disposable
+                          ? 'Use these temporary credentials only with disposable test phones before release.'
+                          : 'Copy these values into Vercel environment variables for the hosted publisher. The campus root private key remains on this PC.',
+                    ),
+                    const SizedBox(height: 12),
+                    SelectableText(result.vercelEnvJson),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Close'),
+              ),
+              FilledButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(
+                    ClipboardData(text: result.vercelEnvJson),
+                  );
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                  }
+                },
+                icon: const Icon(Icons.content_copy_rounded),
+                label: const Text('Copy Vercel env JSON'),
+              ),
+            ],
+          ),
+        );
+        return disposable
+            ? 'Disposable online test publisher credentials generated.'
+            : 'Online publisher delegation authorized by campus root identity.';
+      });
+
   @override
   Widget build(BuildContext context) {
     final identity = ref.watch(adminRecoveryProvider);
@@ -206,6 +268,20 @@ class _AdminRecoveryPanelState extends ConsumerState<AdminRecoveryPanel> {
                         onPressed: _busy ? null : _restore,
                         icon: const Icon(Icons.restore),
                         label: const Text('Restore encrypted backup'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: _busy || status?.hasIdentity != true
+                            ? null
+                            : () => _authorizePublisher(disposable: false),
+                        icon: const Icon(Icons.vpn_key_outlined),
+                        label: const Text('Authorize online publisher key'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _busy
+                            ? null
+                            : () => _authorizePublisher(disposable: true),
+                        icon: const Icon(Icons.science_outlined),
+                        label: const Text('Generate disposable test key'),
                       ),
                     ],
                   ),

@@ -1,10 +1,25 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../messaging/presentation/providers/local_messaging_providers.dart';
 import '../../../messaging/presentation/providers/peer_location_providers.dart';
 import '../../data/services/trust_bundle_store.dart';
+import '../../domain/entities/approval_receipt.dart';
 import '../../domain/entities/device_access_profile.dart';
 import '../../domain/services/device_access_resolver.dart';
+
+Future<SignedApprovalReceipt?> _safeLoadVerifiedReceipt(
+  TrustBundleStore store,
+) async {
+  try {
+    return await store.loadVerifiedReceipt();
+  } on MissingPluginException {
+    return null;
+  } on FlutterError {
+    return null;
+  }
+}
 
 final trustBundleStoreProvider = Provider<TrustBundleStore>(
   (ref) => TrustBundleStore(),
@@ -21,9 +36,12 @@ final sosInboxAccessProvider = Provider<Future<SosInboxAccess> Function()>((
 ) {
   return () async {
     // The background relay can run for hours after the UI resolved its role.
-    final bundle = await ref.read(trustBundleStoreProvider).loadBundle();
-    final expiresAt = bundle?.expiresAt;
-    if (bundle?.isSignatureVerified != true || expiresAt == null) {
+    final store = ref.read(trustBundleStoreProvider);
+    final bundle = await store.loadBundle();
+    final receipt = await _safeLoadVerifiedReceipt(store);
+    final expiresAt = bundle?.expiresAt ?? receipt?.expiresAt;
+    if ((bundle?.isSignatureVerified != true && receipt == null) ||
+        expiresAt == null) {
       return SosInboxAccess.denied;
     }
     final peer = await ref.read(localPeerProvider.future);
@@ -32,7 +50,10 @@ final sosInboxAccessProvider = Provider<Future<SosInboxAccess> Function()>((
       deviceSigningIdentityProvider.future,
     );
     final now = DateTime.now();
-    final expired = bundle!.isExpiredAt(now);
+    final bundleActive =
+        bundle?.isSignatureVerified == true && !bundle!.isExpiredAt(now);
+    final receiptActive = receipt != null && !receipt.isExpiredAt(now);
+    final expired = !bundleActive && !receiptActive;
     final profile = ref
         .read(deviceAccessResolverProvider)
         .resolve(
@@ -41,6 +62,7 @@ final sosInboxAccessProvider = Provider<Future<SosInboxAccess> Function()>((
           keyVersion: identity.keyVersion,
           signingPublicKey: signingIdentity.encodedPublicKey,
           bundle: bundle,
+          receipt: receipt,
           // Check the prior role and keys to decide whether to retain work.
           now: expired
               ? expiresAt.subtract(const Duration(microseconds: 1))
@@ -67,7 +89,9 @@ final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
   final localPeer = await ref.watch(localPeerProvider.future);
   final identity = await ref.watch(deviceCryptoIdentityProvider.future);
   final signingIdentity = await ref.watch(deviceSigningIdentityProvider.future);
-  final bundle = await ref.watch(trustBundleStoreProvider).loadBundle();
+  final store = ref.watch(trustBundleStoreProvider);
+  final bundle = await store.loadBundle();
+  final receipt = await _safeLoadVerifiedReceipt(store);
   if (bundle?.isSignatureVerified == true) {
     final repository = await ref.watch(trustRepositoryProvider.future);
     final previous = await repository.getMetadata();
@@ -85,5 +109,6 @@ final deviceAccessProfileProvider = FutureProvider<DeviceAccessProfile>((
         keyVersion: identity.keyVersion,
         signingPublicKey: signingIdentity.encodedPublicKey,
         bundle: bundle,
+        receipt: receipt,
       );
 });

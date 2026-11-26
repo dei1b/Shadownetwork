@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "buildCommand": "node tools/vercel/build_web.mjs",
+  "outputDirectory": "build/web",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

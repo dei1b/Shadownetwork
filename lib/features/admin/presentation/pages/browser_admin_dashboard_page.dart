@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import 'package:shadownetwork/core/widgets/action_feedback.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../data/services/admin_device_registry_store.dart';
 import '../../domain/entities/registered_device.dart';
 import '../../domain/repositories/admin_registry_repository.dart';
 import '../widgets/registration_json_dialog.dart';
+import '../widgets/approval_qr_dialog.dart';
 import '../widgets/windows_registration_scanner.dart';
 import '../widgets/admin_device_registry_panel.dart';
 import '../../../security/domain/entities/device_registration_qr.dart';
@@ -20,8 +20,6 @@ const _mobileRed = AdminTheme.action;
 const _mobileRedDark = AdminTheme.action;
 const _mobileMuted = AdminTheme.muted;
 const _mobileField = AdminTheme.border;
-// Version 40, byte mode, medium error correction.
-const _maxTrustQrBytes = 2331;
 
 class BrowserAdminDashboardPage extends StatefulWidget {
   const BrowserAdminDashboardPage({
@@ -546,96 +544,11 @@ class _BrowserAdminDashboardPageState extends State<BrowserAdminDashboardPage> {
     if (!mounted) {
       return;
     }
-    // The QR painter throws for oversized input even if validation picked v40.
-    final qr = utf8.encode(qrData).length <= _maxTrustQrBytes
-        ? QrCode.fromData(
-            data: qrData,
-            errorCorrectLevel: QrErrorCorrectLevel.M,
-          )
-        : null;
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        final actions = [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-          FilledButton.icon(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: bundle));
-              if (context.mounted) {
-                Navigator.of(context).pop();
-              }
-              _showSnackBar('Offline trust bundle copied to clipboard.');
-            },
-            icon: const Icon(Icons.content_copy_rounded),
-            label: const Text('Copy JSON'),
-          ),
-        ];
-        if (qr == null) {
-          return AlertDialog(
-            title: Text('Share approval v${parsed.bundleVersion}'),
-            content: const Text(
-              'This approval update is too large for one QR. Copy the JSON, '
-              'transfer the text to the phone, then paste it on the approval screen.',
-            ),
-            actions: actions,
-          );
-        }
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          constraints: const BoxConstraints(maxWidth: 840),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Scan approval QR · v${parsed.bundleVersion}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Open the approval scanner on the phone and fit the whole code in view.',
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      // Four white modules on each side. The painter uses
-                      // half-pixel steps, so size the grid on those steps too.
-                      final modules = qr.moduleCount + 8;
-                      final tile =
-                          (constraints.biggest.shortestSide * 2 / modules)
-                              .floorToDouble() /
-                          2;
-                      if (tile == 0) return const SizedBox.shrink();
-                      return Center(
-                        child: QrImageView.withQr(
-                          qr: qr,
-                          size: modules * tile,
-                          padding: EdgeInsets.all(4 * tile),
-                          backgroundColor: Colors.white,
-                          semanticsLabel: 'Phone approval QR code',
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: 8,
-                  children: actions,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    await showApprovalQrDialog(
+      context,
+      title: 'Scan approval QR · v${parsed.bundleVersion}',
+      payloadJson: qrData,
+      copyJson: bundle,
     );
   }
 
@@ -1084,7 +997,7 @@ class _RegisterDeviceCard extends StatelessWidget {
                 controller: ownerController,
                 decoration: const InputDecoration(
                   labelText: 'User full name / Unit name',
-                  hintText: 'Example: Campus responder',
+                  hintText: 'Example: DNSC Responder',
                   prefixIcon: Icon(Icons.badge_rounded),
                   border: OutlineInputBorder(),
                 ),

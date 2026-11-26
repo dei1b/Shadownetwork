@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/desktop_admin_registry_repository.dart';
+import '../../../trust/domain/entities/publisher_delegation.dart';
 
 final desktopAdminRegistryProvider =
     FutureProvider<DesktopAdminRegistryRepository>((ref) {
@@ -53,5 +54,23 @@ class AdminRecoveryController extends AsyncNotifier<AdminIdentityStatus> {
     await repository.restoreEncryptedBackup(source, password);
     ref.read(adminRegistryRevisionProvider.notifier).registryChanged();
     await refresh();
+  }
+
+  Future<
+    ({
+      PublisherDelegation delegation,
+      String publisherPrivateKeySeed,
+      String vercelEnvJson,
+    })
+  >
+  createPublisherDelegation({
+    required String directoryProject,
+    bool disposable = false,
+  }) async {
+    final repository = await ref.read(desktopAdminRegistryProvider.future);
+    return repository.createPublisherDelegation(
+      directoryProject: directoryProject,
+      disposable: disposable,
+    );
   }
 }

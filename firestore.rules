@@ -10,18 +10,42 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.get('admin', false) == true;
     }
 
+    function validAffiliationFields(data) {
+      let affiliation = data.get('affiliation', 'student');
+      return (affiliation == 'student'
+          && validText(data.displayName, 100, true)
+          && validText(data.studentNumber, 100, true)
+          && validText(data.courseYear, 100, true)
+          && validText(data.get('course', ''), 100, false)
+          && validText(data.get('yearLevel', ''), 50, false)
+          && validText(data.get('sectionSet', ''), 50, false))
+        || (affiliation == 'staff'
+          && validText(data.displayName, 100, true)
+          && validText(data.employeeId, 100, true)
+          && validText(data.unit, 100, true)
+          && validText(data.get('studentNumber', ''), 100, false)
+          && validText(data.get('courseYear', ''), 100, false));
+    }
+
     function review(uid, before, after) {
       let history = before.get('reviewHistory', []);
       let revision = before.get('revision', 0) + 1;
       let decision = after.reviewHistory[history.size()];
       return reviewer() && request.auth.uid != uid && before.status == 'submitted'
         && after.diff(before).affectedKeys().hasOnly([
-          'status', 'revision', 'reviewHistory', 'publicationStatus'
+          'status', 'revision', 'reviewHistory', 'publicationStatus',
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address', 'submittedSnapshot', 'registrationId'
         ])
+        && validAffiliationFields(after)
         && after.status in ['approved_pending_publication', 'changes_requested', 'rejected']
         && after.revision == revision
         && after.publicationStatus == (after.status == 'approved_pending_publication' ? 'pending' : 'none')
-        && decision.keys().hasOnly(['reviewerUid', 'status', 'reason', 'revision', 'role'])
+        && decision.keys().hasOnly([
+          'reviewerUid', 'status', 'reason', 'revision', 'role',
+          'decisionId', 'editedFields'
+        ])
         && decision.reviewerUid == request.auth.uid
         && decision.status == after.status && decision.revision == revision
         && (!('role' in decision) ||
@@ -35,13 +59,13 @@ service cloud.firestore {
         && before.status == 'changes_requested' && after.status == 'submitted'
         && after.revision == before.revision + 1
         && after.diff(before).affectedKeys().hasOnly([
-          'displayName', 'studentNumber', 'courseYear', 'phone', 'address', 'status', 'revision'
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address', 'status', 'revision'
         ])
-        && validText(after.displayName, 100, true)
-        && validText(after.studentNumber, 100, true)
-        && validText(after.courseYear, 100, true)
-        && validText(after.phone, 100, false)
-        && validText(after.address, 200, false);
+        && validAffiliationFields(after)
+        && validText(after.get('phone', ''), 100, false)
+        && validText(after.get('address', ''), 200, false);
     }
 
     function published(uid, before, after) {
@@ -49,8 +73,10 @@ service cloud.firestore {
       return reviewer() && request.auth.uid != uid
         && before.status == 'approved_pending_publication'
         && after.status == 'published' && after.publicationStatus == 'published'
-        && after.diff(before).affectedKeys().hasOnly(['status', 'publicationStatus'])
-        && snapshot.applicationUid == uid
+        && after.diff(before).affectedKeys().hasOnly([
+          'status', 'publicationStatus', 'registrationId'
+        ])
+        && snapshot.get('applicationUid', '') == uid
         && snapshot.publishedAt == request.time;
     }
 
@@ -58,8 +84,8 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == uid
         && before.status == 'published'
         && after.diff(before).affectedKeys().hasOnly(['phone', 'address'])
-        && validText(after.phone, 100, false)
-        && validText(after.address, 200, false);
+        && validText(after.get('phone', ''), 100, false)
+        && validText(after.get('address', ''), 200, false);
     }
 
     function requestProfileChange(uid, before, after) {
@@ -68,14 +94,20 @@ service cloud.firestore {
         && before.status == 'published'
         && before.get('profileChange', {}).get('status', '') in ['', 'published', 'rejected']
         && after.diff(before).affectedKeys().hasOnly(['profileChange'])
-        && change.keys().hasOnly(['displayName', 'studentNumber', 'courseYear', 'status'])
+        && change.keys().hasOnly([
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit', 'status'
+        ])
         && change.status == 'submitted'
         && validText(change.displayName, 100, true)
-        && validText(change.studentNumber, 100, true)
-        && validText(change.courseYear, 100, true)
-        && (change.displayName != before.displayName ||
-            change.studentNumber != before.studentNumber ||
-            change.courseYear != before.courseYear);
+        && (!('affiliation' in change) || change.affiliation in ['student', 'staff'])
+        && validText(change.get('studentNumber', ''), 100, false)
+        && validText(change.get('course', ''), 100, false)
+        && validText(change.get('yearLevel', ''), 100, false)
+        && validText(change.get('sectionSet', ''), 100, false)
+        && validText(change.get('courseYear', ''), 100, false)
+        && validText(change.get('employeeId', ''), 100, false)
+        && validText(change.get('unit', ''), 100, false);
     }
 
     function reviewProfileChange(uid, before, after) {
@@ -83,39 +115,196 @@ service cloud.firestore {
       return reviewer() && request.auth.uid != uid
         && before.status == 'published' && before.profileChange.status == 'submitted'
         && after.diff(before).affectedKeys().hasOnly(['profileChange'])
-        && change.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid'])
+        && change.diff(before.profileChange).affectedKeys().hasOnly(['status', 'reviewerUid', 'reason'])
         && change.reviewerUid == request.auth.uid
         && change.status in ['approved_pending_publication', 'rejected'];
+    }
+
+    function sameCampusIdentity(left, right) {
+      return left.get('displayName', '') == right.get('displayName', '')
+        && left.get('affiliation', '') == right.get('affiliation', '')
+        && left.get('studentNumber', '') == right.get('studentNumber', '')
+        && left.get('course', '') == right.get('course', '')
+        && left.get('yearLevel', '') == right.get('yearLevel', '')
+        && left.get('sectionSet', '') == right.get('sectionSet', '')
+        && left.get('courseYear', '') == right.get('courseYear', '')
+        && left.get('employeeId', '') == right.get('employeeId', '')
+        && left.get('unit', '') == right.get('unit', '')
+        && left.get('phone', '') == right.get('phone', '')
+        && left.get('address', '') == right.get('address', '');
+    }
+
+    function nextProfileRevision(before, reg) {
+      let revision = before.get('revision', 0);
+      return before.get('registrationId', '') != '' && exists(reg)
+        && get(reg).data.get('revision', 0) > revision
+          ? get(reg).data.revision + 1 : revision + 1;
+    }
+
+    function profileCampusMatches(uid, before, after) {
+      let regId = before.get('registrationId', uid);
+      let reg = /databases/$(database)/documents/campusRegistrations/$(regId);
+      return after.revision == nextProfileRevision(before, reg)
+        && (before.get('registrationId', '') == '' || !exists(reg) || (
+          get(reg).data.get('accountUid', '') == uid
+          && get(reg).data.status == 'published'
+          && get(reg).data.get('deviceRegistration', before.deviceRegistration) == before.deviceRegistration
+          && getAfter(reg).data.revision == after.revision
+          && sameCampusIdentity(after, getAfter(reg).data)
+          && getAfter(reg).data.diff(get(reg).data).affectedKeys().hasOnly([
+            'displayName', 'affiliation', 'studentNumber', 'course',
+            'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+            'phone', 'address', 'revision'
+          ])
+        ));
     }
 
     function publishProfileChange(uid, before, after) {
       let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
       return reviewer() && request.auth.uid != uid
         && before.status == 'published'
-        && before.profileChange.status == 'approved_pending_publication'
+        && before.profileChange.status in ['submitted', 'approved_pending_publication']
         && after.diff(before).affectedKeys().hasOnly([
-          'displayName', 'studentNumber', 'courseYear', 'profileChange'
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address', 'profileChange', 'revision'
         ])
-        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly(['status'])
+        && after.profileChange.diff(before.profileChange).affectedKeys().hasOnly([
+          'status', 'reviewerUid',
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address'
+        ])
         && after.profileChange.status == 'published'
-        && after.displayName == before.profileChange.displayName
-        && after.studentNumber == before.profileChange.studentNumber
-        && after.courseYear == before.profileChange.courseYear
-        && snapshot.applicationUid == uid && snapshot.publishedAt == request.time;
+        && ((before.profileChange.status == 'submitted'
+             && after.profileChange.get('reviewerUid', '') == request.auth.uid)
+            || (before.profileChange.status == 'approved_pending_publication'
+                && (before.profileChange.get('reviewerUid', '') == ''
+                    ? after.profileChange.get('reviewerUid', '') == request.auth.uid
+                    : after.profileChange.get('reviewerUid', '') == before.profileChange.get('reviewerUid', ''))))
+        && after.displayName is string && after.displayName.size() > 0
+        && after.displayName == after.profileChange.get('displayName', '')
+        && after.get('affiliation', '') == after.profileChange.get('affiliation', '')
+        && after.get('studentNumber', '') == after.profileChange.get('studentNumber', '')
+        && after.get('course', '') == after.profileChange.get('course', '')
+        && after.get('yearLevel', '') == after.profileChange.get('yearLevel', '')
+        && after.get('sectionSet', '') == after.profileChange.get('sectionSet', '')
+        && after.get('courseYear', '') == after.profileChange.get('courseYear', '')
+        && after.get('employeeId', '') == after.profileChange.get('employeeId', '')
+        && after.get('unit', '') == after.profileChange.get('unit', '')
+        && after.get('phone', '') == after.profileChange.get('phone', '')
+        && after.get('address', '') == after.profileChange.get('address', '')
+        && profileCampusMatches(uid, before, after)
+        && snapshot.get('applicationUid', '') == uid && snapshot.publishedAt == request.time;
+    }
+
+    function requestPhoneReplacement(uid, before, after) {
+      let req = after.replacementRequest;
+      return request.auth != null && request.auth.uid == uid
+        && before.status == 'published'
+        && before.get('replacementRequest', {}).get('status', '') in ['', 'published', 'rejected']
+        && after.diff(before).affectedKeys().hasOnly(['replacementRequest'])
+        && req.keys().hasOnly(['deviceRegistration', 'reason', 'status'])
+        && req.status == 'submitted'
+        && validText(req.deviceRegistration, 4096, true)
+        && validText(req.get('reason', ''), 500, false);
+    }
+
+    function reviewPhoneReplacement(uid, before, after) {
+      let req = after.replacementRequest;
+      return reviewer() && request.auth.uid != uid
+        && before.status == 'published' && before.replacementRequest.status == 'submitted'
+        && after.diff(before).affectedKeys().hasOnly(['replacementRequest'])
+        && req.diff(before.replacementRequest).affectedKeys().hasOnly([
+          'status', 'reviewerUid', 'reason'
+        ])
+        && req.reviewerUid == request.auth.uid
+        && req.status in ['approved_pending_publication', 'rejected'];
+    }
+
+    function publishPhoneReplacement(uid, before, after) {
+      let snapshot = getAfter(/databases/$(database)/documents/trustDirectory/current).data;
+      return reviewer() && request.auth.uid != uid
+        && before.status == 'published'
+        && before.get('replacementRequest', {}).get('status', '') in [
+          'submitted', 'approved_pending_publication'
+        ]
+        && after.diff(before).affectedKeys().hasOnly([
+          'deviceRegistration', 'replacementRequest', 'registrationId',
+          'revision', 'processedDecisionIds', 'decisionOutcomes'
+        ])
+        && after.replacementRequest.status == 'published'
+        && after.deviceRegistration == before.replacementRequest.deviceRegistration
+        && replacementDecisionMatches(uid, before, after)
+        && snapshot.get('applicationUid', '') == uid
+        && snapshot.publishedAt == request.time;
+    }
+
+    function replacementDecisionMatches(uid, before, after) {
+      let reg = getAfter(/databases/$(database)/documents/campusRegistrations/$(after.registrationId)).data;
+      let decisionId = reg.decisionId;
+      let outcome = after.decisionOutcomes[decisionId];
+      return validText(decisionId, 200, true)
+        && reg.get('accountUid', '') == uid
+        && reg.status == 'published'
+        && reg.deviceRegistration == after.deviceRegistration
+        && after.revision > before.get('revision', 0)
+        && reg.revision == after.revision
+        && after.processedDecisionIds == before.get('processedDecisionIds', []).concat([decisionId])
+        && after.decisionOutcomes.diff(before.get('decisionOutcomes', {})).affectedKeys().hasOnly([decisionId])
+        && outcome == reg.decisionOutcomes[decisionId]
+        && outcome.action == 'approve_replacement' && outcome.status == 'published'
+        && outcome.registrationId == after.registrationId
+        && outcome.accountUid == uid
+        && outcome.revision == after.revision
+        && outcome.deviceRegistration == after.deviceRegistration;
+    }
+
+    function reviewerReconcileApplication(uid, after) {
+      let link = /databases/$(database)/documents/registrationLinkRequests/$(uid);
+      let rec = /databases/$(database)/documents/registrationRecoveryRequests/$(uid);
+      return reviewer() && request.auth.uid != uid
+        && after.status == 'published'
+        && after.publicationStatus == 'published'
+        && validAffiliationFields(after)
+        && validText(after.deviceRegistration, 4096, true)
+        && validText(after.get('registrationId', ''), 100, true)
+        && ((exists(link) && get(link).data.status == 'pending' && getAfter(link).data.status == 'linked')
+          || (exists(rec) && get(rec).data.status == 'submitted' && getAfter(rec).data.status == 'published'));
     }
 
     function directoryWrite(data) {
-      let uid = data.applicationUid;
-      let application = /databases/$(database)/documents/pilotApplications/$(uid);
-      return reviewer() && request.auth.uid != uid
-        && data.keys().hasOnly(['applicationUid', 'version', 'bundle', 'publishedAt'])
+      let hasApp = 'applicationUid' in data && data.applicationUid is string && data.applicationUid.size() > 0;
+      let hasReg = 'registrationId' in data && data.registrationId is string && data.registrationId.size() > 0;
+      return reviewer()
+        && data.keys().hasOnly([
+          'applicationUid', 'registrationId', 'version', 'bundle', 'publishedAt', 'lastDecisionId'
+        ])
+        && (hasApp || hasReg)
         && validText(data.bundle, 250000, true)
         && data.version is int && data.version > 0 && data.publishedAt == request.time
-        && getAfter(application).data.status == 'published'
-        && (get(application).data.status == 'approved_pending_publication' ||
-          (get(application).data.status == 'published' &&
-            get(application).data.profileChange.status == 'approved_pending_publication' &&
-            getAfter(application).data.profileChange.status == 'published'));
+        && (!hasApp || (request.auth.uid != data.applicationUid
+          && directoryWriteMatchesApplication(data.applicationUid)))
+        && (hasApp || directoryWriteMatchesRegistration(data.registrationId));
+    }
+
+    function directoryWriteMatchesApplication(uid) {
+      let application = /databases/$(database)/documents/pilotApplications/$(uid);
+      let rec = /databases/$(database)/documents/registrationRecoveryRequests/$(uid);
+      return getAfter(application).data.status == 'published'
+        && ((exists(application) && (
+            get(application).data.status == 'approved_pending_publication'
+            || (get(application).data.status == 'published' && (
+              (get(application).data.get('profileChange', {}).get('status', '') in ['submitted', 'approved_pending_publication']
+               && getAfter(application).data.get('profileChange', {}).get('status', '') == 'published')
+              || get(application).data.get('replacementRequest', {}).get('status', '') in ['submitted', 'approved_pending_publication']))))
+          || (exists(rec) && get(rec).data.status == 'submitted' && getAfter(rec).data.status == 'published'));
+    }
+
+    function directoryWriteMatchesRegistration(regId) {
+      let reg = /databases/$(database)/documents/campusRegistrations/$(regId);
+      return getAfter(reg).data.get('accountUid', '') != request.auth.uid
+        && getAfter(reg).data.status in ['published', 'revoked'];
     }
 
     match /trustDirectory/current {
@@ -127,19 +316,19 @@ service cloud.firestore {
     }
 
     match /pilotApplications/{uid} {
-      allow create: if request.auth != null
+      allow create: if (request.auth != null
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly([
-          'displayName', 'studentNumber', 'courseYear', 'phone', 'address',
-          'deviceRegistration', 'status'
+          'displayName', 'affiliation', 'studentNumber', 'course',
+          'yearLevel', 'sectionSet', 'courseYear', 'employeeId', 'unit',
+          'phone', 'address', 'deviceRegistration', 'status'
         ])
-        && validText(request.resource.data.displayName, 100, true)
-        && validText(request.resource.data.studentNumber, 100, true)
-        && validText(request.resource.data.courseYear, 100, true)
-        && validText(request.resource.data.phone, 100, false)
-        && validText(request.resource.data.address, 200, false)
+        && validAffiliationFields(request.resource.data)
+        && validText(request.resource.data.get('phone', ''), 100, false)
+        && validText(request.resource.data.get('address', ''), 200, false)
         && validText(request.resource.data.deviceRegistration, 4096, true)
-        && request.resource.data.status == 'submitted';
+        && request.resource.data.status == 'submitted')
+        || reviewerReconcileApplication(uid, request.resource.data);
       allow get: if request.auth != null
         && (request.auth.uid == uid
           || reviewer());
@@ -150,7 +339,85 @@ service cloud.firestore {
         || updateContact(uid, resource.data, request.resource.data)
         || requestProfileChange(uid, resource.data, request.resource.data)
         || reviewProfileChange(uid, resource.data, request.resource.data)
-        || publishProfileChange(uid, resource.data, request.resource.data);
+        || publishProfileChange(uid, resource.data, request.resource.data)
+        || requestPhoneReplacement(uid, resource.data, request.resource.data)
+        || reviewPhoneReplacement(uid, resource.data, request.resource.data)
+        || publishPhoneReplacement(uid, resource.data, request.resource.data)
+        || reviewerReconcileApplication(uid, request.resource.data);
+    }
+
+    match /campusRegistrations/{registrationId} {
+      allow get, list: if reviewer();
+      allow create, update: if reviewer()
+        && request.auth.uid != request.resource.data.get('accountUid', '')
+        && validText(request.resource.data.registrationId, 100, true)
+        && request.resource.data.registrationId == registrationId
+        && request.resource.data.role in ['civilian', 'responder', 'relay', 'admin']
+        && request.resource.data.status in [
+          'submitted', 'approved_local', 'approved_pending_publication',
+          'published', 'changes_requested', 'rejected', 'revoked', 'conflict'
+        ]
+        && validAffiliationFields(request.resource.data);
+    }
+
+    match /registrationLinkRequests/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || reviewer());
+      allow list: if reviewer();
+      allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.accountUid == uid
+          && request.resource.data.status == 'pending'
+          && validText(request.resource.data.registrationId, 100, true)
+          && validText(request.resource.data.nonce, 128, true)
+          && validText(request.resource.data.deviceId, 200, true)
+          && validText(request.resource.data.publicKey, 128, true)
+          && validText(request.resource.data.signingPublicKey, 128, true)
+          && request.resource.data.keyVersion is int
+          && request.resource.data.keyVersion > 0
+          && validText(request.resource.data.proofSignature, 256, true)
+          && validText(request.resource.data.issuedAt, 64, true);
+      allow update: if (request.auth != null
+          && request.auth.uid == uid
+          && resource.data.status == 'pending'
+          && request.resource.data.accountUid == uid
+          && request.resource.data.status == 'pending'
+          && validText(request.resource.data.registrationId, 100, true)
+          && validText(request.resource.data.nonce, 128, true)
+          && validText(request.resource.data.deviceId, 200, true)
+          && validText(request.resource.data.publicKey, 128, true)
+          && validText(request.resource.data.signingPublicKey, 128, true)
+          && request.resource.data.keyVersion is int
+          && request.resource.data.keyVersion > 0
+          && validText(request.resource.data.proofSignature, 256, true)
+          && validText(request.resource.data.issuedAt, 64, true))
+        || (reviewer() && request.auth.uid != uid
+          && resource != null
+          && request.resource.data.status in ['linked', 'replacement_required', 'rejected']
+          && request.resource.data.reviewerUid == request.auth.uid);
+    }
+
+    match /registrationRecoveryRequests/{uid} {
+      allow get: if request.auth != null && (request.auth.uid == uid || reviewer());
+      allow list: if reviewer();
+      allow create, update: if (request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.accountUid == uid
+          && request.resource.data.status == 'submitted'
+          && validText(request.resource.data.displayName, 100, true)
+          && validText(request.resource.data.schoolId, 100, true)
+          && request.resource.data.affiliation in ['student', 'staff']
+          && validText(request.resource.data.email, 200, true)
+          && validText(request.resource.data.deviceRegistration, 4096, true))
+        || (reviewer() && request.auth.uid != uid
+          && resource != null
+          && request.resource.data.status in [
+            'approved_pending_publication', 'published', 'rejected'
+          ]
+          && request.resource.data.reviewerUid == request.auth.uid
+          && (!('verificationMethod' in request.resource.data) ||
+            request.resource.data.verificationMethod in [
+              'campus_email_match', 'mailbox_code', 'desk_id_check'
+            ]));
     }
   }
 }

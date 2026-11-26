@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -9,10 +10,12 @@ import '../../../core/constants/mobile_ui_tokens.dart';
 import '../../../core/widgets/mobile_ui_components.dart';
 import '../../messaging/presentation/providers/local_messaging_providers.dart';
 import '../../security/domain/entities/device_registration_qr.dart';
+import '../../trust/data/services/trust_directory_sync_service.dart';
+import '../../trust/domain/entities/approval_receipt.dart';
+import '../../trust/presentation/providers/device_access_provider.dart';
 import '../data/pilot_registration.dart';
 import '../data/registration_review_api.dart';
-import '../../trust/data/services/trust_directory_sync_service.dart';
-import '../../trust/presentation/providers/device_access_provider.dart';
+import '../domain/campus_identity_fields.dart';
 
 final registrationMatchesPhoneProvider = FutureProvider.autoDispose
     .family<bool, String>((ref, binding) async {
@@ -50,37 +53,69 @@ class PilotRegistrationPage extends ConsumerStatefulWidget {
 }
 
 class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
-  static const _requiredDetailLabels = {
+  static const _studentRequiredLabels = {
     'displayName': 'Full name',
     'studentNumber': 'Student number',
-    'courseYear': 'Course and year',
+    'course': 'Course',
+    'yearLevel': 'Year',
+    'sectionSet': 'Set',
+  };
+  static const _staffRequiredLabels = {
+    'displayName': 'Full name',
+    'employeeId': 'Employee ID',
+    'unit': 'Unit or office',
   };
   static const _optionalDetailLabels = {
     'phone': 'Phone number (optional)',
     'address': 'Address (optional)',
   };
-  static const _labels = {
-    ..._requiredDetailLabels,
-    ..._optionalDetailLabels,
-  };
+  static const _allFieldKeys = [
+    'displayName',
+    'studentNumber',
+    'course',
+    'yearLevel',
+    'sectionSet',
+    'employeeId',
+    'unit',
+    'phone',
+    'address',
+  ];
   static const _fieldIcons = {
     'displayName': Icons.person_outline_rounded,
     'studentNumber': Icons.badge_outlined,
-    'courseYear': Icons.school_outlined,
+    'course': Icons.school_outlined,
+    'yearLevel': Icons.calendar_today_outlined,
+    'sectionSet': Icons.group_outlined,
+    'employeeId': Icons.work_outline_rounded,
+    'unit': Icons.apartment_outlined,
     'phone': Icons.phone_outlined,
     'address': Icons.home_outlined,
   };
   final _fields = {
-    for (final key in _labels.keys) key: TextEditingController(),
+    for (final key in _allFieldKeys) key: TextEditingController(),
   };
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _recoverySchoolId = TextEditingController();
+  final _recoveryName = TextEditingController();
   final _requiredFocusNodes = {
     'email': FocusNode(),
     'password': FocusNode(),
-    for (final key in _requiredDetailLabels.keys) key: FocusNode(),
+    for (final key in {..._studentRequiredLabels.keys, ..._staffRequiredLabels.keys})
+      key: FocusNode(),
   };
+  CampusAffiliation _affiliation = CampusAffiliation.student;
+  bool _hasLegacyCourseYearOnly = false;
+  bool _showRecoveryForm = false;
+  SignedApprovalReceipt? _localReceipt;
+  ReviewApplication? _linkRequest;
+  ReviewApplication? _recoveryRequest;
   Set<String> _missingFields = {};
+
+  Map<String, String> get _activeRequiredLabels =>
+      _affiliation == CampusAffiliation.staff
+      ? _staffRequiredLabels
+      : _studentRequiredLabels;
   PilotRegistration? _repository;
   User? _user;
   bool _busy = true;
@@ -128,9 +163,49 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     _application = null;
     _reviewIsStale = false;
     _correction = null;
+    _linkRequest = null;
+    _recoveryRequest = null;
+    _showRecoveryForm = false;
     _missingFields.clear();
-    for (final entry in _fields.entries) {
-      entry.value.text = draft[entry.key] as String? ?? '';
+    final draftIdentity = CampusIdentityFields.fromFirestoreFields(draft);
+    _affiliation = draftIdentity.affiliation;
+    _fields['displayName']!.text = draftIdentity.displayName;
+    _fields['studentNumber']!.text = draftIdentity.studentNumber;
+    _fields['course']!.text = draftIdentity.course;
+    _fields['yearLevel']!.text = draftIdentity.yearLevel;
+    _fields['sectionSet']!.text = draftIdentity.sectionSet;
+    _fields['employeeId']!.text = draftIdentity.employeeId;
+    _fields['unit']!.text = draftIdentity.unit;
+    _fields['phone']!.text = draftIdentity.phone;
+    _fields['address']!.text = draftIdentity.address;
+    _hasLegacyCourseYearOnly =
+        (draft['course'] as String? ?? '').isEmpty &&
+        (draft['yearLevel'] as String? ?? '').isEmpty &&
+        (draft['sectionSet'] as String? ?? '').isEmpty &&
+        (draft['courseYear'] as String? ?? '').isNotEmpty;
+    _localReceipt = null;
+    if (user != null) {
+      try {
+        final loadedReceipt = await ref
+            .read(trustBundleStoreProvider)
+            .loadReceipt();
+        if (loadedReceipt != null) {
+          final peer = await ref.read(localPeerProvider.future);
+          final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+          final signing = await ref.read(deviceSigningIdentityProvider.future);
+          _localReceipt =
+              loadedReceipt.matchesPhone(
+                deviceId: peer.id,
+                publicKey: crypto.encodedPublicKey,
+                signingPublicKey: signing.encodedPublicKey,
+                keyVersion: crypto.keyVersion,
+              )
+              ? loadedReceipt
+              : null;
+        }
+      } catch (_) {
+        _localReceipt = null;
+      }
     }
     _device = draft['deviceRegistration'] as String?;
     _draftCorrectionRevision = draft['correctionRevision'] as String?;
@@ -242,9 +317,21 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
     });
   }
 
-  Map<String, String> get _details => {
-    for (final entry in _fields.entries) entry.key: entry.value.text.trim(),
-  };
+  Map<String, String> get _details {
+    final identity = CampusIdentityFields(
+      affiliation: _affiliation,
+      displayName: _fields['displayName']!.text.trim(),
+      studentNumber: _fields['studentNumber']!.text.trim(),
+      course: _fields['course']!.text.trim(),
+      yearLevel: _fields['yearLevel']!.text.trim(),
+      sectionSet: _fields['sectionSet']!.text.trim(),
+      employeeId: _fields['employeeId']!.text.trim(),
+      unit: _fields['unit']!.text.trim(),
+      phone: _fields['phone']!.text.trim(),
+      address: _fields['address']!.text.trim(),
+    );
+    return identity.toFirestoreFields();
+  }
 
   Future<void> _refreshStatus() => _run(_readStatus);
 
@@ -273,7 +360,17 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       _correction = null;
       _submitted = false;
       _locked = _device != null;
-      if (showMissingApplication) _message = 'No submitted application found.';
+      try {
+        if (_localReceipt != null) {
+          _linkRequest = await _repository!.readLinkRequest(user);
+        }
+        _recoveryRequest = await _repository!.readRecoveryRequest(user);
+      } catch (_) {}
+      if (showMissingApplication &&
+          _linkRequest == null &&
+          _recoveryRequest == null) {
+        _message = 'No submitted application found.';
+      }
       return;
     }
     await _applyStatus(application, syncApproval: true);
@@ -291,9 +388,19 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       if ((_correction?.updateTime ?? _draftCorrectionRevision) !=
           application.updateTime) {
         _missingFields.clear();
-        for (final field in _fields.entries) {
-          field.value.text = application.fields[field.key] as String? ?? '';
-        }
+        final identity = CampusIdentityFields.fromFirestoreFields(
+          application.fields,
+        );
+        _affiliation = identity.affiliation;
+        _fields['displayName']!.text = identity.displayName;
+        _fields['studentNumber']!.text = identity.studentNumber;
+        _fields['course']!.text = identity.course;
+        _fields['yearLevel']!.text = identity.yearLevel;
+        _fields['sectionSet']!.text = identity.sectionSet;
+        _fields['employeeId']!.text = identity.employeeId;
+        _fields['unit']!.text = identity.unit;
+        _fields['phone']!.text = identity.phone;
+        _fields['address']!.text = identity.address;
       }
       _device = application.fields['deviceRegistration'] as String;
       _correction = application;
@@ -434,13 +541,134 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
 
   Future<void> _submit() async {
     if (_busy) return;
-    final details = _details;
-    if (_validateRequiredFields({
-      for (final key in _requiredDetailLabels.keys) key: details[key]!,
-    })) {
-      await _submitDetails(details);
+    final rawValues = {
+      for (final key in _activeRequiredLabels.keys)
+        key: _fields[key]!.text.trim(),
+    };
+    if (_affiliation == CampusAffiliation.student &&
+        _hasLegacyCourseYearOnly &&
+        rawValues['course']!.isNotEmpty) {
+      rawValues.remove('yearLevel');
+      rawValues.remove('sectionSet');
+    }
+    if (_validateRequiredFields(rawValues)) {
+      await _submitDetails(_details);
     }
   }
+
+  static bool _matchesPendingLink(
+    ReviewApplication link, {
+    required String registrationId,
+    required String deviceId,
+    required String publicKey,
+    required String signingPublicKey,
+    required int keyVersion,
+  }) {
+    final fields = link.fields;
+    if (fields['registrationId'] != registrationId) return false;
+    final linkDevice = fields['deviceId'] as String?;
+    if (linkDevice == null) return true;
+    return linkDevice == deviceId &&
+        fields['publicKey'] == publicKey &&
+        fields['signingPublicKey'] == signingPublicKey &&
+        (fields['keyVersion'] as int? ?? keyVersion) == keyVersion;
+  }
+
+  Future<void> _linkLocalPhone() => _run(() async {
+    final user = _user;
+    final receipt = _localReceipt;
+    if (user == null || receipt == null) return;
+    final repo = _repository!;
+    final latestApp = await repo.refreshProfile(user);
+    if (!_isCurrentUser(user)) return;
+    final currentLink = await repo.readLinkRequest(user);
+    if (!_isCurrentUser(user)) return;
+    _linkRequest = currentLink;
+    if (latestApp != null && latestApp.status == 'published') {
+      await _applyStatus(latestApp, syncApproval: true);
+      if (_isCurrentUser(user)) {
+        _message = 'This phone is already linked to your account.';
+      }
+      return;
+    }
+    if (currentLink?.status == 'linked') {
+      _application = latestApp;
+      try {
+        await ref.read(trustDirectorySyncProvider).refresh();
+      } catch (_) {}
+      if (_isCurrentUser(user)) {
+        _message = 'This phone is already linked to your account.';
+      }
+      return;
+    }
+    if (currentLink?.status == 'rejected') {
+      _application = latestApp;
+      _message = 'Phone link request was rejected by campus admin.';
+      return;
+    }
+    if (currentLink?.status == 'replacement_required') {
+      _application = latestApp;
+      _message = 'A new phone replacement review is required before linking.';
+      return;
+    }
+    final peer = await ref.read(localPeerProvider.future);
+    final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+    final signing = await ref.read(deviceSigningIdentityProvider.future);
+    if (currentLink?.status == 'pending' &&
+        _matchesPendingLink(
+          currentLink!,
+          registrationId: receipt.registrationId,
+          deviceId: peer.id,
+          publicKey: crypto.encodedPublicKey,
+          signingPublicKey: signing.encodedPublicKey,
+          keyVersion: crypto.keyVersion,
+        )) {
+      _message = 'Link request is already pending campus admin approval.';
+      return;
+    }
+    final nonceBytes = List<int>.generate(12, (_) => Random.secure().nextInt(256));
+    final proof = await AccountLinkProof.createSigned(
+      registrationId: receipt.registrationId,
+      accountUid: user.uid,
+      nonce: base64UrlEncode(nonceBytes),
+      deviceId: peer.id,
+      identity: crypto,
+      signingIdentity: signing,
+      directoryProject: receipt.directoryProject,
+    );
+    await repo.submitLinkRequest(user, proof);
+    _linkRequest = await repo.readLinkRequest(user);
+    _message =
+        'Link request sent. Waiting for campus staff to match your registration.';
+  });
+
+  Future<void> _submitRecovery() => _run(() async {
+    final user = _user;
+    if (user == null) return;
+    final schoolId = _recoverySchoolId.text.trim();
+    final name = _recoveryName.text.trim();
+    if (name.isEmpty || schoolId.isEmpty) {
+      throw StateError('Enter your full name and student or employee ID.');
+    }
+    final peer = await ref.read(localPeerProvider.future);
+    final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+    final signing = await ref.read(deviceSigningIdentityProvider.future);
+    final qr = await DeviceRegistrationQr.createSigned(
+      deviceId: peer.id,
+      identity: crypto,
+      signingIdentity: signing,
+    );
+    await _repository!.submitRecoveryRequest(
+      user,
+      affiliation: _affiliation,
+      schoolId: schoolId,
+      displayName: name,
+      deviceRegistrationJson: jsonEncode(qr.toJson()),
+    );
+    _recoveryRequest = await _repository!.readRecoveryRequest(user);
+    _showRecoveryForm = false;
+    _message = 'Recovery request sent. Campus staff will review your ID.';
+  });
 
   Future<void> _submitDetails(Map<String, String> details) => _run(() async {
     final user = _user!;
@@ -494,6 +722,8 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _recoverySchoolId.dispose();
+    _recoveryName.dispose();
     for (final controller in _fields.values) {
       controller.dispose();
     }
@@ -615,6 +845,13 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
                 if (_submitted) ...[
                   const SizedBox(height: 14),
                   _buildSubmittedCard(),
+                ] else if (_application == null && _localReceipt != null) ...[
+                  const SizedBox(height: 14),
+                  _buildLinkPhoneCard(),
+                ] else if (_application == null &&
+                    (_recoveryRequest != null || _showRecoveryForm)) ...[
+                  const SizedBox(height: 14),
+                  _buildRecoveryCard(),
                 ] else ...[
                   if (_locked || _correction != null) ...[
                     const SizedBox(height: 12),
@@ -627,6 +864,17 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
                   ],
                   const SizedBox(height: 14),
                   _buildApplicationCard(),
+                  if (_application == null && !_locked) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      style: MobileButtonStyles.secondaryOutlined,
+                      onPressed: _busy
+                          ? null
+                          : () => setState(() => _showRecoveryForm = true),
+                      icon: const Icon(Icons.phonelink_setup_rounded, size: 18),
+                      label: const Text('Recover registration'),
+                    ),
+                  ],
                 ],
               ],
             ],
@@ -867,15 +1115,41 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
           style: MobileUiTokens.subtitle,
         ),
         const SizedBox(height: 18),
+        const MobileSectionLabel('Affiliation'),
+        SegmentedButton<CampusAffiliation>(
+          segments: const [
+            ButtonSegment(
+              value: CampusAffiliation.student,
+              label: Text('Student'),
+            ),
+            ButtonSegment(
+              value: CampusAffiliation.staff,
+              label: Text('Staff'),
+            ),
+          ],
+          selected: {_affiliation},
+          onSelectionChanged: _busy || _locked
+              ? null
+              : (selection) => setState(() {
+                  _affiliation = selection.single;
+                  _missingFields.clear();
+                }),
+        ),
+        const SizedBox(height: 16),
         const MobileSectionLabel('Required details'),
-        for (final entry in _requiredDetailLabels.entries) ...[
+        for (final entry in _activeRequiredLabels.entries) ...[
           TextField(
             controller: _fields[entry.key],
             focusNode: _requiredFocusNodes[entry.key],
             enabled: !_busy && !_locked,
             maxLength: 100,
             textInputAction: TextInputAction.next,
-            onChanged: (value) => _clearFieldError(entry.key, value.trim()),
+            onChanged: (value) {
+              if (entry.key == 'yearLevel' || entry.key == 'sectionSet') {
+                _hasLegacyCourseYearOnly = false;
+              }
+              _clearFieldError(entry.key, value.trim());
+            },
             decoration: _requiredDecoration(
               entry.key,
               entry.value,
@@ -932,6 +1206,127 @@ class _PilotRegistrationState extends ConsumerState<PilotRegistrationPage> {
       ],
     ),
   );
+
+  Widget _buildLinkPhoneCard() {
+    final status = _linkRequest?.status;
+    final waiting = status == 'pending';
+    return MobileSectionCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: MobileStatusBadge(
+              label: 'Phone approved offline',
+              tone: MobileStatusTone.positive,
+              icon: Icons.verified_rounded,
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Link this phone to my account',
+            style: MobileUiTokens.sectionHeading,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            waiting
+                ? 'Waiting for campus sync. Check status after the admin PC reconnects.'
+                : 'Send proof from this approved phone to connect it to your DNSC account.',
+            style: MobileUiTokens.subtitle,
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            style: MobileButtonStyles.primaryFilled,
+            onPressed: _busy ? null : _linkLocalPhone,
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: Text(
+              waiting ? 'Waiting for campus sync · Retry' : 'Link this phone to my account',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecoveryCard() {
+    final submitted = _recoveryRequest?.status == 'submitted';
+    return MobileSectionCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Recover registration',
+            style: MobileUiTokens.sectionHeading,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            submitted
+                ? 'Your recovery request was sent. Campus staff will verify your ID and retire your old phone.'
+                : 'Lost or cleared your approved phone? Enter your name and campus ID to recover access.',
+            style: MobileUiTokens.subtitle,
+          ),
+          if (!submitted) ...[
+            const SizedBox(height: 14),
+            SegmentedButton<CampusAffiliation>(
+              segments: const [
+                ButtonSegment(
+                  value: CampusAffiliation.student,
+                  label: Text('Student'),
+                ),
+                ButtonSegment(
+                  value: CampusAffiliation.staff,
+                  label: Text('Staff'),
+                ),
+              ],
+              selected: {_affiliation},
+              onSelectionChanged: (sel) =>
+                  setState(() => _affiliation = sel.single),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _recoveryName,
+              enabled: !_busy,
+              decoration: MobileInputStyles.decoration(labelText: 'Full name'),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _recoverySchoolId,
+              enabled: !_busy,
+              decoration: MobileInputStyles.decoration(
+                labelText: _affiliation == CampusAffiliation.staff
+                    ? 'Employee ID'
+                    : 'Student number',
+              ),
+            ),
+            const SizedBox(height: 14),
+            FilledButton(
+              style: MobileButtonStyles.primaryFilled,
+              onPressed: _busy ? null : _submitRecovery,
+              child: const Text('Submit recovery request'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              style: MobileButtonStyles.neutralText,
+              onPressed: _busy
+                  ? null
+                  : () => setState(() => _showRecoveryForm = false),
+              child: const Text('Back to new registration'),
+            ),
+          ] else ...[
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              style: MobileButtonStyles.secondaryOutlined,
+              onPressed: _busy ? null : _refreshStatus,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('Check recovery status'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class _BrandHeader extends StatelessWidget {

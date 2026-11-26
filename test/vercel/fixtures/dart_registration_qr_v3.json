@@ -1,0 +1,15 @@
+{
+  "registration_type": "shadow_network_device_registration",
+  "schema_version": 3,
+  "device_id": "android-fixture-v3",
+  "public_key": "AjPwBu9L7RROoKW7RscGfHwqzsX4zIEfPfWf3NWsdhQ=",
+  "key_id": "x25519-c31cbb8f849d9b18",
+  "key_version": 1,
+  "user_information": {
+    "full_name": "Maria Santos",
+    "phone_number": "+63 912 345 6789",
+    "address": "Purok 2, Panabo City"
+  },
+  "signing_public_key": "2pcdyuKykLQCXiiB0Z-BVZG_dsl2k8WVrzUSwhH-2Uc=",
+  "registration_signature": "sbDXAs1pdk5pTWw0yUc6lhoW5dbjiN-EufWJyqF_tKxjyTebEKD9SfYnXe_D9dd_hl7zwH8VuGja2lrnWGyKDA=="
+}

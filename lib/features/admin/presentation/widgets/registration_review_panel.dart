@@ -85,7 +85,7 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
                     ),
                     DropdownMenuItem(
                       value: RegisteredDeviceRole.responder,
-                      child: Text('Campus responder'),
+                      child: Text('DNSC Responder'),
                     ),
                   ],
                   onChanged: (value) {
@@ -189,7 +189,7 @@ class _RegistrationReviewPanelState extends State<RegistrationReviewPanel> {
       : application.history.last['role'] as String?;
 
   String _roleLabel(String role) =>
-      role == 'responder' ? 'Campus responder' : 'Student';
+      role == 'responder' ? 'DNSC Responder' : 'Student';
 
   Future<void> _reviewProfileChange(
     ReviewApplication application, {

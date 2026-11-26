@@ -4505,7 +4505,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                             items: [
                               const DropdownMenuItem(
                                 value: _broadcast,
-                                child: Text('Broadcast to campus responders'),
+                                child: Text('Broadcast to verified campus phones'),
                               ),
                               for (final device in widget.trustedRecipients)
                                 DropdownMenuItem(
@@ -4537,7 +4537,7 @@ class _SosComposerSheetState extends State<_SosComposerSheet> {
                         else
                           Text(
                             recipientId == null
-                                ? 'Nearby phones can relay this SOS to campus responders.'
+                                ? 'Nearby phones can relay this SOS to verified students and DNSC responders.'
                                 : 'Nearby phones can relay this SOS. Only the chosen responder can read it.',
                             style: MobileUiTokens.subtitle,
                           ),

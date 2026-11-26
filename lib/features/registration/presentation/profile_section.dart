@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -6,10 +8,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/mobile_ui_tokens.dart';
 import '../../../core/widgets/mobile_ui_components.dart';
+import '../../messaging/presentation/providers/local_messaging_providers.dart';
+import '../../security/domain/entities/device_registration_qr.dart';
 import '../../trust/data/services/trust_directory_sync_service.dart';
+import '../../trust/domain/entities/approval_receipt.dart';
 import '../../trust/domain/entities/device_access_profile.dart';
+import '../../trust/presentation/providers/device_access_provider.dart';
 import '../data/pilot_registration.dart';
 import '../data/registration_review_api.dart';
+import '../domain/campus_identity_fields.dart';
 import 'pilot_registration_page.dart';
 
 class ProfileSection extends ConsumerStatefulWidget {
@@ -29,16 +36,25 @@ class ProfileSection extends ConsumerStatefulWidget {
 }
 
 class _ProfileSectionState extends ConsumerState<ProfileSection> {
-  static const _identityFields = {
+  static const _studentIdentityFields = {
     'displayName': 'Full name',
     'studentNumber': 'Student number',
-    'courseYear': 'Course and year',
+    'course': 'Course',
+    'yearLevel': 'Year',
+    'sectionSet': 'Set',
+  };
+  static const _staffIdentityFields = {
+    'displayName': 'Full name',
+    'employeeId': 'Employee ID',
+    'unit': 'Unit or office',
   };
   static const _contactFields = {'phone': 'Phone number', 'address': 'Address'};
 
   PilotRegistration? _registration;
   User? _user;
   ReviewApplication? _application;
+  SignedApprovalReceipt? _localReceipt;
+  ReviewApplication? _linkRequest;
   Map<String, dynamic> _draft = {};
   bool _busy = false;
   bool _reloadAccount = false;
@@ -96,7 +112,31 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
         : await registration.loadDraft(user.uid);
     if (!mounted || registration.auth.currentUser?.uid != user?.uid) return;
     setState(() => _draft = draft);
+    _localReceipt = null;
+    if (!mounted || registration.auth.currentUser?.uid != user?.uid) return;
     if (user == null) return;
+    try {
+      final loadedReceipt = await ref
+          .read(trustBundleStoreProvider)
+          .loadReceipt();
+      if (loadedReceipt != null) {
+        final peer = await ref.read(localPeerProvider.future);
+        final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+        final signing = await ref.read(deviceSigningIdentityProvider.future);
+        _localReceipt =
+            loadedReceipt.matchesPhone(
+              deviceId: peer.id,
+              publicKey: crypto.encodedPublicKey,
+              signingPublicKey: signing.encodedPublicKey,
+              keyVersion: crypto.keyVersion,
+            )
+            ? loadedReceipt
+            : null;
+      }
+    } catch (_) {
+      _localReceipt = null;
+    }
+    if (!mounted || registration.auth.currentUser?.uid != user.uid) return;
     final cached = await registration.readCachedProfile(user);
     if (!mounted || registration.auth.currentUser?.uid != user.uid) return;
     if (cached != null) {
@@ -144,8 +184,16 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       rethrow;
     }
     if (!mounted || _registration!.auth.currentUser?.uid != user.uid) return;
+    ReviewApplication? linkRequest;
+    if (application == null && _localReceipt != null) {
+      try {
+        linkRequest = await _registration!.readLinkRequest(user);
+      } catch (_) {}
+    }
+    if (!mounted || _registration!.auth.currentUser?.uid != user.uid) return;
     setState(() {
       _application = application;
+      _linkRequest = linkRequest;
       _reviewIsStale = false;
     });
     if (syncApproval && application?.status == 'published') {
@@ -158,6 +206,107 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       }
     }
   }
+
+  static bool _matchesPendingLink(
+    ReviewApplication link, {
+    required String registrationId,
+    required String deviceId,
+    required String publicKey,
+    required String signingPublicKey,
+    required int keyVersion,
+  }) {
+    final fields = link.fields;
+    if (fields['registrationId'] != registrationId) return false;
+    final linkDevice = fields['deviceId'] as String?;
+    if (linkDevice == null) return true;
+    return linkDevice == deviceId &&
+        fields['publicKey'] == publicKey &&
+        fields['signingPublicKey'] == signingPublicKey &&
+        (fields['keyVersion'] as int? ?? keyVersion) == keyVersion;
+  }
+
+  Future<void> _linkLocalPhone() => _run(() async {
+    final user = _user;
+    final receipt = _localReceipt;
+    if (user == null || receipt == null) return;
+    final repo = _registration!;
+    final latestApp = await repo.refreshProfile(user);
+    if (!mounted || repo.auth.currentUser?.uid != user.uid) return;
+    final currentLink = await repo.readLinkRequest(user);
+    if (!mounted || repo.auth.currentUser?.uid != user.uid) return;
+    _application = latestApp;
+    _linkRequest = currentLink;
+    if (latestApp?.status == 'published' || currentLink?.status == 'linked') {
+      final binding = latestApp?.fields['deviceRegistration'];
+      if (binding is String &&
+          await ref.read(registrationMatchesPhoneProvider(binding).future) &&
+          mounted &&
+          repo.auth.currentUser?.uid == user.uid) {
+        try {
+          await ref.read(trustDirectorySyncProvider).refresh();
+        } catch (_) {}
+      }
+      _message = 'This phone is already linked to your account.';
+      return;
+    }
+    if (currentLink?.status == 'rejected') {
+      _message = 'Phone link request was rejected by campus admin.';
+      return;
+    }
+    if (currentLink?.status == 'replacement_required') {
+      _message = 'A new phone replacement review is required before linking.';
+      return;
+    }
+    final peer = await ref.read(localPeerProvider.future);
+    final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+    final signing = await ref.read(deviceSigningIdentityProvider.future);
+    if (currentLink?.status == 'pending' &&
+        _matchesPendingLink(
+          currentLink!,
+          registrationId: receipt.registrationId,
+          deviceId: peer.id,
+          publicKey: crypto.encodedPublicKey,
+          signingPublicKey: signing.encodedPublicKey,
+          keyVersion: crypto.keyVersion,
+        )) {
+      _message = 'Link request is already pending campus admin approval.';
+      return;
+    }
+    final nonce = List<int>.generate(12, (_) => Random.secure().nextInt(256));
+    final proof = await AccountLinkProof.createSigned(
+      registrationId: receipt.registrationId,
+      accountUid: user.uid,
+      nonce: base64UrlEncode(nonce),
+      deviceId: peer.id,
+      identity: crypto,
+      signingIdentity: signing,
+      directoryProject: receipt.directoryProject,
+    );
+    await repo.submitLinkRequest(user, proof);
+    _linkRequest = await repo.readLinkRequest(user);
+    _message = 'Link request sent. Waiting for campus sync.';
+  });
+
+  Future<void> _requestPhoneReplacement() => _run(() async {
+    final user = _user;
+    final application = _application;
+    if (user == null || application == null) return;
+    final peer = await ref.read(localPeerProvider.future);
+    final crypto = await ref.read(deviceCryptoIdentityProvider.future);
+    final signing = await ref.read(deviceSigningIdentityProvider.future);
+    final qr = await DeviceRegistrationQr.createSigned(
+      deviceId: peer.id,
+      identity: crypto,
+      signingIdentity: signing,
+    );
+    await _registration!.submitPhoneReplacement(
+      user,
+      application,
+      jsonEncode(qr.toJson()),
+    );
+    await _refresh();
+    _message = 'Phone replacement request sent for admin review.';
+  });
 
   Future<void> _openRegistration() async {
     await Navigator.of(context).push<void>(
@@ -175,10 +324,33 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
     final application = _application;
     final user = _user;
     if (application == null || user == null) return;
-    final labels = identity ? _identityFields : _contactFields;
-    final initial = labels.map(
-      (key, _) => MapEntry(key, application.fields[key] as String? ?? ''),
+    final currentIdentity = CampusIdentityFields.fromFirestoreFields(
+      application.fields,
     );
+    final isStaff = currentIdentity.affiliation == CampusAffiliation.staff;
+    final labels = identity
+        ? (isStaff ? _staffIdentityFields : _studentIdentityFields)
+        : _contactFields;
+    final initial = identity
+        ? (isStaff
+              ? {
+                  'displayName': currentIdentity.displayName,
+                  'employeeId': currentIdentity.employeeId,
+                  'unit': currentIdentity.unit,
+                }
+              : {
+                  'displayName': currentIdentity.displayName,
+                  'studentNumber': currentIdentity.studentNumber,
+                  'course': currentIdentity.course.isNotEmpty
+                      ? currentIdentity.course
+                      : currentIdentity.legacyCourseYear,
+                  'yearLevel': currentIdentity.yearLevel,
+                  'sectionSet': currentIdentity.sectionSet,
+                })
+        : {
+            'phone': currentIdentity.phone,
+            'address': currentIdentity.address,
+          };
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -193,6 +365,7 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
       ),
       builder: (_) => _ProfileEditSheet(
         identity: identity,
+        affiliation: currentIdentity.affiliation,
         labels: labels,
         initial: initial,
         onSave: (values) async {
@@ -200,11 +373,30 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
           if (registration.auth.currentUser?.uid != user.uid) {
             throw StateError('Sign in again before saving.');
           }
-          final changes = identity
-              ? {
-                  'profileChange': {...values, 'status': 'submitted'},
-                }
-              : values;
+          final Map<String, dynamic> changes;
+          if (identity) {
+            final updated = isStaff
+                ? currentIdentity.copyWith(
+                    displayName: values['displayName'] ?? '',
+                    employeeId: values['employeeId'] ?? '',
+                    unit: values['unit'] ?? '',
+                  )
+                : currentIdentity.copyWith(
+                    displayName: values['displayName'] ?? '',
+                    studentNumber: values['studentNumber'] ?? '',
+                    course: values['course'] ?? '',
+                    yearLevel: values['yearLevel'] ?? '',
+                    sectionSet: values['sectionSet'] ?? '',
+                  );
+            final canonical = updated.toFirestoreFields()
+              ..remove('phone')
+              ..remove('address');
+            changes = {
+              'profileChange': {...canonical, 'status': 'submitted'},
+            };
+          } else {
+            changes = values;
+          }
           try {
             await registration.updateProfile(user, application, changes);
           } catch (_) {
@@ -314,21 +506,30 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
     final matchesPhone = status == 'published' && binding is String
         ? ref.watch(registrationMatchesPhoneProvider(binding)).asData?.value
         : null;
-    final detailLabels = {..._identityFields, ..._contactFields};
+    final parsedIdentity = CampusIdentityFields.fromFirestoreFields(fields);
     final details = {
-      for (final entry in detailLabels.entries)
-        if (fields[entry.key] case final String value when value.isNotEmpty)
-          entry.value: value,
+      if (parsedIdentity.displayName.isNotEmpty)
+        'Full name': parsedIdentity.displayName,
+      if (parsedIdentity.affiliation == CampusAffiliation.staff) ...{
+        if (parsedIdentity.employeeId.isNotEmpty)
+          'Employee ID': parsedIdentity.employeeId,
+        if (parsedIdentity.unit.isNotEmpty) 'Unit': parsedIdentity.unit,
+      } else ...{
+        if (parsedIdentity.studentNumber.isNotEmpty)
+          'Student number': parsedIdentity.studentNumber,
+        if (parsedIdentity.formattedCourseYear.isNotEmpty)
+          'Course and year': parsedIdentity.formattedCourseYear,
+      },
+      if (parsedIdentity.phone.isNotEmpty) 'Phone number': parsedIdentity.phone,
+      if (parsedIdentity.address.isNotEmpty) 'Address': parsedIdentity.address,
       if (_user?.email case final String email) 'Email': email,
     };
-    final title = fields['displayName'] as String?;
+    final title = parsedIdentity.displayName.isNotEmpty
+        ? parsedIdentity.displayName
+        : fields['displayName'] as String?;
     final statusLabel = _registrationStatus(status, matchesPhone);
     final statusTone = _registrationTone(status, matchesPhone);
-    final detailsPreview = [
-      if (fields['studentNumber'] case final String id when id.isNotEmpty) id,
-      if (fields['courseYear'] case final String course when course.isNotEmpty)
-        course,
-    ].join(' · ');
+    final detailsPreview = parsedIdentity.summarySubtitle;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -541,6 +742,8 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
                           ? 'Your request is awaiting review or publication.'
                           : changeStatus == 'rejected'
                           ? 'Your last request was declined.'
+                          : parsedIdentity.affiliation == CampusAffiliation.staff
+                          ? 'Changes to name, employee ID, or unit need admin approval.'
                           : 'Changes to name, student number, or course need admin approval.',
                       onTap: _busy || awaitingChange
                           ? null
@@ -614,12 +817,54 @@ class _ProfileSectionState extends ConsumerState<ProfileSection> {
         label: const Text('Update application'),
       );
     }
-    if (_user != null && status == null && _draft['submitted'] != true) {
+    if (status == 'published' && matchesPhone == false) {
+      final replacementStatus =
+          (_application?.fields['replacementRequest'] as Map?)?['status']
+              as String?;
       return FilledButton.icon(
         style: MobileButtonStyles.primaryFilled,
-        onPressed: _busy ? null : _openRegistration,
-        icon: const Icon(Icons.edit_note_rounded, size: 18),
-        label: const Text('Finish registration'),
+        onPressed: _busy || replacementStatus == 'submitted'
+            ? null
+            : _requestPhoneReplacement,
+        icon: const Icon(Icons.phonelink_setup_rounded, size: 18),
+        label: Text(
+          replacementStatus == 'submitted'
+              ? 'Replacement pending review'
+              : 'Request phone replacement',
+        ),
+      );
+    }
+    if (_user != null && status == null && _localReceipt != null) {
+      final waitingSync = _linkRequest?.status == 'pending';
+      return FilledButton.icon(
+        style: MobileButtonStyles.primaryFilled,
+        onPressed: _busy ? null : _linkLocalPhone,
+        icon: const Icon(Icons.link_rounded, size: 18),
+        label: Text(
+          waitingSync
+              ? 'Waiting for campus sync · Retry'
+              : 'Link this phone to my account',
+        ),
+      );
+    }
+    if (_user != null && status == null && _draft['submitted'] != true) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          FilledButton.icon(
+            style: MobileButtonStyles.primaryFilled,
+            onPressed: _busy ? null : _openRegistration,
+            icon: const Icon(Icons.edit_note_rounded, size: 18),
+            label: const Text('Finish registration'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            style: MobileButtonStyles.secondaryOutlined,
+            onPressed: _busy ? null : _openRegistration,
+            icon: const Icon(Icons.phonelink_setup_rounded, size: 18),
+            label: const Text('Recover registration'),
+          ),
+        ],
       );
     }
     if (_user != null && matchesPhone != false && status != 'rejected') {
@@ -817,9 +1062,11 @@ class _ProfileEditSheet extends StatefulWidget {
     required this.labels,
     required this.initial,
     required this.onSave,
+    this.affiliation = CampusAffiliation.student,
   });
 
   final bool identity;
+  final CampusAffiliation affiliation;
   final Map<String, String> labels;
   final Map<String, String> initial;
   final Future<void> Function(Map<String, String>) onSave;
@@ -832,7 +1079,12 @@ class _ProfileEditSheetState extends State<_ProfileEditSheet> {
   static const _fieldIcons = {
     'displayName': Icons.person_outline_rounded,
     'studentNumber': Icons.badge_outlined,
+    'course': Icons.school_outlined,
+    'yearLevel': Icons.calendar_today_outlined,
+    'sectionSet': Icons.group_outlined,
     'courseYear': Icons.school_outlined,
+    'employeeId': Icons.work_outline_rounded,
+    'unit': Icons.apartment_outlined,
     'phone': Icons.phone_outlined,
     'address': Icons.home_outlined,
   };
@@ -919,7 +1171,9 @@ class _ProfileEditSheetState extends State<_ProfileEditSheet> {
                 const SizedBox(height: 4),
                 Text(
                   widget.identity
-                      ? 'Changes to your name, student number, or course require campus admin review.'
+                      ? (widget.affiliation == CampusAffiliation.staff
+                            ? 'Changes to your name, employee ID, or unit require campus admin review.'
+                            : 'Changes to your name, student number, or course require campus admin review.')
                       : 'Phone number and address update your profile immediately.',
                   style: MobileUiTokens.subtitle,
                 ),

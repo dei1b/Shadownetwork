@@ -4,12 +4,17 @@ enum RegisteredDeviceRole {
   relay,
   admin;
 
+  static const campusRoles = [
+    RegisteredDeviceRole.civilian,
+    RegisteredDeviceRole.responder,
+  ];
+
   String get label {
     switch (this) {
       case RegisteredDeviceRole.civilian:
         return 'Student';
       case RegisteredDeviceRole.responder:
-        return 'Campus responder';
+        return 'DNSC Responder';
       case RegisteredDeviceRole.relay:
         return 'Relay';
       case RegisteredDeviceRole.admin:
