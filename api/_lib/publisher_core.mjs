@@ -558,7 +558,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      updateTime: registration?.updateTime,
+      ...(registration?.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
     });
   } else if (action === 'sync_offline_decision') {
     if (!registration) {
@@ -617,7 +617,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      updateTime: registration.updateTime,
+      ...(registration.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
     });
   } else if (action === 'approve_link') {
     if (!linkRequest || !registration) {
@@ -665,7 +665,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      updateTime: registration.updateTime,
+      ...(registration.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
     });
     writes.push({
       collection: 'pilotApplications',
@@ -680,7 +680,7 @@ export function applyDecisionAndBuildCommit({
         reviewHistory: [...(application?.reviewHistory ?? []), historyEntry],
         processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
       },
-      updateTime: application?.updateTime,
+      ...(application?.updateTime ? { updateTime: application.updateTime } : { createOnly: true }),
     });
   } else if (action === 'approve_replacement' || action === 'approve_recovery') {
     const newQrRaw =
@@ -756,7 +756,7 @@ export function applyDecisionAndBuildCommit({
         processedDecisionIds: [...(registration?.processedDecisionIds ?? []), decisionId],
         updatedAt: nowIso,
       },
-      updateTime: registration?.updateTime,
+      ...(registration?.updateTime ? { updateTime: registration.updateTime } : { createOnly: true }),
     });
     if (targetAccountUid) {
       writes.push({
@@ -775,7 +775,7 @@ export function applyDecisionAndBuildCommit({
             : {}),
           processedDecisionIds: [...(application?.processedDecisionIds ?? []), decisionId],
         },
-        updateTime: application?.updateTime,
+        ...(application?.updateTime ? { updateTime: application.updateTime } : { createOnly: true }),
       });
     }
     if (action === 'approve_recovery' && recoveryRequest) {
@@ -816,7 +816,9 @@ export function applyDecisionAndBuildCommit({
       lastDecisionId: decisionId,
       publishedAt: nowIso,
     },
-    updateTime: existingDirectory?.updateTime,
+    ...(existingDirectory?.updateTime
+      ? { updateTime: existingDirectory.updateTime }
+      : { createOnly: true }),
   });
 
   return {

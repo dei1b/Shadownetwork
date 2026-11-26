@@ -202,6 +202,33 @@ async function getDoc(origin, accessToken, projectId, collection, docId, idField
   return decodeDocument(await resp.json(), idFieldName);
 }
 
+export function buildFirestoreCommitBody(projectId, writes) {
+  const dbRoot = `projects/${projectId}/databases/(default)/documents`;
+  return {
+    writes: (writes ?? []).map((w) => {
+      const fields = {};
+      for (const [k, v] of Object.entries(w.fields)) {
+        fields[k] = k === 'publishedAt' && typeof v === 'string'
+          ? { timestampValue: v }
+          : encodeFirestoreValue(v);
+      }
+      let currentDocument;
+      if (w.createOnly === true) {
+        currentDocument = { exists: false };
+      } else if (w.updateTime) {
+        currentDocument = { updateTime: w.updateTime };
+      }
+      return {
+        update: {
+          name: `${dbRoot}/${w.collection}/${w.docId}`,
+          fields,
+        },
+        ...(currentDocument ? { currentDocument } : {}),
+      };
+    }),
+  };
+}
+
 async function commitWrites(origin, accessToken, projectId, writes) {
   if (!writes || writes.length === 0) return;
   const dbRoot = `projects/${projectId}/databases/(default)/documents`;
@@ -211,29 +238,42 @@ async function commitWrites(origin, accessToken, projectId, writes) {
       authorization: `Bearer ${accessToken}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({
-      writes: writes.map((w) => {
-        const fields = {};
-        for (const [k, v] of Object.entries(w.fields)) {
-          fields[k] = k === 'publishedAt' && typeof v === 'string'
-            ? { timestampValue: v }
-            : encodeFirestoreValue(v);
-        }
-        return {
-          update: {
-            name: `${dbRoot}/${w.collection}/${w.docId}`,
-            fields,
-          },
-          ...(w.updateTime ? { currentDocument: { updateTime: w.updateTime } } : {}),
-        };
-      }),
-    }),
+    body: JSON.stringify(buildFirestoreCommitBody(projectId, writes)),
   });
   if (!resp.ok) {
     const body = await resp.text();
     const status = resp.status === 400 || resp.status === 409 ? 409 : resp.status;
     throw new PublisherError(status, `Directory commit conflicted or failed: ${body}`, 'firestore_commit_error');
   }
+}
+
+export async function executeDecisionWithRetry({
+  readState,
+  applyDecision,
+  commitWritesFn,
+  maxAttempts = 3,
+}) {
+  let lastError;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const state = await readState();
+    const result = applyDecision(state);
+    try {
+      await commitWritesFn(result.writes);
+      return result;
+    } catch (err) {
+      if (
+        attempt < maxAttempts &&
+        err instanceof PublisherError &&
+        err.code === 'firestore_commit_error' &&
+        err.statusCode === 409
+      ) {
+        lastError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
 }
 
 export default async function handler(req, res) {
@@ -264,34 +304,51 @@ export default async function handler(req, res) {
 
     const accountUid = body.accountUid ?? body.applicationUid ?? null;
     const registrationId = body.registrationId ?? null;
-    const [existingDirectory, application, registration, linkRequest, recoveryRequest] = await Promise.all([
-      getDoc(origin, accessToken, projectId, 'trustDirectory', 'current'),
-      getDoc(origin, accessToken, projectId, 'pilotApplications', accountUid, 'uid'),
-      getDoc(origin, accessToken, projectId, 'campusRegistrations', registrationId, 'registrationId'),
-      body.action === 'approve_link'
-        ? getDoc(origin, accessToken, projectId, 'registrationLinkRequests', accountUid, 'accountUid')
-        : null,
-      body.action === 'approve_recovery'
-        ? getDoc(origin, accessToken, projectId, 'registrationRecoveryRequests', accountUid, 'accountUid')
-        : null,
-    ]);
-
-    const result = applyDecisionAndBuildCommit({
-      action: body.action,
-      decisionId: body.decisionId,
-      reviewerUid: reviewer.sub,
-      directoryProject: projectId,
-      publisherSeed,
-      publisherDelegation,
-      existingDirectory,
-      application,
-      registration: registration ?? (body.registration ?? null),
-      linkRequest,
-      recoveryRequest,
-      payload: body,
+    const result = await executeDecisionWithRetry({
+      readState: async () => {
+        const [
+          existingDirectory,
+          application,
+          registration,
+          linkRequest,
+          recoveryRequest,
+        ] = await Promise.all([
+          getDoc(origin, accessToken, projectId, 'trustDirectory', 'current'),
+          getDoc(origin, accessToken, projectId, 'pilotApplications', accountUid, 'uid'),
+          getDoc(origin, accessToken, projectId, 'campusRegistrations', registrationId, 'registrationId'),
+          body.action === 'approve_link'
+            ? getDoc(origin, accessToken, projectId, 'registrationLinkRequests', accountUid, 'accountUid')
+            : null,
+          body.action === 'approve_recovery'
+            ? getDoc(origin, accessToken, projectId, 'registrationRecoveryRequests', accountUid, 'accountUid')
+            : null,
+        ]);
+        return {
+          existingDirectory,
+          application,
+          registration: registration ?? (body.registration ?? null),
+          linkRequest,
+          recoveryRequest,
+        };
+      },
+      applyDecision: (state) =>
+        applyDecisionAndBuildCommit({
+          action: body.action,
+          decisionId: body.decisionId,
+          reviewerUid: reviewer.sub,
+          directoryProject: projectId,
+          publisherSeed,
+          publisherDelegation,
+          existingDirectory: state.existingDirectory,
+          application: state.application,
+          registration: state.registration,
+          linkRequest: state.linkRequest,
+          recoveryRequest: state.recoveryRequest,
+          payload: body,
+        }),
+      commitWritesFn: (writes) =>
+        commitWrites(origin, accessToken, projectId, writes),
     });
-
-    await commitWrites(origin, accessToken, projectId, result.writes);
 
     return res.status(200).json({
       ok: true,
